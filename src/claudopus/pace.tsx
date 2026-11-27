@@ -28,6 +28,8 @@ const pacedOf = (text: string): { at: number; held: number; others?: number } =>
 // A look when one is due: the processes and their threads, then the background mode put on or taken off only where it changes
 // (only on a Mac, whose taskpolicy puts a process in the background mode: Linux and Windows have none to put it in)
 const paceWork = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   if (isLinux || isWindows || isPacing) return
   const now = await $.clock.now()
   const every = PACE_EVERY * (isOnBattery ? 2 : 1)
@@ -56,5 +58,8 @@ const paceWork = async ($: EngineInterface) => {
     if (!paced.held && last.held) await log($, "every one of Claude's commands runs at full speed again")
   } finally {
     isPacing = false
+  }
+  } finally {
+    runTo('paceWork', ranFrom)
   }
 }

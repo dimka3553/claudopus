@@ -182,6 +182,8 @@ const barCardsSign = (cards: Todo[]) => {
 }
 // Once a second while a bar holds a box (chat.tsx): the cards it shows moved, so it is drawn again, once for each change
 const lookBar = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   // A redraw put off while the box held the cursor is made once it no longer does (drawFresh)
   if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
   if (!barHeld.size || !barOpen || isBoxKind(barOpen.kind)) return
@@ -189,6 +191,9 @@ const lookBar = async ($: EngineInterface) => {
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
   drawAgain($, true)
+  } finally {
+    runTo('lookBar', ranFrom)
+  }
 }
 // A bar drawn afresh with a box in it read the cards to draw it, and the engine draws a drawing again at the first write of what
 // it read: the app then built the box anew under the cursor, its ring fading in again, at the first card any work wrote after the

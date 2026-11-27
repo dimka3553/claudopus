@@ -1,0 +1,2 @@
+- A panel drawn again with nothing new in it costs less in a chat with many tasks: what its cards say is put together once for each change, not at every drawing.
+- The panel's recorder, switched on to find faults, also notes how often each part of Claudopus ran and for how long, so what slows a busy chat can be found in the real app.

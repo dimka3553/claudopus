@@ -61,6 +61,8 @@ let ledgerSign = ''
 // The chat whose ledger folder this load has made
 let ledgerMade = ''
 const saveLedger = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const { id, title } = await read($, me)
   if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
   const list = await ownCards($)
@@ -76,6 +78,9 @@ const saveLedger = async ($: EngineInterface) => {
   const r = await runOn($, ['mv', '-f', `${path}.part`, path])
   if (r.exitCode !== 0) throw new Error(`ledger not moved into place: ${r.stderr.slice(0, 200)}`)
   ledgerSign = sign
+  } finally {
+    runTo('saveLedger', ranFrom)
+  }
 }
 // One write at a time; a change made while one is written is written after it
 // and at most one every LEDGER_GAP: the list changes at every call of every task, and each save builds the whole ledger to see

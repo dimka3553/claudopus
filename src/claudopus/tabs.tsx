@@ -201,10 +201,15 @@ const watchLoaded = async ($: EngineInterface) => {
 }
 // Each second: a tab the person brought in front
 const watchFront = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const front = (await $.ui.panes().catch(() => [])).find(pane => pane.isShown)?.id ?? ''
   if (front === tabInFront) return
   tabInFront = front
   if (front) await watchTabs($, [front], 'it came in front', 2_000)
+  } finally {
+    runTo('watchFront', ranFrom)
+  }
 }
 // A tab whose drawing failed shows why, in place of nothing, and is asked for again in a few seconds: three times a minute at most
 const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { requestId?: string }, error: { kind: string; message?: string } | undefined) => {
