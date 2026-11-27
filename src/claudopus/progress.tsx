@@ -53,7 +53,7 @@ const PROGRESS_LOAD_AFTER = 90_000
 // An event the model could not answer this many times is dropped, and index.log says so
 const PROGRESS_TRIES = 3
 // How many model calls go at once while the history is read in, and how far back it goes
-const BACKFILL_AT_ONCE = 4
+const BACKFILL_AT_ONCE = 16
 const BACKFILL_DAYS = 30
 // The drain's lock is taken over once its maker has been gone this long; the files' lock, held only to write, sooner
 const DRAIN_STALE = 10 * 60_000
@@ -244,6 +244,13 @@ const drainProgress = async ($: EngineInterface) => {
   if (isLate) drainSoon($, PROGRESS_RETRY)
 }
 
+// How far the sorting has got: the events still queued, and how many results the history read in, for the Progress tab
+const readSorting = async ($: EngineInterface) => {
+  const left = (await $.fs.list(queueDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json')).length
+  const total = Number((await readOr($, `${progressDir()}/backfilled`)).split('\n')[1] ?? 0) || 0
+  return { left, total }
+}
+
 // The history read in: every result of the past BACKFILL_DAYS, oldest first, when progress/ has no areas yet or progress/backfill
 // asks for it. A result of a test chat, in a temporary folder, is left out
 const backfillProgress = async ($: EngineInterface) => {
@@ -257,7 +264,8 @@ const backfillProgress = async ($: EngineInterface) => {
     const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', task: r.agent ?? '', report: r.id, title: r.title, topic: r.subject, files: r.files.filter(file => PICTURE.test(file)), text: hideKeys(clip(text, EVENT_CHARS.result / 2)), isBackfill: true }
     await $.fs.write(`${queueDir()}/${queueName(r.at)}`, `${JSON.stringify(one)}\n`)
   }
-  await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n`)
+  // (with how many it queued, which the Progress tab counts down from)
+  await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n${all.length}\n`)
   if (isAsked) await $.process.run(['rm', '-f', `${progressDir()}/backfill`]).catch(() => undefined)
   await indexLog($, `history queued: ${all.length} results`)
 }

@@ -44,7 +44,13 @@ export type ProgressGoal = { id: string; name: string; color: string }
 export type AreaFigures = { done: number; aside: number; next: number; month: number; days: number[]; live: boolean }
 // How many days back the chart can reach
 export const CHART_DAYS = 21
-export type ProgressData = { star: string; goals: ProgressGoal[]; areas: PageArea[]; entries: Map<string, PageEntry[]>; working: Set<string> }
+export type ProgressData = { star: string; goals: ProgressGoal[]; areas: PageArea[]; entries: Map<string, PageEntry[]>; working: Set<string>; sorting?: { left: number; total: number } }
+// While past results are still being sorted into areas, how far it has got; nothing once only a few new events wait
+export const sortingSaid = (sorting: { left: number; total: number } | undefined) => {
+  if (!sorting || sorting.left < 3) return ''
+  const { left, total } = sorting
+  return total >= left ? `Sorting your past results into areas: ${total - left} of ${total} done. This page fills in as it goes.` : `Sorting your results into areas: ${left} left. This page fills in as it goes.`
+}
 // What is done, set aside and next in an area: a milestone or a next step ticked is done; a set-aside result or step is aside; an
 // open step is next. With the tasks of the last 30 days, the tasks of each of the last CHART_DAYS days (oldest first, today last), and
 // whether one runs now
@@ -258,7 +264,7 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
     return (
       <Box key="progress-empty" flexDirection="column" gap={1} paddingX={1}>
         <Text bold>Nothing is sorted yet</Text>
-        <Text dimColor wrap="wrap">Claudopus sorts each task into its area as it finishes, and shows here what each area has done and what comes next.</Text>
+        <Text dimColor wrap="wrap">{sortingSaid(data.sorting) || 'Claudopus sorts each task into its area as it finishes, and shows here what each area has done and what comes next.'}</Text>
       </Box>
     )
   const chartAreas: ChartArea[] = data.areas.map(area => ({ id: area.id, name: area.name, color: goalOf(data, area).color, goal: goalOf(data, area).id, ...(figures.get(area.id) as AreaFigures) }))
@@ -327,6 +333,7 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
   return (
     <Box key="progress-overview" flexDirection="column" gap={2.5}>
       <Box key="progress-top" flexDirection="column" gap={1} flexShrink={0}>
+        {sortingSaid(data.sorting) ? <Text key="progress-sorting" dimColor wrap="wrap">{sortingSaid(data.sorting)}</Text> : null}
         {Svg ? <Svg key="progress-chart" source={chart.source} alt={chart.alt} width={chart.width} height={chart.height} /> : data.star ? <Text wrap="wrap">{`“${data.star}”`}</Text> : null}
       </Box>
       {groups.map(({ goal, areas }) =>

@@ -1,0 +1,2 @@
+- While your past results are still being sorted into areas, the Progress tab says how far it has got, such as "Sorting your past results into areas: 300 of 1,430 done", and fills in as it goes. Nothing needs pressing: it starts by itself after an update.
+- Past results are sorted four times faster: 16 at once instead of 4.
