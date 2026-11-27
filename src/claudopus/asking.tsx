@@ -1196,11 +1196,12 @@ const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes
   // An ask its reply held waits on the person again, every answer back
   const ids = new Set(answers.map(({ one }) => one.id))
   await changeTodos($, list => list.map(card => (ids.has(card.id) ? mapAsks(card, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)) : card)))
-  // A task Claude Code can't start again, and that no run of this chat's is behind, can't be reached at all: its card ends so, and
-  // the chat has the words (keep.tsx)
+  // A task a rewind brought over (its record is in the chat it came from) that Claude Code can't start again, and that no run of
+  // this chat's is behind, can't be reached at all: its card ends so, and the chat has the words (keep.tsx). Any other answer that
+  // could not go waits in the chat for the person's next message, as below
   const list = await read($, todos)
   const top = list.find(card => card.id === topOf(list, target))
-  const isGone = UNRESUMABLE.test(reason) && top && !top.chat && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
+  const isGone = UNRESUMABLE.test(reason) && top && !top.chat && Boolean(top.chatWas) && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
   if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
     for (const { one, sent } of answers) sentReplies.set(one.id, { ...sent, to: 'chat' })
     return redraw($)

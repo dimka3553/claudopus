@@ -8158,7 +8158,7 @@ const ids = new Set(answers.map(({ one }) => one.id))
 await changeTodos($, list => list.map(card => (ids.has(card.id) ? mapAsks(card, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)) : card)))
 const list = await read($, todos)
 const top = list.find(card => card.id === topOf(list, target))
-const isGone = UNRESUMABLE.test(reason) && top && !top.chat && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
+const isGone = UNRESUMABLE.test(reason) && top && !top.chat && Boolean(top.chatWas) && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
 if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
 for (const { one, sent } of answers) sentReplies.set(one.id, { ...sent, to: 'chat' })
 return redraw($)
