@@ -988,7 +988,9 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const to = ask.refused
     ? isRun && run
       ? await startRun($, one, run)
-      : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
+      : !isReply && said === ALLOW
+        ? `${RUN_GONE(ask.copy ?? ask.text)}${note}`
+        : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
     : ask.rule
       ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
     : isReply
