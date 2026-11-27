@@ -30,7 +30,7 @@ import { USAGE_CELLS, usageDrawn, usageSpacersDrawn, usageText } from './usage-b
 import { PACE_EVERY, PACE_LOOK, PACE_SET, PACE_THREADS, paceLookOf, paceNeedsThreads, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
-import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, SKIP_ONE, SKIP_TOLD, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
 import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
@@ -8506,7 +8506,8 @@ replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
 const isRelease = !isReply && !ask.refused && Boolean(ask.release) && ask.choices?.[0] === said && (await allowRelease($, one.id, ask.release ?? '').catch(err => (void log($, `release not allowed by the press: ${String(err)}`), false)))
 const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
 const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
-const isAside = !isReply && !ask.refused && !ask.rule && said === SET_ASIDE && !(ask.choices ?? []).includes(SET_ASIDE)
+const isOurs = (label: string) => !isReply && !ask.refused && !ask.rule && said === label && !(ask.choices ?? []).includes(label)
+const isAside = isOurs(SET_ASIDE)
 const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
 const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
 sentReplies.set(one.id, { ...sent, to: 'sending' })
@@ -8524,7 +8525,7 @@ const to = ask.refused
 ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
 : isAside
 ? SET_ASIDE_TOLD()
-: `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
+: `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isOurs(SKIP_ONE) ? `\n${SKIP_TOLD}` : ''}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
 if (!ask.refused) {
 if (isAside) await markAside($, one.id).catch(err => log($, `task ${one.id} not marked set aside: ${String(err)}`))
 queueSoon($, { kind: isAside ? 'aside' : 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}${ask.details ? `\n${ask.details}` : ''}\nAnswer: ${said}` })
@@ -8758,7 +8759,8 @@ if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'wo
 const one = (await read($, todos)).find(todo => todo.id === card)
 if (sent?.to !== 'work' || !one) return
 const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
-await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
+const isOurs = Boolean(sent.asked && !(sent.asked.choices ?? []).includes(sent.text))
+await toEnded($, one, agentId, isOurs && sent.text === SET_ASIDE ? SET_ASIDE_TOLD() : `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isOurs && sent.text === SKIP_ONE ? `\n${SKIP_TOLD}` : ''}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
 }
 const heldAnswer = (one: Todo, now: number) => {
 const sent = one.chat ? undefined : sentReplies.get(one.id)
@@ -11575,7 +11577,7 @@ return {
 ...base,
 kind: 'question',
 buttons: [
-...(ask.rule ? (ask.choices ?? []) : withSetAside(ask.choices ?? [])).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
+...(ask.rule ? (ask.choices ?? []) : withSetAside(ask.choices ?? [])).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, ...(choice === SET_ASIDE && !ask.rule ? { isPlain: true } : {}), onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
 ...(inBar ? [isReplyOpen(card, ask) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
 ],
 ...(inBar
@@ -15674,7 +15676,7 @@ const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) =>
 const [first] = asking
 const ask = first?.ask
 if (first && ask) {
-const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 8))
+const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 7))
 const id = `${first.id}:${ask.at}`
 const picked = bandPick?.id === id ? bandPick.n : -1
 const press = (n: number, choice: string) => {

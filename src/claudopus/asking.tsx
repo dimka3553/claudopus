@@ -1028,7 +1028,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
   const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
   // Set aside, the press every question has beside the task's own choices (progress.tsx), unless the task gave that choice itself
-  const isAside = !isReply && !ask.refused && !ask.rule && said === SET_ASIDE && !(ask.choices ?? []).includes(SET_ASIDE)
+  const isOurs = (label: string) => !isReply && !ask.refused && !ask.rule && said === label && !(ask.choices ?? []).includes(label)
+  const isAside = isOurs(SET_ASIDE)
   const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
   const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
   sentReplies.set(one.id, { ...sent, to: 'sending' })
@@ -1047,7 +1048,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
       : isAside
         ? SET_ASIDE_TOLD()
-        : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
+        : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isOurs(SKIP_ONE) ? `\n${SKIP_TOLD}` : ''}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
   // The answer goes into the queue of progress/: a press on Set aside marks the task's entries at once, and the indexer sets the
   // steps it covers aside; any other answer may tick or add next steps (progress.tsx)
   if (!ask.refused) {
@@ -1363,7 +1364,9 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   const one = (await read($, todos)).find(todo => todo.id === card)
   if (sent?.to !== 'work' || !one) return
   const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
-  await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
+  // (a press on Skip this one or Set aside task says what it means here too)
+  const isOurs = Boolean(sent.asked && !(sent.asked.choices ?? []).includes(sent.text))
+  await toEnded($, one, agentId, isOurs && sent.text === SET_ASIDE ? SET_ASIDE_TOLD() : `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isOurs && sent.text === SKIP_ONE ? `\n${SKIP_TOLD}` : ''}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
 }
 // An answer or a press given on the card in the last ANSWER_SHOWN: the card says it
 const heldAnswer = (one: Todo, now: number) => {

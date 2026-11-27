@@ -1,0 +1,1 @@
+- Every question on a task's card now has Skip this one, which skips only that question while the task goes on with the rest, and Set aside is now Set aside task, a quiet button that says it stops the whole task, so a press meant for one question no longer ends the task.
