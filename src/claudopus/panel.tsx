@@ -705,7 +705,7 @@ const panelHooks = (on: On) => {
     // picture and the boxes it sits in stay the same; any change makes it anew, from its first moment (27 Nov: rings that turned
     // a little and jumped back). There a moving mark is a picture of its own laid over the lines, which change as rows come and go
     const twigPicture = (t: Twig, key: string, dot: string, isMoving: boolean, alt: string, shape?: Parameters<typeof twigSvg>[4]) =>
-      isMoving && e.surface === 'desktop' ? (
+      !('Svg' in table) ? null : isMoving && e.surface === 'desktop' ? (
         <Box key={key} flexShrink={0}>
           <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, dot, true, shape, 'lines')} alt={alt} width={twigWidth(t)} height={LINE} isInteractive />
           <Box key={`${key}-moving`} position="absolute" top={0} left={0}>

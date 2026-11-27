@@ -3156,6 +3156,7 @@ test("a moving mark keeps turning for as long as what it stands for goes on: the
       const tree = await pane.drawn()
       return moving(tree) === count ? tree : undefined
     })
+    if (!drawn) throw new Error(`the panel never drew ${count} moving marks`)
     const seen = appKeeps(was, drawn).map(one => `${one.alt}${one.isKept ? '' : ' (anew)'}`)
     was = drawn
     return seen
