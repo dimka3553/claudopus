@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.286 · 27 November 2026
+- Each month of the Progress chart now shows what you worked on that month, not today's goals: its rows are that month's own areas, the one with the most results first. The list under an earlier month's chart is that month's too.
+- A month nothing is kept from says so.
+
 ## 0.2.285 · 27 November 2026
 - The Progress chart shows one month at a time, with a press to earlier months back to your first results. Each month's goals stand in order of how much went into them, with the count beside each, so you can see what the priorities were that month.
 - Fixed: the Progress tab said it couldn't be shown once it held many areas. The list of every area now drops its small pictures as far as it must to fit.

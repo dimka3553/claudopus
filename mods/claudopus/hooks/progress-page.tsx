@@ -1,4 +1,4 @@
-// The Progress tab's drawing: one month at a time, a square for each result by goal and day under the north star, each area's row under its goal, and an area's own page with its next
+// The Progress tab's drawing: one month at a time, a square for each result by area and day under the north star, each area's row under its goal, and an area's own page with its next
 // steps and timeline. Pure: register.tsx's progress-tab part reads the progress folder and the pictures, and hands them here
 import type { ElementTable } from 'claude-code'
 
@@ -110,12 +110,27 @@ export const chartMonths = (areas: { days: number[] }[], now: number) => {
   const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (CHART_DAYS - 1 - first))
   return (today.getFullYear() - day.getFullYear()) * 12 + today.getMonth() - day.getMonth() + 1
 }
-// The chart as one Svg, `width` wide: the north star on top, then one month, `back` months before this one: for each goal a row of
-// the month's days, each day its results as squares stacked from the row's line, and the goal's results of the month at the right.
-// The goal with the most that month comes first, so the rows read as that month's priorities. A square is one result, or more in a
-// busy month; `since`, when Claudopus came in, is a line across the rows in its month
-export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[], width: number, now: number, since = 0, back = 0) => {
-  const used = [...goals, OTHER_GOAL].filter(goal => areas.some(area => area.goal === goal.id))
+// The month `back` months before this one: its first day, and for each of its days its place in an area's days (today the last of
+// them), out of their reach for a day to come or too long ago
+export const monthOf = (now: number, back: number) => {
+  const today = new Date(now)
+  const first = new Date(today.getFullYear(), today.getMonth() - back, 1)
+  const daysIn = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
+  const daysAgo = (day: number) => Math.round((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(first.getFullYear(), first.getMonth(), day)) / DAY_MS)
+  return { first, next: new Date(first.getFullYear(), first.getMonth() + 1, 1), cells: Array.from({ length: daysIn }, (_, d) => CHART_DAYS - 1 - daysAgo(d + 1)) }
+}
+// An area's results on each day of that month, and all of them
+export const monthCounts = (days: number[], now: number, back: number) => {
+  const counts = monthOf(now, back).cells.map(i => (i >= 0 && i < CHART_DAYS ? (days[i] ?? 0) : 0))
+  return { counts, total: counts.reduce((s, n) => s + n, 0) }
+}
+// The most areas a month's chart gives a row of their own; the rest share one
+export const CHART_ROWS_MOST = 7
+// The chart as one Svg, `width` wide: the north star on top, then one month, `back` months before this one. Its rows are what was
+// worked on that month, so each month has its own: the areas with a result in it, the one with the most first, each a row of the
+// month's days with a day's results as squares stacked from the row's line, in its goal's colour, and its results of the month at
+// the right. A square is one result, or more in a busy month; `since`, when Claudopus came in, is a line across the rows in its month
+export const chartOf = (star: string, areas: ChartArea[], width: number, now: number, since = 0, back = 0) => {
   const isWide = width >= 560
   const quoted = star.trim() ? `“${star.trim().replace(/^["“]+|["”]+$/g, '')}”` : ''
   const starSize = isWide ? 14 : 12.5
@@ -125,20 +140,16 @@ export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[],
   const splits = words.slice(1).map((_, i) => [words.slice(0, i + 1).join(' '), words.slice(i + 1).join(' ')])
   const even = splits.reduce((best, two) => (Math.max(...two.map(l => l.length)) < Math.max(...best.map(l => l.length)) ? two : best), [quoted, ''])
   const starLines = !quoted ? [] : quoted.length <= fits ? [quoted] : Math.max(...even.map(l => l.length)) <= fits ? even : wrapped(quoted, fits).slice(0, 2)
-  // The month's days, each with its place in the areas' days (today the last of them), or none for a day to come or too long ago
   const today = new Date(now)
-  const first = new Date(today.getFullYear(), today.getMonth() - back, 1)
-  const daysIn = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
-  const daysAgo = (day: number) => Math.round((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(first.getFullYear(), first.getMonth(), day)) / DAY_MS)
-  const cells = Array.from({ length: daysIn }, (_, d) => CHART_DAYS - 1 - daysAgo(d + 1))
+  const { first, cells } = monthOf(now, back)
   const todayCell = back === 0 ? today.getDate() - 1 : -1
-  const rowsOf = used
-    .map(goal => {
-      const mine = areas.filter(area => area.goal === goal.id)
-      const counts = cells.map(i => (i >= 0 && i < CHART_DAYS ? mine.reduce((s, area) => s + (area.days[i] ?? 0), 0) : 0))
-      return { goal, counts, total: counts.reduce((s, n) => s + n, 0), live: back === 0 && mine.some(area => area.live) }
-    })
+  const busy = areas
+    .map(area => ({ name: area.name, color: area.color, ...monthCounts(area.days, now, back), live: back === 0 && area.live }))
+    .filter(row => row.total > 0)
     .sort((a, b) => b.total - a.total)
+  const rest = busy.length > CHART_ROWS_MOST + 1 ? busy.slice(CHART_ROWS_MOST) : []
+  const more = { name: `${rest.length} more areas`, color: OTHER_GOAL.color, counts: cells.map((_, i) => rest.reduce((s, row) => s + (row.counts[i] ?? 0), 0)), total: rest.reduce((s, row) => s + row.total, 0), live: false }
+  const rowsOf = rest.length ? [...busy.slice(0, CHART_ROWS_MOST), more] : busy
   const left = isWide ? 160 : 8
   const right = isWide ? 56 : 44
   const colW = (width - left - right) / cells.length
@@ -164,8 +175,8 @@ export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[],
     const body = Math.max(isWide ? 22 : 10, Math.max(1, ...row.counts.map(n => Math.ceil(Math.ceil(n / unit) / per))) * step)
     const base = y + (isWide ? 0 : 15) + body
     const mid = base - body / 2 + 4.5
-    const name = xmlSafe(isWide ? cutTo(row.goal.name, nameMost) : row.goal.name)
-    const look = row.live ? `fill="${LIVE}" font-weight="600"` : row.total ? 'fill="currentColor"' : `fill="${P_DIM}"`
+    const name = xmlSafe(isWide ? cutTo(row.name, nameMost) : row.name)
+    const look = row.live ? `fill="${LIVE}" font-weight="600"` : row === more ? `fill="${P_DIM}"` : 'fill="currentColor"'
     parts.push(isWide ? `<text x="${left - 12}" y="${n1(mid)}" text-anchor="end" ${P_FONT} font-size="${nameSize}" ${look}>${name}</text>` : `<text x="${left}" y="${n1(y + 11)}" ${P_FONT} font-size="${nameSize}" ${look}>${name}</text>`)
     parts.push(`<path d="M${left} ${n1(base + 1)}H${n1(width - right)}" stroke="${P_RAIL}" stroke-opacity="0.7"/>`)
     const squares: string[] = []
@@ -173,10 +184,16 @@ export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[],
       const x = left + colW * i + (colW - (per * step - gap)) / 2
       for (let k = 0; k < Math.ceil(count / unit); k++) squares.push(`M${n1(x + (k % per) * step)} ${n1(base - (Math.floor(k / per) + 1) * step + gap)}h${sq}v${sq}h-${sq}z`)
     })
-    if (squares.length) parts.push(`<path d="${squares.join('')}" fill="${row.goal.color}"/>`)
-    parts.push(row.total ? `<text x="${n1(width - right + 10)}" y="${n1(mid)}" ${P_FONT} font-size="${nameSize}" font-weight="600" fill="${P_GREEN}">${row.total}</text>` : `<text x="${n1(width - right + 10)}" y="${n1(mid)}" ${P_FONT} font-size="${nameSize}" fill="${P_DIM}">–</text>`)
-    said.push(`${row.goal.name}: ${row.total === 1 ? '1 result' : `${row.total} results`}${row.live ? ', working now' : ''}.`)
+    if (squares.length) parts.push(`<path d="${squares.join('')}" fill="${row.color}"/>`)
+    parts.push(`<text x="${n1(width - right + 10)}" y="${n1(mid)}" ${P_FONT} font-size="${nameSize}" font-weight="600" fill="${P_GREEN}">${row.total}</text>`)
+    said.push(`${row.name}: ${row.total === 1 ? '1 result' : `${row.total} results`}${row.live ? ', working now' : ''}.`)
     y = base + (isWide ? 14 : 12)
+  }
+  // A month nothing is kept from says so, on a row's line
+  if (!rowsOf.length) {
+    parts.push(`<text x="${n1((left + width - right) / 2)}" y="${n1(top + 16)}" text-anchor="middle" ${P_FONT} font-size="${nameSize}" fill="${P_DIM}">Nothing is kept from ${label}</text>`)
+    parts.push(`<path d="M${left} ${n1(top + 27)}H${n1(width - right)}" stroke="${P_RAIL}" stroke-opacity="0.7"/>`)
+    y = top + 40
   }
   // Where Claudopus came in: a line across the rows, named above them
   if (sinceX) {
@@ -191,7 +208,7 @@ export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[],
     if (todayCell < 0 || Math.abs(cellX(i) - cellX(todayCell)) > 40) parts.push(`<text x="${n1(Math.max(cellX(i), left + 12))}" y="${H - 5 - keyH}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="${P_DIM}">${i ? i + 1 : `1 ${MONTHS[first.getMonth()] ?? ''}`}</text>`)
   if (todayCell >= 0) parts.push(`<text x="${n1(Math.min(cellX(todayCell), width - right))}" y="${H - 5 - keyH}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="currentColor">today</text>`)
   if (unit > 1) parts.push(`<rect x="${left}" y="${H - 11}" width="${sq + 1}" height="${sq + 1}" fill="${P_DIM}"/><text x="${left + sq + 6}" y="${H - 5}" ${P_FONT} font-size="10.5" fill="${P_DIM}">${unit} results</text>`)
-  const alt = cutTo([quoted, `Results a day in ${label}, the goal with the most first.`, unit > 1 ? `Each square is ${unit} results.` : '', sinceX ? `Claudopus came in on ${dayOf(since, now)}.` : '', ...said, ...areas.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
+  const alt = cutTo([quoted, rowsOf.length ? `Results a day in ${label}, the area with the most first.` : `Nothing is kept from ${label}.`, unit > 1 ? `Each square is ${unit} results.` : '', sinceX ? `Claudopus came in on ${dayOf(since, now)}.` : '', ...said, ...areas.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
   return { source: svgDoc(width, H, parts.join('')), width, height: H, alt, label }
 }
 
@@ -303,14 +320,19 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
   const chartAreas: ChartArea[] = data.areas.map(area => ({ id: area.id, name: area.name, color: goalOf(data, area).color, goal: goalOf(data, area).id, ...(figures.get(area.id) as AreaFigures) }))
   const months = chartMonths(chartAreas, look.now)
   const back = Math.min(Math.max(0, progressView.month), months - 1)
-  const chart = chartOf(data.star, data.goals, chartAreas, Math.floor(look.width), look.now, data.since ?? 0, back)
+  const chart = chartOf(data.star, chartAreas, Math.floor(look.width), look.now, data.since ?? 0, back)
   let thumbs = 0
   const groups = grouped(data)
   const tw = isWide ? 64 : 52
   const th = isWide ? 48 : 39
+  // An earlier month has its own list under its chart: what was worked on in it, the most first, each with its newest result of
+  // that month and how many it had
+  const month = monthOf(look.now, back)
+  const inMonth = (one: PageEntry) => atOf(one.at) >= month.first.getTime() && atOf(one.at) < month.next.getTime()
+  const totalOf = (area: PageArea) => monthCounts((figures.get(area.id) as AreaFigures).days, look.now, back).total
   const row = (area: PageArea) => {
     const f = figures.get(area.id) as AreaFigures
-    const entries = data.entries.get(area.id) ?? []
+    const entries = back ? (data.entries.get(area.id) ?? []).filter(inMonth) : (data.entries.get(area.id) ?? [])
     const live = f.live ? entries.find(one => one.task && data.working.has(one.task)) : undefined
     const newest = live ?? entries[0]
     const best = entries.map(one => look.pictures(one)[0]).find(Boolean)
@@ -335,10 +357,11 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
                   </Box>
                 </Box>
               ) : null}
-              {!isWide && Svg ? <Box paddingTop={0.5}><Svg source={barOf(`n-${area.id}`, f, barWidth)} alt={countsSaid(f)} width={barWidth} height={30} /></Box> : null}
-              {!Svg ? <Text dimColor>{countsSaid(f)}</Text> : null}
+              {!back && !isWide && Svg ? <Box paddingTop={0.5}><Svg source={barOf(`n-${area.id}`, f, barWidth)} alt={countsSaid(f)} width={barWidth} height={30} /></Box> : null}
+              {!back && !Svg ? <Text dimColor>{countsSaid(f)}</Text> : null}
             </Box>
-            {isWide && Svg ? <Box flexShrink={0} paddingLeft={1}><Svg source={barOf(`w-${area.id}`, f, 150)} alt={countsSaid(f)} width={150} height={30} /></Box> : null}
+            {back ? <Box flexShrink={0} paddingLeft={1}><Text color={P_GREEN}>{totalOf(area) === 1 ? '1 result' : `${totalOf(area)} results`}</Text></Box> : null}
+            {!back && isWide && Svg ? <Box flexShrink={0} paddingLeft={1}><Svg source={barOf(`w-${area.id}`, f, 150)} alt={countsSaid(f)} width={150} height={30} /></Box> : null}
             <Box flexShrink={0}>
               <Button key={`progress-go-${area.id}-${look.gen}`} label="›" plain dimColor onPress={() => look.acts.open(area.id)} />
             </Box>
@@ -379,7 +402,11 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
         ) : null}
         {Svg ? <Svg key="progress-chart" source={chart.source} alt={chart.alt} width={chart.width} height={chart.height} /> : data.star ? <Text wrap="wrap">{`“${data.star}”`}</Text> : null}
       </Box>
-      {groups.map(({ goal, areas }) =>
+      {back ? (
+        <Box key={`progress-month-areas-${back}`} flexDirection="column" gap={0.5} flexShrink={0}>
+          {data.areas.filter(area => totalOf(area) > 0).sort((a, b) => totalOf(b) - totalOf(a)).map(row)}
+        </Box>
+      ) : groups.map(({ goal, areas }) =>
         goal === OTHER_GOAL && groups.length > 1 ? (
           otherRow(areas)
         ) : (
