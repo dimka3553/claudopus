@@ -1,4 +1,4 @@
-// The Progress tab: each goal's tasks as squares under the north star at the top, each area as a row under its goal, and an area's own page with its
+// The Progress tab: one month of each goal's results as squares under the north star at the top, each area as a row under its goal, and an area's own page with its
 // next steps and its timeline. Read from the progress folder (progress.tsx) and drawn by mods/claudopus/hooks/progress-page.tsx
 
 const PROGRESS_PANE = 'progress'
@@ -78,6 +78,7 @@ const progressActs = ($: EngineInterface): ProgressActs => {
     open: area => ((progressView.area = area), (progressView.daysShown = 5), (progressView.drawer = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
     back: () => ((progressView.area = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
     other: () => ((progressView.isOtherOpen = !progressView.isOtherOpen), again()),
+    month: by => ((progressView.month = Math.max(0, progressView.month + by)), again()),
     day: key => (flip(progressView.days, key), again()),
     aside: key => (flip(progressView.asides, key), again()),
     tick: (area, next, state) => void setNextState($, area, next, state).then(again, err => log($, `next step not changed: ${String(err)}`)),
@@ -106,7 +107,7 @@ const progressTab = async ($: EngineInterface, ui: Ui, width: number, rows: numb
     const look: ProgressLook = {
       width,
       now,
-      gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.isOtherOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], [...progressView.asides], 'isTerminal' in ui]),
+      gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.month, progressView.isOtherOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], [...progressView.asides], 'isTerminal' in ui]),
       pictures: entry => progressPictures(data, entry as ProgressEntry),
       hasResult: entry => Boolean(entry.report && data.reports.has(entry.report)),
       small: ref => small.get(ref.key) ?? null,
@@ -120,6 +121,7 @@ const progressTab = async ($: EngineInterface, ui: Ui, width: number, rows: numb
       </ui.Box>
     )
   }
+  progressView.thumbs = PROGRESS_THUMBS_MOST
   let drawing = drawn()
   while (!drawingFits(drawing) && fewerProgress()) drawing = drawn()
   return drawing

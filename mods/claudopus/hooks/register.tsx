@@ -26,7 +26,7 @@ import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
-import { daysOf, fewerProgress, goalsOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, progressView } from './progress-page'
+import { daysOf, fewerProgress, goalsOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
@@ -14888,6 +14888,7 @@ return {
 open: area => ((progressView.area = area), (progressView.daysShown = 5), (progressView.drawer = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
 back: () => ((progressView.area = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
 other: () => ((progressView.isOtherOpen = !progressView.isOtherOpen), again()),
+month: by => ((progressView.month = Math.max(0, progressView.month + by)), again()),
 day: key => (flip(progressView.days, key), again()),
 aside: key => (flip(progressView.asides, key), again()),
 tick: (area, next, state) => void setNextState($, area, next, state).then(again, err => log($, `next step not changed: ${String(err)}`)),
@@ -14915,7 +14916,7 @@ const drawn = () => {
 const look: ProgressLook = {
 width,
 now,
-gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.isOtherOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], [...progressView.asides], 'isTerminal' in ui]),
+gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.month, progressView.isOtherOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], [...progressView.asides], 'isTerminal' in ui]),
 pictures: entry => progressPictures(data, entry as ProgressEntry),
 hasResult: entry => Boolean(entry.report && data.reports.has(entry.report)),
 small: ref => small.get(ref.key) ?? null,
@@ -14929,6 +14930,7 @@ return (
 </ui.Box>
 )
 }
+progressView.thumbs = PROGRESS_THUMBS_MOST
 let drawing = drawn()
 while (!drawingFits(drawing) && fewerProgress()) drawing = drawn()
 return drawing

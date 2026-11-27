@@ -1,0 +1,2 @@
+- The Progress chart shows one month at a time, with a press to earlier months back to your first results. Each month's goals stand in order of how much went into them, with the count beside each, so you can see what the priorities were that month.
+- Fixed: the Progress tab said it couldn't be shown once it held many areas. The list of every area now drops its small pictures as far as it must to fit.
