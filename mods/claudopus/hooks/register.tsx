@@ -31,8 +31,8 @@ import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, Prog
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
-import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, slotsFor, textHash as colourTextHash } from './colours'
-import type { ColourIndex, TaskLink } from './colours'
+import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
+import type { CardWords, ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
 
@@ -821,6 +821,8 @@ return [folder]
 }
 const NO_SWITCH = (folder: string) =>
 named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there. No checkout, switch, reset, merge or commit runs in it, except going back to main and a fast-forward to main online. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
+const NO_EDIT_OWN = (folder: string) =>
+named(`Not changed: ${folder} holds the Claudopus code {name}'s chats run, and a change there reaches every chat as it next loads, finished or not. Make a worktree of your own and change the file there.`)
 const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
 const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
 const commandAt = (words: string[]) => {
@@ -3597,7 +3599,7 @@ ui,
 
 let isColoured = true
 let isLinked = true
-const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, quotes: {}, asked: {} }
+const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, rows: {}, said: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
 let colourBuilder: ColourBuilder | undefined
 let colourRunning: Promise<void> | undefined
@@ -3644,6 +3646,32 @@ return { ids: [passed], cards }
 return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards }
 }
 
+const HEARD_KEPT = 40
+let personHeard: string[] = []
+let isHeardRead = false
+const heardSaid = (text: string) => {
+const words = personWords(text)
+if (words) personHeard = [...personHeard, words].slice(-HEARD_KEPT)
+}
+const readHeard = async ($: EngineInterface) => {
+if (isHeardRead || !dir) return
+isHeardRead = true
+const { id } = await read($, me)
+const text = id ? await readOr($, `${dir}/words/${id}.said.md`) : ''
+const kept = text.slice(-60_000).split(/^## \S+.*$/m).slice(1).map(one => personWords(one)).filter(Boolean)
+personHeard = [...kept, ...personHeard].slice(-HEARD_KEPT)
+}
+const cardWords = (list: readonly Todo[]): CardWords[] => list.flatMap(one => (one.parentId || one.chat ? [] : (one.written ?? []).map(w => ({ id: one.id, ...w }))))
+const WRITTEN_KEPT = 6
+const writtenOnCard = async ($: EngineInterface, id: string, text: string) => {
+if (!isColoured || !text.trim()) return
+await colourBuild($, false)
+const at = colourBuilder?.stamp()
+if (!at) return
+await changeTodos($, list => list.map(one => (one.id === id ? { ...one, written: [...(one.written ?? []), { text: text.trim(), ...at }].slice(-WRITTEN_KEPT) } : one)))
+await colourBuild($, false)
+}
+
 const colourPass = async ($: EngineInterface, isWhole: boolean) => {
 const every = await $.session.messages().catch(() => [])
 const rows = Array.isArray(every) ? every : []
@@ -3652,7 +3680,8 @@ if (!builder || isWhole || rows.length < builder.read) builder = new ColourBuild
 const fresh = rows.slice(builder.read)
 colourBuilder = builder
 builder.ingest(fresh)
-const value = builder.index()
+await readHeard($).catch(err => log($, `messages said not read back: ${String(err)}`))
+const value = builder.index({ cards: cardWords(await read($, todos)), heard: personHeard })
 const json = JSON.stringify(value)
 if (json === colourWritten) return
 colourWritten = json
@@ -3739,7 +3768,7 @@ if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
 const given = isLinked ? replyLinksIn(e.props.text) : []
 const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
 const hash = colourTextHash(e.props.text)
-if (isColoured && !colourIndex.texts[hash] && !colourIndex.quotes[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
+if (isColoured && !colourIndex.texts[hash] && colourIndex.rows[hash] === undefined && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
 const [first] = ids
 if (!first && !given.length) return reply
 const { Box, Button, Markdown, Text } = ui
@@ -3780,9 +3809,8 @@ return (
 })}
 </Box>
 {(() => {
-const hash = colourTextHash(e.props.text)
-const isIndexed = (colourIndex.replies[e.requestId] ?? colourIndex.texts[hash])?.[0] === first
-const words = ((isIndexed ? (colourIndex.quotes[e.requestId] ?? colourIndex.quotes[hash]) : undefined) ?? colourIndex.asked[first] ?? cards.find(one => one.id === first)?.words ?? '').trim()
+const row = colourIndex.rows[e.requestId] ?? colourIndex.rows[hash]
+const words = (quoteFor(colourIndex, first, row) ?? cards.find(one => one.id === first)?.words ?? '').trim()
 return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
 })()}
 {reply}
@@ -7892,6 +7920,7 @@ const files = [...new Set([...picked, ...(await pathsIn($, said))])]
 const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
 const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
+void writtenOnCard($, id, shown).catch(err => log($, `message on a card not kept for quotes: ${String(err)}`))
 const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
 if (isNow && card.status === 'working' && (await interruptStep($, card))) {
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: one.entries.map(entry => (entry.kind === 'steer' && entry.at === at ? { ...entry, isNow: true } : entry)) } : one)))
@@ -7934,6 +7963,7 @@ await changeTodos($, list =>
 )
 askPressed.delete(mark)
 if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
+void writtenOnCard($, one.id, said).catch(err => log($, `answer on a card not kept for quotes: ${String(err)}`))
 await answerCleared($, one, ask, said, isReply, target, at, line, note)
 } catch (err) {
 askPressed.delete(mark)
@@ -7963,6 +7993,8 @@ $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
 const to = ask.refused
 ? isRun && run
 ? await startRun($, one, run)
+: !isReply && said === ALLOW
+? `${RUN_GONE(ask.copy ?? ask.text)}${note}`
 : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
 : ask.rule
 ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
@@ -8047,6 +8079,7 @@ await changeTodos($, list =>
 ((isHeld = false), list).map(card => (card.id === one.id && hasAsk(card, ask) ? ((isHeld = true), { ...mapAsk(card, ask, kept => ({ ...kept, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(kept.refused ? { talk: [...(kept.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) })), entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
 )
 if (!isHeld) return
+void writtenOnCard($, one.id, said).catch(err => log($, `reply on a card not kept for quotes: ${String(err)}`))
 dropDrafts($, one.id, ask)
 replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
 freeTimes($)
@@ -10271,6 +10304,9 @@ isReply
 const REFUSAL_ANSWERED = (command: string, said: string, isReply: boolean) =>
 `${isReply ? `${who(true)} replied, in their own words, when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}): ${said}` : `${who(true)} pressed "${DONT_ALLOW}" when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}).`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
 
+const RUN_GONE = (command: string) =>
+`${who(true)} pressed "${ALLOW}" on your card for the command Claude Code refused you (${cut(oneLine(command), 200)}), but Claudopus no longer keeps that command, so it did not run. If you still need it, run exactly the same command once more: Claude Code refuses it again, and your card asks ${who()} afresh, where their press runs it. Do not reach its result another way.`
+
 const REFUSAL_WORDS = (command: string, said: string) =>
 `${who(true)} wrote to you, in their own words, about the command Claude Code refused you (${cut(oneLine(command), 200)}), which waits on your card for their Allow: “${said}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside that permission, which keeps Allow and Don't allow: only their press runs the command, once, as theirs. Do not run it, or another way to the same end, yourself. With nothing else to do, end your step.`
 
@@ -10343,6 +10379,12 @@ redraw($)
 return runList
 }
 const isSameRun = (one: PressRun, other: Pick<PressRun, 'card' | 'askAt'>) => one.card === other.card && one.askAt === other.askAt
+const readRuns = async ($: EngineInterface) => {
+const kept = await read($, runs)
+const missing = kept.filter(one => !runList.some(other => isSameRun(other, one)))
+if (missing.length) runList = [...runList, ...missing]
+return runList
+}
 const offeredRun = (one: Todo) => {
 const ask = one.ask
 if (!ask?.refused || one.chat || !ask.copy) return undefined
@@ -10395,8 +10437,10 @@ const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs
 
 const runIt = async ($: EngineInterface, one: Todo) => {
 presses += 1
+await readRuns($).catch(err => log($, `runs not read for a press: ${String(err)}`))
 const run = offeredRun(one)
-if (!run || runPressed.has(runKey(run))) return
+if (!run) return void (await answerAsk($, one, ALLOW))
+if (runPressed.has(runKey(run))) return
 runPressed.add(runKey(run))
 runAsked.set(one.id, run)
 try {
@@ -10884,7 +10928,6 @@ const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.
 const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
 const inBar = repliesInBar(surface)
 if (ask.refused) {
-const run = offeredRun(one)
 const talk = talkText(ask.talk)
 const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(card, ask), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
 if (isActingOnReply(one)) return { ...base, ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}), kind: 'permission', isActing: true, buttons: [] }
@@ -10896,7 +10939,7 @@ kind: 'permission',
 buttons: elsewhere
 ? []
 : [
-...(run ? [{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) }] : []),
+{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) },
 { key: `${id}-deny-${ask.at}-${loadMark}`, label: DONT_ALLOW, onPress: () => void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(err => log($, `answer not sent: ${String(err)}`))) },
 ...words.buttons,
 ],
@@ -11405,6 +11448,8 @@ await watchLoaded($).catch(err => log($, `tabs not watched: ${String(err)}`))
 
 const id = await $.session.id()
 heldChat = id
+isEnded = false
+await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
 const title = await appTitle($)
 await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
 await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
@@ -11575,7 +11620,6 @@ asked = []
 await unshare($, true).catch(() => undefined)
 if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
 isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
-await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
 await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`))
 if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
 if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
@@ -11693,6 +11737,7 @@ context.push(PASTED)
 
 said = text
 heard = [...heard, text]
+heardSaid(e.text)
 fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
 const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
 await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
@@ -13690,6 +13735,22 @@ if (said.exitCode === 0 && gitDir && gitDir === common && top.replace(/\/+$/, ''
 return ''
 }
 
+const ownCheckoutWritten = async ($: EngineInterface, path: string, start: string) => {
+const home = (await $.env.get('HOME')) ?? ''
+if (!path) return ''
+const known = await knowSource($).catch(() => undefined)
+const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
+const full = pathOf(path, home, start || home)
+if (!own || !full.startsWith(`${own}/`)) return ''
+for (let folder = full.slice(0, full.lastIndexOf('/')); folder.length >= own.length; folder = folder.slice(0, folder.lastIndexOf('/'))) {
+const said = await $.process.run(['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+if (said.exitCode !== 0) continue
+const [gitDir = '', common = '', top = ''] = said.stdout.trim().split('\n').map(line => line.trim())
+return gitDir && gitDir === common && top.replace(/\/+$/, '') === own ? own : ''
+}
+return ''
+}
+
 const workHooks = (on: On) => {
 
 on('tool.call', async ($, e, raw) => {
@@ -13790,6 +13851,14 @@ const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command],
 if (changed) {
 await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
 return { deny: NO_SWITCH(changed) }
+}
+}
+if (dir && !isOff && e.agentId !== undefined && FILE_TOOLS.includes(e.tool)) {
+const input = e as { file_path?: unknown; notebook_path?: unknown }
+const written = await ownCheckoutWritten($, String(input.file_path ?? input.notebook_path ?? ''), cwd || '.')
+if (written) {
+await log($, `refused work ${e.agentId}'s change to a file of Claudopus's own checkout`)
+return { deny: NO_EDIT_OWN(written) }
 }
 }
 if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {

@@ -108,6 +108,10 @@ export type Todo = {
   // Its place in the task colours' palette: given once, the colour least used by the tasks started just before it, so tasks seen
   // together differ
   colour?: number
+  // What the person wrote to it on its card (its Message box, its answer box, Reply on a chat reply), the newest few, each with
+  // where the chat's transcript stood as it went: a chat reply about it quotes the newest message it was sent before it, here or
+  // in the chat (colours.tsx). Never shared with other chats
+  written?: { text: string; row: number; mark: string }[]
   // When it first began, kept when it is started again (whose startedAt moves on so its time runs on): the cards keep their places by it
   begunAt?: number
   // 0 while it works

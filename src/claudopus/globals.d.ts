@@ -400,8 +400,11 @@ declare global {
   export import replyLinksIn = M18.linksIn
   export import PALETTE = M18.PALETTE
   export import passedOn = M18.passedOn
+  export import personWords = M18.personWords
+  export import quoteFor = M18.quoteFor
   export import slotsFor = M18.slotsFor
   export import colourTextHash = M18.textHash
+  export import CardWords = M18.CardWords
   export import ColourIndex = M18.ColourIndex
   export import TaskLink = M18.TaskLink
   export import ProgressArea = M15.ProgressArea

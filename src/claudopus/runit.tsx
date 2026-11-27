@@ -40,6 +40,16 @@ const saveRuns = async ($: EngineInterface, fn: (list: PressRun[]) => PressRun[]
   return runList
 }
 const isSameRun = (one: PressRun, other: Pick<PressRun, 'card' | 'askAt'>) => one.card === other.card && one.askAt === other.askAt
+// What another copy kept, read from the mod's state as Allow is pressed: the copy that saw Claude Code refuse a command may not be
+// the one that draws its card, so Allow is on every such card (needs.tsx) and looks up its command only as it is pressed. On 27 Nov a
+// card came up 16 s after an update, saved by the copy the update replaced, and the new copy, which had not read the runs yet, drew
+// it with Don't allow alone. Only what this copy lacks is taken: a read may come back older than this copy's own last write
+const readRuns = async ($: EngineInterface) => {
+  const kept = await read($, runs)
+  const missing = kept.filter(one => !runList.some(other => isSameRun(other, one)))
+  if (missing.length) runList = [...runList, ...missing]
+  return runList
+}
 // The command its card's notice offers, not yet pressed: only the one Claudopus kept as Claude Code refused it, on that same notice
 const offeredRun = (one: Todo) => {
   const ask = one.ask
@@ -110,11 +120,14 @@ const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs
 
 // Allow on the card in this chat's own panel: the one way a run starts. The question is answered first, as any press answers
 // it; only once it has been cleared does the command start (answerCleared calls startRun). A press whose answer could not be
-// written leaves the block to be pressed again
+// written leaves the block to be pressed again. One whose command Claudopus no longer keeps (let go after a day) runs nothing:
+// the task is told to try the command again, which puts up a card of its own (RUN_GONE)
 const runIt = async ($: EngineInterface, one: Todo) => {
   presses += 1
+  await readRuns($).catch(err => log($, `runs not read for a press: ${String(err)}`))
   const run = offeredRun(one)
-  if (!run || runPressed.has(runKey(run))) return
+  if (!run) return void (await answerAsk($, one, ALLOW))
+  if (runPressed.has(runKey(run))) return
   runPressed.add(runKey(run))
   runAsked.set(one.id, run)
   try {
