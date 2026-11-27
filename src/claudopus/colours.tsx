@@ -39,7 +39,7 @@ const taskColour = (id: string) => {
 const taskLinks = ($: EngineInterface, id: string) => {
   if (!isLinked) return []
   // Its Details reads the rows since at most every 10 seconds, so a link given since shows there
-  colourSoon($, 10_000)
+  colourSoon($, 10_000, !isColoured)
   return colourIndex.tasks[id]?.links ?? []
 }
 const isColourRead = () => isColoured || isLinked
@@ -138,18 +138,37 @@ const colourBuild = ($: EngineInterface, isWhole: boolean) => {
 // A pass soon, asked by a drawing that may show what the last pass did not read: a reply it knows nothing of, a task's Details. At
 // most one waits, and none starts within `gap` of the last, so a tab drawn every second reads the transcript only now and then.
 // (Not on each new row: Claude Code's hook for that runs on every row of every task, and held each of them up.)
+// Each pass is given the whole chat, copied to this code: once COLOUR_LONG rows are read none starts within COLOUR_GAP of the last
+// (a reply as it is written is a new text at every drawing), and the last one asked still gets its pass when that is over. An ask
+// that knows of no new row (`isNew` false: Details while colours are on, where each new reply asks for itself) reads once in
+// COLOUR_IDLE at most
+const COLOUR_LONG = 400
+const COLOUR_GAP = 3_000
+const COLOUR_IDLE = 60_000
 let colourPassAt = 0
+let colourNews = 0
+let colourRead = 0
+let colourGap = Infinity
 const colourAsked = new Set<string>()
-const colourSoon = ($: EngineInterface, gap = 400) => {
-  if (colourTimer || !isColourRead()) return
-  colourTimer = $.clock.after(400, () => {
-    colourTimer = undefined
-    void $.clock.now().then(now => {
-      if (now - colourPassAt < gap) return
-      colourPassAt = now
-      return colourBuild($, false)
+const colourSoon = ($: EngineInterface, gap = 400, isNew = true) => {
+  if (!isColourRead()) return
+  if (isNew) colourNews += 1
+  colourGap = Math.min(colourGap, gap)
+  if (colourTimer) return
+  const look = (wait: number) => {
+    colourTimer = $.clock.after(wait, () => {
+      colourTimer = undefined
+      void $.clock.now().then(now => {
+        const isFresh = colourNews !== colourRead
+        const least = Math.max(colourGap, isFresh ? ((colourBuilder?.read ?? 0) > COLOUR_LONG ? COLOUR_GAP : 0) : COLOUR_IDLE)
+        const since = now - colourPassAt
+        if (since >= 0 && since < least) return isFresh && least <= COLOUR_GAP && !colourTimer ? look(least - since) : void (colourGap = Infinity)
+        ;[colourPassAt, colourRead, colourGap] = [now, colourNews, Infinity]
+        return colourBuild($, false)
+      })
     })
-  })
+  }
+  look(400)
 }
 
 // Reply on a reply's box opens the box above the chat, to that task: its answer box while it asks something, else the box Message
@@ -159,7 +178,7 @@ const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
   const one = (await read($, todos)).find(card => card.id === id)
   if (one?.ask && needsPerson(one)) return openBar($, { kind: 'answer', id, one }, surface)
   if (one && canChange(one)) return openBar($, { kind: 'change', id }, surface)
-  const kept = (await read($, reports)).find(r => r.agent === id)
+  const kept = (await ownReports($)).find(r => r.agent === id)
   if (kept) return openBar($, { kind: 'continue', id: kept.id }, surface)
   openWork($, id)
 }

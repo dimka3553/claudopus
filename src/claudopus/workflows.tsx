@@ -140,6 +140,9 @@ const stopFlow = async ($: EngineInterface, id: string) => {
   await changeFlow($, id, (one, at) => ({ ...one, status: 'stopped', endedAt: at }))
 }
 const journalSigns = new Map<string, string>()
+// When each run's journal was last seen to have moved, and each other session's file as it was when last read as not this chat's
+const journalMoved = new Map<string, number>()
+const flowsPassed = new Map<string, number>()
 const readJournal = async ($: EngineInterface, id: string) => {
   const f = (await read($, flows)).find(one => one.id === id)
   if (!f?.transcriptDir) return
@@ -148,7 +151,7 @@ const readJournal = async ($: EngineInterface, id: string) => {
   const stat = await $.fs.stat(path).catch(() => undefined)
   const sign = `${stat?.size ?? 0}:${stat?.mtimeMs ?? 0}`
   if (stat && journalSigns.get(id) === sign) return
-  if (stat) journalSigns.set(id, sign)
+  if (stat) (journalSigns.set(id, sign), journalMoved.set(id, await $.clock.now()))
   during('read a workflow')
   const text = await readOr($, path)
   if (!text) return
@@ -164,7 +167,10 @@ const followFlows = async ($: EngineInterface) => {
   const mine = await sessionName($)
   const running = (await read($, flows)).filter(f => f.status === 'working' && f.session === mine)
   for (const f of running) await readJournal($, f.id).catch(err => log($, `journal of ${f.id} not read: ${String(err)}`))
-  if (running.length && flowLooks % END_LOOK === 0) {
+  // (the whole chat is read for it, so only once a run's journal has stood still for about as long as two such reads are apart:
+  // one that still writes has not ended)
+  const quietFrom = running.length && flowLooks % END_LOOK === 0 ? (await $.clock.now()) - (END_LOOK - 1) * FLOW_EVERY : -Infinity
+  if (running.some(f => (journalMoved.get(f.id) ?? 0) <= quietFrom)) {
     during('read the chat for ended workflows')
     const rows = await $.session.messages().catch(() => [])
     for (const row of Array.isArray(rows) ? rows : []) if (row.role === 'user' && row.text.includes('<task-notification')) await flowEnded($, row.text)
@@ -180,11 +186,14 @@ const followFlows = async ($: EngineInterface) => {
       // A file not written for a day is an old run, read once at load at most
       const stat = await $.fs.stat(`${flowsDir()}/${entry.name}`).catch(() => undefined)
       if (!known && stat && now - stat.mtimeMs > FLOW_OLD) continue
+      // One read before as no run of this chat's, and not written since, is not read again
+      if (!known && stat?.mtimeMs && flowsPassed.get(entry.name) === stat.mtimeMs) continue
       try {
         const read1 = JSON.parse(await readOr($, `${flowsDir()}/${entry.name}`)) as Flow
         // A run its session has not written for this long has lost its session: it shows as stopped
         const one = read1.status === 'working' && stat && now - stat.mtimeMs > FLOW_STALE ? { ...read1, status: 'stopped' as const, endedAt: stat.mtimeMs } : read1
         if (one.id && one.parent === ccd.id && one.session !== mine) found.push(one)
+        else if (stat) flowsPassed.set(entry.name, stat.mtimeMs)
       } catch {
         // A file being written is read at the next look
       }

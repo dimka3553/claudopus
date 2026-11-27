@@ -580,9 +580,20 @@ const installedCopy = async ($: EngineInterface) => {
 // in a chat run from afar this copy keeps that mark naming it, looked at every HOLD_EVERY, which is far below their RELOAD_EVERY.
 // A copy that a newer load in this chat has replaced (the version this chat ran last is not its own) does nothing, so the holds of
 // copies left behind by typed reloads do not pile up
+// Each second it asks only whether Claude Code's record of what is installed has changed (a newer version is what the old copies
+// would reload for); the whole look is every HOLD_WHOLE, as the mark it keeps lasts minutes
 const HOLD_EVERY = 1000
+const HOLD_WHOLE = 5000
+let heldAt = -Infinity
+let heldRecord = 0
 const holdOldCopies = async ($: EngineInterface) => {
   if (!dir) return
+  const from = installedFrom($.plugin.root)
+  const record = from ? ((await $.fs.stat(`${from.plugins}/installed_plugins.json`).catch(() => undefined))?.mtimeMs ?? 0) : 0
+  const due = await $.clock.now()
+  if (record === heldRecord && due >= heldAt && due - heldAt < HOLD_WHOLE - 500) return
+  heldAt = due
+  heldRecord = record
   const loaded = (await versionsOf($)).version
   if (!loaded || (await read($, ranVersion)) !== loaded) return
   const copy = await installedCopy($)

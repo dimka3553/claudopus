@@ -66,13 +66,17 @@ const openMemory = ($: EngineInterface, path: string) => {
   presses += 1
   void comingTab((async () => {
     const report = path.slice(dir.length + 1).match(/^reports\/([^/]+)/)?.[1]
-    if (report && (await read($, reports)).some(one => one.id === report)) return openReport($, report)
+    if (report && (await ownReports($)).some(one => one.id === report)) return openReport($, report)
     const id = memoryPaneOf(path)
     const text = await memoryRead($, path)
     memoryPanes.set(id, path)
     memoryText.set(id, text)
     const open = (await $.ui.panes()).filter(pane => pane.id.startsWith(MEMORY_PANE) && pane.id !== id)
-    for (const pane of open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
+    const closed = open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))
+    for (const pane of closed) await $.ui.close({ id: pane.id }).catch(() => undefined)
+    // Only the open tabs' files are kept: a tab closed is read again when its link is pressed again
+    const left = new Set([id, ...open.filter(pane => !closed.includes(pane)).map(pane => pane.id)])
+    for (const one of [...memoryPanes.keys()]) if (!left.has(one)) (memoryPanes.delete(one), memoryText.delete(one))
     const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim()
     // The memory folder itself is named Memory, as in Config; else its heading would read 'claudopus' beside the panel's tab
     await front($, id, path === dir ? 'Memory' : cut(heading || fileName(path), 30))
@@ -96,9 +100,20 @@ const CATCH_UP_AFTER = 60_000
 const CATCH_UP_EVERY = 10 * 60_000
 // Its log is added to, and set aside once it passes a megabyte
 const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+// (not started at all while its own stamp says it ran lately: every open chat asked every ten minutes, and each ask started five
+// programs that left at once. The stamp is bin/catch-up's own, caught/last-<the start of the projects folder's md5>, good for 540 s)
+let catchUpStamp = ''
 const startCatchUp = async ($: EngineInterface) => {
   if (!dir) return
-  const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, `${await configDir($)}/projects`])
+  const projects = `${await configDir($)}/projects`
+  if (!catchUpStamp) {
+    const r = await $.process.run(['/usr/bin/perl', '-MDigest::MD5=md5_hex', '-e', 'print substr(md5_hex($ARGV[0]), 0, 12)', projects]).catch(() => undefined)
+    if (r?.exitCode === 0 && /^[0-9a-f]{12}$/.test(r.stdout)) catchUpStamp = `${dir}/caught/last-${r.stdout}`
+  }
+  const stamp = catchUpStamp ? ((await $.fs.stat(catchUpStamp).catch(() => undefined))?.mtimeMs ?? 0) : 0
+  const now = stamp ? await $.clock.now() : 0
+  if (stamp && now >= stamp && now - stamp < 540_000) return
+  const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, projects])
   if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
 }
 

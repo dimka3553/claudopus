@@ -11,7 +11,7 @@ const continueFrom = ($: EngineInterface, id: string, words: string, files: stri
   return run
 }
 const continueNow = async ($: EngineInterface, id: string, words: string, files: string[] = []): Promise<void> => {
-  const r = (await read($, reports)).find(one => one.id === id)
+  const r = (await ownReports($)).find(one => one.id === id)
   if (!r || (!words.trim() && !files.length)) return
   // To that result's own task while its card is still there to carry on from; else as the person's message naming the result
   const card = r.agent ? (await read($, todos)).find(one => one.id === r.agent && canChange(one)) : undefined
@@ -154,14 +154,14 @@ const svgOf = async ($: EngineInterface, path: string): Promise<Thumb> => {
 const openReport = ($: EngineInterface, id: string) => {
   presses += 1
   void comingTab((async () => {
-    const r = (await read($, reports)).find(one => one.id === id)
+    const r = (await ownReports($)).find(one => one.id === id)
     if (!r) return
     // A report brought in by hand gets its small copies when it is first opened
     await makeThumbs($, r).catch(err => log($, `small copies of report ${id} not made: ${String(err)}`))
     const open = (await $.ui.panes()).filter(pane => pane.id.startsWith('report-') && pane.id !== paneOf(r))
     for (const pane of open.slice(0, Math.max(0, open.length - (REPORT_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
     // Its tab is named after it; rounds of one piece of work, which share a name, by their time too
-    const kept = await read($, reports)
+    const kept = await ownReports($)
     const now = await $.clock.now()
     await front($, paneOf(r), kept.some(one => one.id !== r.id && one.title === r.title) ? `${cut(r.title, 22)} · ${time(r.at, now)}` : cut(r.title, 30))
     // The pressed row gets a new name, so the app does not hold the list where that button was
@@ -179,14 +179,14 @@ const archiveReport = ($: EngineInterface, r: Report, isArchived: boolean) => {
   presses += 1
   void (async () => {
     // A round already put away keeps when it was; a round that came after is put away with the rest
-    const kept = (await read($, reports)).filter(one => Boolean(one.archived) !== isArchived)
+    const kept = (await ownReports($)).filter(one => Boolean(one.archived) !== isArchived)
     const rounds = entriesOf(kept).find(entry => entry.some(one => one.id === r.id)) ?? []
     const now = await $.clock.now()
     // Each round is marked even when another's mark fails, so the press leaves as little half done as it can
     // Brought back keeps when, so another Mac that has it put away follows the later of the two
     for (const one of rounds) await markReport($, one, isArchived ? { archived: now } : { archived: undefined, broughtBack: now }).catch(err => log($, `result ${one.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
     // One brought back is listed in its place, even one that came after the list was opened
-    if (!isArchived && reportsListed.length) reportsListed =[...new Set([...reportsListed, ...rounds.map(one => one.id)])]
+    if (!isArchived && reportsListed.size) reportsListed = new Set([...reportsListed, ...rounds.map(one => one.id)])
     if (isArchived) {
       const tabs = new Set(rounds.map(paneOf))
       for (const pane of (await $.ui.panes()).filter(one => tabs.has(one.id))) await $.ui.close({ id: pane.id }).catch(() => undefined)
@@ -198,13 +198,21 @@ const archiveReport = ($: EngineInterface, r: Report, isArchived: boolean) => {
 
 // The reports shown when the list was last opened from the Claudopus pane. One that arrives while the person reads the list waits,
 // counted in its heading, so no row moves under the pointer
-let reportsListed: string[] = []
+let reportsListed = new Set<string>()
 // A subject in letters the slug drops stands alone, by its id
 const subjectOf = (r: Report) => slug(r.subject || r.title) || r.id
 // One entry per piece of work, its newest report first and its earlier rounds after it. Rounds of one work are: the same work
 // reporting again; work started from a report (its `from`); and reports on one subject whose titles lead with that subject. A report
 // brought in by hand is an entry of its own unless one of these joins it
+// (the grouping is kept by what it reads of each result, in the list's order, as places in the list: a drawing asks for it several
+// times, and each list it is given is a new one)
+const ENTRIES_HELD = 6
+const entriesHeld = new Map<string, number[][]>()
 const entriesOf = (list: Report[]) => {
+  let key = ''
+  for (const r of list) key += `${r.id}\n${r.agent ?? ''}\n${r.from ?? ''}\n${r.subject}\n${r.title}\n`
+  const held = entriesHeld.get(key)
+  if (held) return heldIn(entriesHeld, key, held, ENTRIES_HELD).map(entry => entry.map(n => list[n] as Report))
   const head = new Map(list.map(r => [r.id, r.id]))
   const find = (id: string): string => {
     const up = head.get(id) ?? id
@@ -222,7 +230,8 @@ const entriesOf = (list: Report[]) => {
     const subject = slug(r.subject)
     if (subject && (slug(r.title) === subject || slug(r.title).startsWith(`${subject}-`))) by(`subject:${subject}`, r)
   }
-  return [...list.reduce((all, r) => all.set(find(r.id), [...(all.get(find(r.id)) ?? []), r]), new Map<string, Report[]>()).values()]
+  const places = [...list.reduce((all, r, n) => all.set(find(r.id), [...(all.get(find(r.id)) ?? []), n]), new Map<string, number[]>()).values()]
+  return heldIn(entriesHeld, key, places, ENTRIES_HELD).map(entry => entry.map(n => list[n] as Report))
 }
 // What a report waits on now: an earlier round's open items were asked again, or not, by its newest round
 const newestOf = (list: Report[]) => new Set(entriesOf(list).map(entry => entry[0]?.id))
@@ -232,7 +241,7 @@ const openReports = ($: EngineInterface) => {
   presses += 1
   return comingTab(
     (async () => {
-      reportsListed = (await read($, reports)).map(r => r.id)
+      reportsListed = new Set((await ownReports($)).map(r => r.id))
       redraw($)
       await front($, REPORTS_PANE, REPORTS_TITLE)
     })(),
@@ -279,14 +288,14 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
   const list = all.filter(r => !r.archived)
   const gone = entriesOf(all.filter(r => r.archived))
   // A new round of an entry already listed shows in its place; a new entry waits
-  const shown = reportsListed.length ? entriesOf(list).filter(entry => entry.some(r => reportsListed.includes(r.id))).flat() : list
+  const shown = reportsListed.size ? entriesOf(list).filter(entry => entry.some(r => reportsListed.has(r.id))).flat() : list
   const entries = entriesOf(shown)
   const fresh = entriesOf(list).length - entries.length
   const [recent, earlier] = [entries.slice(0, RECENT), entries.slice(RECENT)]
   // The app keeps each button it drew by its key, with the handle of its first drawing; the engine gives every button a new handle
   // whenever anything in the drawing changes (a result arriving, a fold, a time). A key that stayed then pressed a dead handle and
   // nothing opened, press after press. So every key here carries a mark of what the drawing shows, which moves whenever it changes
-  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, earlierMost, archivedMost, 'isTerminal' in ui, ...[recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
+  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, earlierMost, archivedMost, 'isTerminal' in ui, earlier.length, gone.length, ...[recent, isEarlierOpen ? earlier.slice(0, earlierMost) : [], isArchivedOpen ? gone.slice(0, archivedMost) : []].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
   const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
     <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}

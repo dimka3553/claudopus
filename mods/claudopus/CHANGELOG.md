@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.307 · 27 November 2026
+- A busy chat uses far less of the processor. Claudopus kept the whole list of a chat's tasks in Claude's memory and read and wrote all of it several times for every tool call of every task: with five tasks at work its own code used more than half a core. It now keeps the list at hand, writes it once or twice per call, and saves the ledger at most every two seconds.
+- A tool call of a task no longer draws the whole panel again unless what the panel shows has changed.
+- Hiding your saved keys in what a tool answers no longer reads every key from the keychain each time. Claudopus first tests the answer against a fingerprint of each key, which holds no key, and only reads the keys when one may be in it. When it does read them, it starts about a third as many programs.
+- The results list is looked at with two small checks every 20 seconds and read again only when something changed. Every result is read afresh every 10 minutes, or when you open Results.
+- Claudopus's background looks are shared between your open chats or made less often: the disk, the chats run from elsewhere, running commands' output, the servers, and how Claude's commands share the processor. Its watcher starts one program every three seconds instead of one for each chat and one more.
+- The pictures and texts of results and tasks you opened are let go again, so a long chat holds less memory.
+
 ## 0.2.306 · 27 November 2026
 - A task that can no longer be reached, such as one a rewind of the chat left behind, no longer shows Working for good: its card says Interrupted · Can't be reached any more, keeps its last result, and has Carry on
 - A message you write to such a task is marked "Didn't reach the task · the chat has it" instead of "Not read yet", and the chat gets your words

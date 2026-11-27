@@ -396,7 +396,8 @@ async function statsShow($: EngineInterface, scope: Scope, memory: string, chatI
 }
 // The tab's figures: drawn at once from what is kept, then Claude's records are looked at again, at most once a minute, and the
 // figures drawn again from what that changed
-const MEMORY_EVERY = 5 * 60_000
+// (the memory's sizes, a count of every file under it: as the tab is first read, then at most once in MEMORY_EVERY)
+const MEMORY_EVERY = 30 * 60_000
 let memoryReadAt = 0
 async function loadStats($: EngineInterface, scope: Scope, memory: string, chatId: string, hint: string, now: number) {
   if (reading.has(scope) || !chatId) return
@@ -404,9 +405,12 @@ async function loadStats($: EngineInterface, scope: Scope, memory: string, chatI
   const isDue = !was || now - was.at >= READ_EVERY
   if (!isDue && was.shown[statsShown.range]) return
   reading.add(scope)
+  // What the tab draws of these figures: it is drawn again at the end only when that differs
+  const look = () => JSON.stringify([held.get(scope)?.shown, held.get(scope)?.chats, held.get(scope)?.error])
+  let drew = look()
   try {
-    if (now - memoryReadAt >= MEMORY_EVERY) ((memoryReadAt = now), void loadMemorySizes($, memory).then(() => drawAgain($), () => undefined))
-    if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now))) drawAgain($)
+    if (now - memoryReadAt >= MEMORY_EVERY) ((memoryReadAt = now), void loadMemorySizes($, memory).then(isMoved => isMoved && drawAgain($), () => undefined))
+    if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now))) ((drew = look()), drawAgain($))
     if (!isDue) return
     const looked = await statsRefresh($, memory, chatId, hint, scope, now, true)
     await statsShow($, scope, memory, chatId, now)
@@ -417,7 +421,7 @@ async function loadStats($: EngineInterface, scope: Scope, memory: string, chatI
     held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` })
   } finally {
     reading.delete(scope)
-    drawAgain($)
+    if (look() !== drew) drawAgain($)
   }
 }
 async function loadMemorySizes($: EngineInterface, memory: string) {
@@ -439,7 +443,9 @@ async function loadMemorySizes($: EngineInterface, memory: string) {
     { name: 'Picture previews and Stats', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
   ]
   const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
+  const was = JSON.stringify(memoryHeld.now)
   memoryHeld.now = { parts, bytes }
+  return JSON.stringify(memoryHeld.now) !== was
 }
 
 // Stats: what the work added up to, in a tab of its own, opened in front like Results

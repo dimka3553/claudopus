@@ -27,7 +27,7 @@ import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, 
 import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, chartSvg, FOOTPRINT_BATTERY_EVERY, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isOnBatteryLook, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_BATTERY_EVERY, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
-import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
+import { PACE_EVERY, PACE_LOOK, PACE_SET, PACE_THREADS, paceLookOf, paceNeedsThreads, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'

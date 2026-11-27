@@ -91,29 +91,126 @@ async function saveText($: EngineInterface, root: string, memory: string, path: 
 
 // Kept keys stay out of every chat: a command that would read one from the keychain is refused, and once any key is kept, what a
 // tool answers comes back with every kept value hidden. The values never reach the mod: `bin/secret --hide` swaps them in a pipe
-let secrets = { at: -SECRETS_MS, names: [] as string[], isAdminKept: false }
-// The names of the kept keys, and whether an admin password is kept, read again at most every SECRETS_MS (and with each use of a
-// runner): a list that cannot be read keeps what was known before, so hiding never stops on a failure
+// The names of the kept keys and of the kept admin passwords (undefined while their list could not be read), each value's marks
+// by its length in bytes (undefined when they could not be read: then every text goes through the runner), and the last texts the
+// runner gave back unchanged
+let secrets = { at: -SECRETS_MS, names: [] as string[], admins: undefined as string[] | undefined, marks: undefined as Map<number, number[]> | undefined, same: [] as string[] }
+// A mark is a value's length and a hash of its bytes that only `bin/secret --marks` works out, with this load's own random base:
+// each byte b in turn, hash = (hash * MARK_BASE + b) % MARK_MOD. A base under 2^21 keeps every step a whole number a double holds,
+// and the modulus 2^31 - 1 is taken without a division (the part above 2^31 added to the part below), which is several times faster
+const MARK_BASE = 256 + Math.floor(Math.random() * 2_096_896)
+const MARK_MOD = 2_147_483_647
+const SAME_MAX = 200_000
+// The names, read again at most every SECRETS_MS (and with each use of a runner), in one run that lists the keychain once and marks
+// each value. A list that cannot be read keeps what was known before, so hiding never stops on a failure
 const knowKept = async ($: EngineInterface, isNow = false) => {
   const now = await $.clock.now()
   if (now - secrets.at < SECRETS_MS && !isNow) return secrets
-  const listed = await $.process.run([`${$.plugin.root}/bin/secret`, '--list']).catch(() => undefined)
-  const admins = await $.process.run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin']).catch(() => undefined)
-  if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), isAdminKept: admins?.exitCode === 0 ? Boolean(admins.stdout.trim()) : secrets.isAdminKept }
+  const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
+  const marked = await run([`${$.plugin.root}/bin/secret`, '--marks', String(MARK_BASE)])
+  const lines = marked?.exitCode === 0 && !marked.isStdoutTruncated ? marked.stdout.split('\n').filter(Boolean) : []
+  if (lines.at(-1) === 'end') {
+    const names: string[] = []
+    const admins: string[] = []
+    const marks = new Map<number, number[]>()
+    let isRead = true
+    for (const line of lines.slice(0, -1)) {
+      const [kind, one = '', hash = ''] = line.split('\t')
+      if (kind === 'name') names.push(one)
+      else if (kind === 'admin') admins.push(one)
+      else if (kind === 'mark' && /^[1-9]\d*$/.test(one) && /^\d+$/.test(hash)) marks.set(Number(one), [...(marks.get(Number(one)) ?? []), Number(hash)])
+      else isRead = false
+    }
+    if (isRead) return (secrets = { at: now, names, admins, marks, same: [] })
+  }
+  // No marks (a value that cannot be read, a runner that fails): the names alone, as before, and every text goes through the runner
+  const listed = await run([`${$.plugin.root}/bin/secret`, '--list'])
+  const admins = await run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin'])
+  if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), admins: admins?.exitCode === 0 ? admins.stdout.split('\n').filter(Boolean) : secrets.admins, marks: undefined, same: [] }
   return secrets
 }
-// A JSON text with every kept value hidden inside its strings, kept admin passwords too; undefined when it could not be checked
+// Whether a JSON text may hold a marked value where the runner looks: inside its strings, keys too, as they read once decoded (and
+// its numbers as written, which perl takes as text when they are too long for it). Their UTF-8 BYTES are rolled through the marks'
+// hash, once for each length: no window matching a mark is proof that no value is there; a match may be chance, and the runner decides
+const mayHoldKept = (text: string, marks: Map<number, number[]>) => {
+  const parts: string[] = []
+  let size = 0
+  const walk = (x: unknown) => {
+    if (typeof x === 'string' || typeof x === 'number') size += parts[parts.push(String(x)) - 1]!.length * 3 + 1
+    else if (Array.isArray(x)) for (const one of x) walk(one)
+    else if (x && typeof x === 'object') for (const key of Object.keys(x)) (walk(key), walk((x as Record<string, unknown>)[key]))
+  }
+  try {
+    walk(JSON.parse(text))
+  } catch {
+    return true
+  }
+  // (between two strings a byte no UTF-8 text holds, so a window over both matches nothing but by chance)
+  const bytes = new Uint8Array(size)
+  let n = 0
+  for (const s of parts) {
+    for (let i = 0; i < s.length; i++) {
+      let c = s.charCodeAt(i)
+      if (c < 0x80) {
+        bytes[n++] = c
+        continue
+      }
+      const next = c >= 0xd800 && c < 0xdc00 ? s.charCodeAt(i + 1) : 0
+      if (c < 0x800) bytes[n++] = 0xc0 | (c >> 6)
+      else if (next >= 0xdc00 && next < 0xe000) {
+        c = 0x10000 + ((c - 0xd800) << 10) + (next - 0xdc00)
+        i++
+        bytes[n++] = 0xf0 | (c >> 18)
+        bytes[n++] = 0x80 | ((c >> 12) & 63)
+        bytes[n++] = 0x80 | ((c >> 6) & 63)
+      } else {
+        bytes[n++] = 0xe0 | (c >> 12)
+        bytes[n++] = 0x80 | ((c >> 6) & 63)
+      }
+      bytes[n++] = 0x80 | (c & 63)
+    }
+    bytes[n++] = 0xff
+  }
+  const gone = new Float64Array(256)
+  for (const [length, hashes] of marks) {
+    if (length > n) continue
+    // What the byte leaving the window takes away, its share base^length, kept as what is added instead
+    let top = 1
+    let h = 0
+    for (let i = 0; i < length; i++) {
+      top = (top * MARK_BASE) % MARK_MOD
+      h = (h * MARK_BASE + bytes[i]!) % MARK_MOD
+    }
+    for (let b = 0; b < 256; b++) gone[b] = MARK_MOD - ((b * top) % MARK_MOD)
+    const first = hashes[0]
+    const isOne = hashes.length === 1
+    for (let i = length; ; i++) {
+      if (h === first || (!isOne && hashes.includes(h))) return true
+      if (i >= n) break
+      const x = h * MARK_BASE + bytes[i]! + gone[bytes[i - length]!]!
+      const high = Math.floor(x / 2_147_483_648)
+      h = x - high * 2_147_483_648 + high
+      if (h >= MARK_MOD) h -= MARK_MOD
+    }
+  }
+  return false
+}
+// A JSON text with every kept value hidden inside its strings, kept admin passwords too; undefined when it could not be checked.
+// The runner starts only for a text that may hold a value, and not for one it gave back unchanged since the names were read
 const hiddenJson = async ($: EngineInterface, text: string) => {
-  const { names, isAdminKept } = await knowKept($)
-  if (!names.length && !isAdminKept) return text
-  const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...names], { stdin: text }).catch(() => undefined)
-  return hidden && hidden.exitCode === 0 && !hidden.isStdoutTruncated && hidden.stdout.trim() ? hidden.stdout : undefined
+  const { names, admins, marks, same } = await knowKept($)
+  if (!names.length && !admins?.length) return text
+  if (same.includes(text) || (marks && !mayHoldKept(text, marks))) return text
+  const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...(admins ? ['--admins', admins.join(',')] : []), ...names], { stdin: text }).catch(() => undefined)
+  if (!hidden || hidden.exitCode !== 0 || hidden.isStdoutTruncated || !hidden.stdout.trim()) return undefined
+  if (hidden.stdout === text && text.length <= SAME_MAX && same.push(text) > 8) same.shift()
+  return hidden.stdout
 }
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
   const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
   if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
-  const { names, isAdminKept } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
-  if (!names.length && !isAdminKept) return r
+  const { names, admins } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
+  if (!names.length && !admins?.length) return r
   try {
     const text = JSON.stringify({ result: r.result, context: r.context })
     const hidden = await hiddenJson($, text)

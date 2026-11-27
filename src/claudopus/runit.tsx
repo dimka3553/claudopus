@@ -188,26 +188,39 @@ const runOutputOf = (text: string) => {
   const lines = text.replace(RUN_END, '').replace(/\s+$/, '').split('\n')
   return { exit: end ? Number(end[1]) : undefined, isStopped: Boolean(end?.[2]), lines }
 }
+// Each run's output as last looked at (its size and time), and when it was last asked whether it still runs: an output that has
+// not moved is not read again, and a run is asked for every RUN_ALIVE, as only one gone without a word is found that way
+const RUN_ALIVE = 15_000
+const runLooked = new Map<string, { sign: string; aliveAt: number }>()
 const lookRun = async ($: EngineInterface, run: PressRun) => {
   const now = runList.find(one => isSameRun(one, run)) ?? run
-  if (now.endedAt || !run.log || !run.pid || !run.startedAt) return true
+  const key = runKey(run)
+  if (now.endedAt || !run.log || !run.pid || !run.startedAt) return runLooked.delete(key), true
   during('look at a command run on a press')
-  const out = runOutputOf(await fileEnd($, run.log, 64_000))
+  const stat = await $.fs.stat(run.log).catch(() => undefined)
+  const sign = stat?.mtimeMs ? `${stat.size}:${stat.mtimeMs}` : ''
+  const was = runLooked.get(key)
+  const isMoved = !sign || sign !== was?.sign
+  const out = isMoved ? runOutputOf(await fileEnd($, run.log, 64_000)) : { exit: undefined, isStopped: false, lines: [] }
   // Nothing is drawn again for a look: the card shows only that it runs, and its time moves with the panel's calm drawings (calmLook).
   // A drawing at each look, every 5 s and through the person's use of the panel, rebuilt the whole panel in the app, which flashed
   // (17 Nov, Dima's screenshot); its end is drawn at once (saveRuns)
   const at = await $.clock.now()
   const stopped = (isStopped: boolean) => (isStopped || runStopped.has(runKey(run)) ? 'stopped' : 'exited')
-  if (out.exit !== undefined) return void (await endRun($, run, stopped(out.isStopped), out.exit, out.lines)), true
+  const ended = () => (runLooked.delete(key), true)
+  if (out.exit !== undefined) return void (await endRun($, run, stopped(out.isStopped), out.exit, out.lines)), ended()
   if (at - run.startedAt > run.limitMs) {
     await stopProcess($, run)
-    return void (await endRun($, run, 'limit', undefined, runOutputOf(await fileEnd($, run.log, 64_000)).lines)), true
+    return void (await endRun($, run, 'limit', undefined, runOutputOf(await fileEnd($, run.log, 64_000)).lines)), ended()
   }
+  const isAliveDue = !was || at < was.aliveAt || at - was.aliveAt >= RUN_ALIVE - RUN_LOOK / 2
+  runLooked.set(key, { sign, aliveAt: isAliveDue ? at : was.aliveAt })
+  if (!isAliveDue) return false
   // Gone without writing its end (stopped from outside, or the Mac restarted): said so, with what it printed
   const alive = await $.process.run([`${$.plugin.root}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
   if (alive && alive.exitCode !== 0) {
     const late = runOutputOf(await fileEnd($, run.log, 64_000))
-    return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), true
+    return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), ended()
   }
   return false
 }

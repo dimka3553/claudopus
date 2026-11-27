@@ -3,25 +3,40 @@
 // ---- Chats running without Claudopus, on this Mac or a Mac it reaches, and the Claude app's decision that starts new ones so ----
 
 // What was found: the chats by Mac ('' for this one), and when this Mac's app decided a Mac's own install didn't load there ('' when
-// it holds no such decision). Looked at every AFAR_EVERY by each chat, as the look is a ps and a grep of one log
+// it holds no such decision). Looked at every AFAR_EVERY (twice as long on battery) by one chat for every chat on this Mac, through
+// a small file beside the usage line's, as the look is a ps and a grep of the app's whole log; the log is read again only once it
+// has changed (the decision may be far above its end, so its end alone would lose it)
 let offChats: (Off & { host: string })[] = []
 let stuckAt = ''
 let afarAt = -Infinity
-const AFAR_EVERY = 30_000
+const AFAR_EVERY = 60_000
+type AfarKept = { at?: number; here?: { exitCode: number; stdout: string }; app?: string; log?: string }
 // Says whether what was found changed, so the panel is drawn again
 const lookAfar = async ($: EngineInterface, now: number) => {
-  if (now - afarAt < AFAR_EVERY) return false
+  const every = AFAR_EVERY * (isOnBattery ? 2 : 1)
+  if (now - afarAt < every) return false
   afarAt = now
   const failed = { exitCode: -1, stdout: '' }
-  const here = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-  const app = await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-  const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : []
+  const path = (await usagePathOf($)).replace(/usage\.json$/, 'afar.json')
+  let kept = parsedOr<AfarKept>(await $.fs.read(path).catch(() => ''), {})
+  if (!kept || typeof kept !== 'object') kept = {}
+  if (!(kept.here && typeof kept.at === 'number' && now >= kept.at && now - kept.at < every - 1000)) {
+    await $.fs.write(path, JSON.stringify({ ...kept, at: now })).catch(() => undefined)
+    const ran = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+    const stat = await $.fs.stat(`${(await $.env.get('HOME')) ?? ''}/Library/Logs/Claude/main.log`).catch(() => undefined)
+    const log = stat?.mtimeMs ? `${stat.size}:${stat.mtimeMs}` : ''
+    const app = log && log === kept.log && typeof kept.app === 'string' ? kept.app : (await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)).stdout
+    kept = { at: now, here: { exitCode: ran.exitCode, stdout: ran.stdout }, app, log }
+    await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
+  }
+  const here = kept.here ?? failed
+  const found = here.exitCode === 0 ? offOf(String(here.stdout)).map(one => ({ ...one, host: '' })) : []
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
     if (f.text && now - (f.fetchedAt ?? 0) <= STALE) found.push(...offOf(f.text).map(one => ({ ...one, host: mac })))
   }
   if (found.some(one => one.host)) await readAppIds($, now).catch(() => false)
-  const stuck = stuckOf(app.stdout)
+  const stuck = stuckOf(String(kept.app ?? ''))
   const isChanged = JSON.stringify([found, stuck]) !== JSON.stringify([offChats, stuckAt])
   offChats = found
   stuckAt = stuck

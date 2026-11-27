@@ -123,9 +123,11 @@ const draftDrawn = (key: string) => {
 // What a pane shows, as far as it moves while the person types: work that starts, finishes, asks, waits on an admin command, is cut
 // or stuck, or leaves after its pause, here or in another chat; workflows; boxes, gates and prompts that come or go; a Details
 // tab's own to-dos
+// (whether a card has a call running, not which: named by when it began, every call of every task was a new shape, and the
+// whole pane was drawn afresh for it)
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -136,10 +138,12 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
 const calmCard = (one: Todo) => {
-  const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
+  // (nor what only counts its calls, which no card shows: with those in, each call of each task drew the whole panel afresh;
+  // the kind of call a card names as what its task is doing now is in what the pane shows, paneContent)
+  const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
   return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, (await read($, reports)).length, (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
 const holdTimes = ($: EngineInterface) => {
   if (!isTyping) recordEvent($, 'hold')
   const made = (typing += 1)

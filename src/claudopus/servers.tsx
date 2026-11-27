@@ -3,8 +3,8 @@
 // ---- The servers on this Mac: what listens on which port, from which folder, started by which chat ----
 
 const rows = (text: string) => text.split('\n').filter(Boolean)
-// The engine process of a chat, as `ps` names it; the app itself is `Claude`
-const isEngine = (path: string) => path.endsWith('/MacOS/claude')
+// The engine process of a chat, as `ps` shows its command (the program's path, then what it was given); the app itself is `Claude`
+const isEngine = (args: string) => /^(?:(?! -).)*\/MacOS\/claude(?: |$)/.test(args)
 // "node /long/path/.bin/next dev" reads as "node next dev"
 const short = (args: string) =>
   args
@@ -34,14 +34,9 @@ const scanServers = async ($: EngineInterface) => {
     if (row.startsWith('p')) pid = Number(row.slice(1))
     else if (row.startsWith('n')) folders.set(pid, row.slice(1))
   }
-  const commands = new Map<number, string>()
-  for (const row of rows(await run(['ps', '-o', 'pid=,args=', '-p', pids]))) {
-    const m = /^\s*(\d+)\s+(.*)$/.exec(row)
-    if (m) commands.set(Number(m[1]), m[2] ?? '')
-  }
-  // Every process with its parent, to find who started a server
+  // Every process with its parent and its command, to find who started a server and what it runs: one list for both
   const table = new Map<number, { parent: number; path: string }>()
-  for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,comm=']))) {
+  for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,args=']))) {
     const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row)
     if (m) table.set(Number(m[1]), { parent: Number(m[2]), path: m[3] ?? '' })
   }
@@ -80,7 +75,7 @@ const scanServers = async ($: EngineInterface) => {
     // The chat is the engine process above it, or the one whose scratch folder it runs in
     const chat = chats.get(String(above(id, isEngine))) ?? chats.get(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/.exec(folder)?.[0] ?? '') ?? seen[`${id}:${port}`]
     if (chat) kept[`${id}:${port}`] = chat
-    const command = short(commands.get(id) ?? table.get(id)?.path ?? '')
+    const command = short(table.get(id)?.path ?? '')
     const hasPages = !NO_PAGES.test(command)
     const place = isScratch ? (folder.split('/').pop() ?? '') : folder.replace(`${home}/Documents/GitHub/`, '').replace(`${home}/`, '~/')
     found.push({
@@ -95,10 +90,15 @@ const scanServers = async ($: EngineInterface) => {
   await update($, servers, () => found)
 }
 
-// Looks at the servers again while their panel is open; each pass redraws it
+// Looks at the servers again while their panel is open, every SERVERS_EVERY (and at once as it is shown again); each look redraws it
+const SERVERS_EVERY = 10_000
+let serversAt = -Infinity
 const refresh = async ($: EngineInterface) => {
   const open = await $.ui.panes().catch(() => [])
-  if (!open.some(one => one.id === PANE && one.isShown)) return
+  if (!open.some(one => one.id === PANE && one.isShown)) return void (serversAt = -Infinity)
+  const now = await $.clock.now()
+  if (now - serversAt < SERVERS_EVERY - TICK / 2) return
+  serversAt = now
   await scanServers($)
   // Its own value, which only the Servers tab reads: the panel is not drawn again with it
   await update($, servers, list => [...list])
