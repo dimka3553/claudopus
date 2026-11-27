@@ -12,6 +12,7 @@ export const register = on => {
     panelHooks(on);
     tabHooks(on);
     memoryHooks(on);
+    colourHooks(on);
     serversTabHooks(on);
     workflowHooks(on);
 };

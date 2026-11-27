@@ -11,7 +11,7 @@ const USAGE_GAP = 120000;
 export const MEMORY_WARN = 0.9;
 // One look on a Mac: the engine's own process, every process with its parent, memory and processor time, the memory as Activity
 // Monitor counts it, the disks' and the network's running totals, and now and then top's own memory of each process
-export const usageMac = (isTop) => `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@LOAD@@; sysctl -n vm.loadavg; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"(SystemLoad|SystemPowerIn|Voltage|InstantAmperage)" ?= ?[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`;
+export const usageMac = (isTop) => `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@LOAD@@; sysctl -n vm.loadavg; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"(SystemLoad|SystemPowerIn|Voltage|InstantAmperage|Watts)" ?= ?[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`;
 // Each process's disk bytes read and written and the energy its processors used (nanojoules), as the Mac keeps them for Activity
 // Monitor: libproc's proc_pid_rusage, through the system's Python, and only where the developer tools are there, as without them
 // /usr/bin/python3 asks to install them. A process of another user gives nothing. Then the whole processors' and the graphics
@@ -21,7 +21,9 @@ const USAGE_RU = `xcode-select -p >/dev/null 2>&1 && /usr/bin/python3 -I -c 'imp
 // One look on Linux, from /proc and /sys, and nvidia-smi where the machine has one (bounded, as a GPU with no driver kept loaded is slow
 // to answer). A graphics card asleep (its display device, not its sound) is left asleep: then there is no GPU figure. Files are read by
 // the shell itself, so the look starts no process per device
-export const USAGE_LINUX = "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@LOAD@@; cat /proc/loadavg; getconf _NPROCESSORS_ONLN; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do c=; v=; p=; { read c < $d/class; } 2>/dev/null; case \"$c\" in 0x03*) { read v < $d/vendor; read p < $d/power/runtime_status; } 2>/dev/null; case \"$v\" in 0x10de|0x1002) [ \"$p\" = suspended ] && asleep=1;; esac;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; true";
+export const USAGE_LINUX = "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@LOAD@@; cat /proc/loadavg; getconf _NPROCESSORS_ONLN; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do c=; v=; p=; { read c < $d/class; } 2>/dev/null; case \"$c\" in 0x03*) { read v < $d/vendor; read p < $d/power/runtime_status; } 2>/dev/null; case \"$v\" in 0x10de|0x1002) [ \"$p\" = suspended ] && asleep=1;; esac;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status /sys/class/power_supply/*/power_now /sys/class/power_supply/*/current_now /sys/class/power_supply/*/voltage_now 2>/dev/null; true";
+// How far back the charts go
+export const HISTORY_SPAN = 10 * 60000;
 const clamp = (n) => Math.min(1, Math.max(0, n));
 const sectionsOf = (text) => {
     const out = {};
@@ -235,31 +237,56 @@ export const rawOfMac = (text, at, footprint) => {
     const gpuNs = gpuTimesOf(s.GPUP ?? '');
     const netBy = netByOf(s.NETP ?? '');
     const ru = rusageOf(s.RU ?? '');
-    const load = loadOf(s.POWER ?? '');
+    const power = powerOf(s.POWER ?? '');
     const own = {
         ...(Object.keys(gpuNs).length ? { gpuNs } : {}),
         ...(Object.keys(netBy.netIn).length ? { netInBy: netBy.netIn, netOutBy: netBy.netOut } : {}),
         ...(Object.keys(ru.disk).length ? { diskBy: ru.disk, energyBy: ru.energy } : {}),
         ...(ru.cpuNj !== undefined ? { cpuNj: ru.cpuNj, gpuNj: ru.gpuNj } : {}),
         energyAll: true,
-        ...(load !== undefined ? { watts: load / 1000 } : {}),
+        ...power,
     };
     return { ...own, names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used } : {}), ...netSplitOf(s.NET ?? '', false), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed, memTotal, ncpu: ncpu || 1, ...loadIn(s.LOAD, ncpu || 1), disk, net, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) };
 };
-// The whole Mac's draw in milliwatts, from the battery's gauge. It writes signed numbers as unsigned 64-bit ones, so a value below
-// zero reads as nearly 2^64: each is read back as signed. On the charger its system load is the draw; on battery that figure is
-// off (a Mac drawing 69 W told 2 W, or below zero), so the draw is what leaves the battery, its voltage times its current. A draw
-// no Mac makes is no draw at all
-const loadOf = (text) => {
-    // The load and power in are the gauge's telemetry ("Key"=n); the battery's own voltage and current its top-level lines ("Key" = n),
-    // as another part of the gauge tells a voltage of its own
+// The power, from the battery's gauge, in watts: what goes into the battery (below zero, what comes out of it), what the charger
+// gives and what it can give, and what the whole Mac draws. The gauge writes signed numbers as unsigned 64-bit ones, so a value below
+// zero reads as nearly 2^64: each is read back as signed. The battery's own voltage times its current is what goes in or out, as
+// its charge grows by just that (25 Nov: 4.9 A at 11.7 V while charging, where the gauge's system load of 82 W counted the charging
+// too, and its battery power said 6 W). So the Mac draws what the charger gives less what goes into the battery, and on battery
+// what comes out of it; the system load only where the battery says neither. A draw no Mac makes is no draw at all
+const powerOf = (text) => {
+    // The load, power in and the charger's watts are the gauge's telemetry and the charger's details ("Key"=n); the battery's own
+    // voltage and current its top-level lines ("Key" = n), as another part of the gauge tells a voltage of its own
     const of = (key, sep = '=') => {
         const digits = new RegExp(`"${key}"${sep}(\\d+)`).exec(text)?.[1];
         return digits ? Number(BigInt.asIntN(64, BigInt(digits))) : undefined;
     };
-    const [load, powerIn, mv, ma] = [of('SystemLoad'), of('SystemPowerIn'), of('Voltage', ' = '), of('InstantAmperage', ' = ')];
-    const mw = powerIn ? load : mv !== undefined && ma !== undefined ? (mv * -ma) / 1000 : powerIn === undefined ? load : undefined;
-    return mw !== undefined && mw > 0 && mw <= 2000000 ? mw : undefined;
+    const [load, powerIn, mv, ma, rated] = [of('SystemLoad'), of('SystemPowerIn'), of('Voltage', ' = '), of('InstantAmperage', ' = '), of('Watts')];
+    const battIn = mv !== undefined && ma !== undefined ? (mv * ma) / 1e6 : undefined;
+    const inW = powerIn !== undefined && powerIn > 0 && powerIn <= 2000000 ? powerIn / 1000 : undefined;
+    const mw = battIn !== undefined ? ((inW ?? 0) - battIn) * 1000 : powerIn === undefined ? load : undefined;
+    const isFine = (w) => w !== undefined && Math.abs(w) <= 2000;
+    return {
+        ...(mw !== undefined && mw > 0 && mw <= 2000000 ? { watts: mw / 1000 } : {}),
+        ...(isFine(battIn) ? { battIn } : {}),
+        ...(inW !== undefined ? { powerIn: inW, ...(rated && rated > 0 && rated <= 2000 ? { adapter: rated } : {}) } : {}),
+    };
+};
+// On Linux, what goes into the batteries (below zero, what comes out): power_now in microwatts, else current_now times
+// voltage_now, each as a size, the way given by whether it charges or discharges
+const battInOfLinux = (text) => {
+    const by = new Map();
+    for (const m of text.matchAll(/^\/sys\/class\/power_supply\/([^/]+)\/(type|scope|status|power_now|current_now|voltage_now):(.*)$/gm))
+        by.set(m[1] ?? '', { ...(by.get(m[1] ?? '') ?? {}), [m[2] ?? '']: (m[3] ?? '').trim() });
+    let sum;
+    for (const b of by.values()) {
+        if (b.type !== 'Battery' || b.scope === 'Device' || (b.status !== 'Charging' && b.status !== 'Discharging'))
+            continue;
+        const w = b.power_now ? Math.abs(Number(b.power_now)) / 1e6 : b.current_now && b.voltage_now ? (Math.abs(Number(b.current_now)) * Math.abs(Number(b.voltage_now))) / 1e12 : NaN;
+        if (Number.isFinite(w) && w <= 2000)
+            sum = (sum ?? 0) + (b.status === 'Charging' ? w : -w);
+    }
+    return sum;
 };
 // The load average over the last minute, what the processors have to run or wait to run, and the cores it is shared by: the
 // Mac's from sysctl (the cores are the look's own), Linux's from /proc/loadavg with the cores after it
@@ -311,8 +338,9 @@ export const rawOfLinux = (text, at) => {
     const gpu = gpuOf(s.GPU ?? '', true);
     const gpuMem = gpuMemOf(s.GPU ?? '', true);
     const battery = batteryOfLinux(s.BATT ?? '');
+    const battIn = battery ? battInOfLinux(s.BATT ?? '') : undefined;
     const memTop = topOf(procs.map(p => [p.name, p.mem]));
-    return { names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used, ...(gpuMem.total ? { gpuMemTotal: gpuMem.total } : {}) } : {}), ...netSplitOf(s.NET ?? '', true), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed: Math.max(0, memTotal - kb('MemAvailable')), memTotal, ncpu: 1, ...loadIn(s.LOAD), disk, net, busy, all, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) };
+    return { names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used, ...(gpuMem.total ? { gpuMemTotal: gpuMem.total } : {}) } : {}), ...netSplitOf(s.NET ?? '', true), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed: Math.max(0, memTotal - kb('MemAvailable')), memTotal, ncpu: 1, ...loadIn(s.LOAD), disk, net, busy, all, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}), ...(battIn !== undefined ? { battIn } : {}) };
 };
 // Bytes moved between two looks by the disks or ports that were in both
 const movedOf = (prev, cur) => Object.entries(cur).reduce((sum, [name, n]) => sum + (typeof prev[name] === 'number' ? Math.max(0, n - (prev[name] ?? 0)) : 0), 0);
@@ -332,6 +360,9 @@ export const figuresOf = (prev, cur) => {
         ...(cur.gpuMem !== undefined ? { gpuMem: cur.gpuMem } : {}),
         ...(cur.gpuMemTotal !== undefined ? { gpuMemTotal: cur.gpuMemTotal } : {}),
         ...(cur.battery ? { battery: cur.battery } : {}),
+        ...(cur.battIn !== undefined ? { battIn: cur.battIn } : {}),
+        ...(cur.powerIn !== undefined ? { powerIn: cur.powerIn } : {}),
+        ...(cur.adapter !== undefined ? { adapter: cur.adapter } : {}),
     };
     const span = prev ? (cur.at - prev.at) / 1000 : 0;
     if (!prev || span < 1 || span * 1000 > USAGE_GAP)
@@ -424,13 +455,20 @@ export const nextKept = (was, text, at, isLinux, isTop = false) => {
         return undefined;
     const topAt = isTop ? at : was?.topAt;
     const { names: _names, ...kept } = raw;
-    return { at, raw: kept, figures: figuresOf(was?.raw, raw), ...(footprint ? { footprint } : {}), ...(topAt !== undefined ? { topAt } : {}) };
+    const figures = figuresOf(was?.raw, raw);
+    // The figures of the last minutes, this look's added: the charts need no look of their own
+    const history = [...(was?.history ?? []).filter(p => p.at < at && at - p.at <= HISTORY_SPAN), pointOf(figures, at)];
+    return { at, raw: kept, figures, ...(footprint ? { footprint } : {}), ...(topAt !== undefined ? { topAt } : {}), history };
 };
 // The shared file's state, when it reads as one
 export const keptOf = (text) => {
     try {
         const kept = JSON.parse(text);
-        return typeof kept?.at === 'number' && kept.raw && typeof kept.raw.disk === 'object' && kept.figures ? kept : undefined;
+        if (!(typeof kept?.at === 'number' && kept.raw && typeof kept.raw.disk === 'object' && kept.figures))
+            return undefined;
+        if (kept.history !== undefined && !(Array.isArray(kept.history) && kept.history.every(p => typeof p?.at === 'number')))
+            delete kept.history;
+        return kept;
     }
     catch {
         return undefined;
@@ -522,4 +560,58 @@ export const batterySvg = (b) => {
         fill ? `<rect x="${x + 2.5}" y="6" width="${fill}" height="4" rx="0.8" fill="${color}"/>` : '',
     ];
     return { source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${H}" viewBox="0 0 ${width} ${H}">${parts.join('')}</svg>`, width, height: H };
+};
+// ---- The charts in the cards ----
+const round = (n, places) => Math.round(n * 10 ** places) / 10 ** places;
+// One look's point: only what the look gave, rounded so the shared file stays small (ten minutes of looks is a few kilobytes)
+export const pointOf = (f, at) => {
+    const part = (all, claude) => [round(clamp(all), 3), round(clamp(Math.min(claude ?? 0, all)), 3)];
+    const rate = (all, claude) => [Math.round(all), Math.round(Math.min(claude ?? 0, all))];
+    const claudeW = f.wattsClaude !== undefined ? f.wattsClaude + (f.wattsGpuClaude ?? 0) : undefined;
+    return {
+        at,
+        ...(f.memTotal > 0 ? { mem: part(f.memUsed / f.memTotal, f.memClaude / f.memTotal) } : {}),
+        ...(f.cpu !== undefined ? { cpu: part(f.cpu, f.cpuClaude) } : {}),
+        ...(f.gpu !== undefined ? { gpu: part(f.gpu, f.gpuClaude) } : {}),
+        ...(f.watts !== undefined ? { watts: [round(f.watts, 1), round(Math.min(claudeW ?? 0, f.watts), 1)] } : {}),
+        ...(f.disk !== undefined ? { disk: rate(f.disk, f.diskClaude) } : {}),
+        ...(f.net !== undefined ? { net: rate(f.net, f.netInClaude !== undefined ? (f.netInClaude ?? 0) + (f.netOutClaude ?? 0) : undefined) } : {}),
+        ...(f.battery ? { batt: f.battery.pct } : {}),
+    };
+};
+// A chart's size: as wide as a card's rows, two lines high
+export const CHART_W = 272;
+export const CHART_H = 30;
+// Looks further apart than this leave a gap in the chart: no work ran, so nothing was looked at
+const CHART_GAP = 30000;
+// The last ten minutes of one figure, the newest at the right: the whole in grey, Claude's part in purple over it, a gap where no
+// look was had. top is the chart's full height in the figure's own units. Nothing for fewer than two looks
+export const chartSvg = (points, now, top) => {
+    const shown = points.filter(([at]) => at <= now && now - at <= HISTORY_SPAN).sort((a, b) => a[0] - b[0]);
+    if (shown.length < 2 || !(top > 0))
+        return undefined;
+    const x = (at) => round(CHART_W - ((now - at) / HISTORY_SPAN) * CHART_W, 1);
+    const y = (n) => round(CHART_H - 1 - Math.min(1, Math.max(0, n / top)) * (CHART_H - 2), 1);
+    const runs = [];
+    for (const p of shown) {
+        const run = runs[runs.length - 1];
+        const last = run?.[run.length - 1];
+        if (run && last && p[0] - last[0] <= CHART_GAP)
+            run.push(p);
+        else
+            runs.push([p]);
+    }
+    // A run of one look is a sliver two pixels wide, so a lone look still shows
+    const area = (run, at) => {
+        const xs = run.length === 1 ? [x(run[0][0]) - 1, x(run[0][0]) + 1] : run.map(p => x(p[0]));
+        const ys = run.length === 1 ? [y(at(run[0])), y(at(run[0]))] : run.map(p => y(at(p)));
+        return `M${xs[0]} ${CHART_H}${xs.map((one, i) => `L${one} ${ys[i]}`).join('')}L${xs[xs.length - 1]} ${CHART_H}Z`;
+    };
+    const hasClaude = shown.some(p => (p[2] ?? 0) > 0);
+    const parts = [
+        `<rect x="0" y="${CHART_H - 1}" width="${CHART_W}" height="1" fill="${TRACK}"/>`,
+        ...runs.map(run => `<path d="${area(run, p => p[1])}" fill="${USAGE_GREY}" fill-opacity="0.45"/>`),
+        ...(hasClaude ? runs.map(run => `<path d="${area(run, p => p[2] ?? 0)}" fill="${USAGE_PURPLE}"/>`) : []),
+    ];
+    return { source: `<svg xmlns="http://www.w3.org/2000/svg" width="${CHART_W}" height="${CHART_H}" viewBox="0 0 ${CHART_W} ${CHART_H}">${parts.join('')}</svg>`, width: CHART_W, height: CHART_H };
 };

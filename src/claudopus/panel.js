@@ -51,9 +51,17 @@ const withoutScroll = (key) => key.replace(/\|[01]$/, '');
 // The mod's tabs drawn on the desktop, whose buttons a click holds the drawing for (holdForPress)
 const heldTabs = new Set();
 let usedUntil = 0;
-// How many times less a Details tab too big for the app may be drawn with (drawFor), and how much less each was last drawn with
+// How many times less a Details tab or the list too big for the app may be drawn with (drawFor), and how much less each was last
+// drawn with
 const SQUEEZE_MOST = 3;
 const paneSqueezed = new Map();
+// The list drawn with less in it cuts its lines to what a panel beside the chat holds: a pane as wide as the window put a few
+// thousand more characters into the same cards, and a list near the app's limit then showed only that it couldn't show this tab
+// (21-22 Nov, 132 times, a chat with 10 open cards and 24 helpers)
+const LESS_COLUMNS = 80;
+// The list is drawn often: drawn with less in it, it tries one step more only on a new width or once a minute, not at each drawing
+const LESS_RETRY = 60000;
+const lessTried = new Map;
 // A drawing the app would throw away is never given: the tab says so in plain words instead, with the way back to the list, so it
 // never stays on "Nothing to show yet" (drawingFits). Said in the log once a minute at most for each tab
 const tooBigLogged = new Map();
@@ -62,8 +70,9 @@ const givenIfDrawn = async ($, e, drawing) => {
         return drawing;
     const id = e.requestId ?? '';
     const now = await $.clock.now();
+    // (with each count beside its limit and the pane's width, so the log says which limit it passed)
     if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60000)
-        (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws`));
+        (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws (${sizeSaid(drawing)}, ${e.props?.bodyColumns ?? 'unknown'} columns wide)`));
     const { Box, Button, Text } = uiOf($, e);
     return (<Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
       <Text bold>Claudopus couldn't show this tab</Text>
@@ -83,7 +92,7 @@ const panelHooks = (on) => {
         const id = e.requestId ?? '';
         // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
         await noteTabAsked($, id);
-        const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start));
+        const isTab = [REPORTS_PANE, PROGRESS_PANE, STATS_PANE, BOARD_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start));
         // A tab of the mod's on the desktop, Settings, About, Results and the rest, but for a work's or a workflow's Details, which are
         // drawn with the panel below: every drawing of the panel draws it again too, so under load its buttons went as the panel's did
         // (16 Nov: Settings' Reset pressed, never reached the mod). Held the same way: given again through a click, and while its
@@ -138,7 +147,7 @@ const panelHooks = (on) => {
         if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE))
             return next(e);
         // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
-        if (heldSends.length || heldPrompts.length)
+        if (heldSends.length)
             await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`));
         if (paneId === LIST)
             ((listDrawing += 1), (listSurface = e.surface));
@@ -190,7 +199,9 @@ const panelHooks = (on) => {
             const doneDrawn = [];
             try {
                 const shape = await paneShape($, paneId);
-                const content = await paneContent($);
+                // (a Details tab's live part moves with what its task and helpers do now, which no value holds)
+                const liveIds = paneId.startsWith(WORK_PANE) && paneWork.get(paneId) ? [paneWork.get(paneId) ?? '', ...(await read($, todos)).filter(kid => kid.parentId === paneWork.get(paneId)).map(kid => kid.id)] : [];
+                const content = `${await paneContent($)}${liveIds.length ? liveSign(liveIds, heldAt) : ''}`;
                 const held = heldDrawings.get(heldKey);
                 // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
                 if (held && held.drawing === recent && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM)))))
@@ -252,7 +263,7 @@ const panelHooks = (on) => {
                     for (const one of cardsOf(otherChats))
                         if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text)
                             actingOn.delete(`${one.id}:${one.ask.at}`);
-                    const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one));
+                    const elsewhere = cardsOf(otherChats).map(one => (asksOf(one).some(ask => answeredHere.has(`${one.id}:${ask.at}`)) ? withAsks(one, asksOf(one).filter(ask => !answeredHere.has(`${one.id}:${ask.at}`))) : one));
                     // Their helpers, which only a Details tab lists
                     const helpersThere = helpersOf(otherChats);
                     const chat = await read($, me);
@@ -291,7 +302,7 @@ const panelHooks = (on) => {
                     // A card's top row is its facts alone: model, how full, to-dos and time, never its stage, which its colour and the line under
                     // it say (18 Nov, the person: "This top row should never say 'waiting for its command'. It should only have context, model,
                     // how many to-dos, and time"). Details, whose header is the whole card, still begins with how it ended
-                    const glance = (one, count = '', isWhole = false) => [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${stage(one) === 'failed' && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ');
+                    const glance = (one, count = '', isWhole = false) => [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${(stage(one) === 'failed' || stage(one) === 'interrupted') && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ');
                     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
                     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
                     const { picking = '' } = await read($, view);
@@ -341,7 +352,9 @@ const panelHooks = (on) => {
                     const table = uiOf($, e);
                     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
                     // narrower than a cell, the terminal's are one each
-                    const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)));
+                    // (the list drawn with less in it, as much as a panel beside the chat holds, however wide the pane: LESS_COLUMNS)
+                    const columns = paneId === LIST && squeeze >= 1 ? Math.min(e.props.bodyColumns, LESS_COLUMNS) : e.props.bodyColumns;
+                    const room = Math.max(40, Math.floor((columns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)));
                     // How many letters one row of a small card holds, and a bold one: the card's two-row room halved
                     const perRow = Math.max(24, Math.floor(room / 2));
                     // Three moving dots: beside the line a small card gives, and beside the to-do being done on the big one
@@ -414,7 +427,7 @@ const panelHooks = (on) => {
                         const blocks = cardNeeds(one, isWhole).map(need => {
                             const isOwnField = Boolean(need.field && need.card);
                             const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false;
-                            const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus, isMoving: isListed && !isWhole });
+                            const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(need.card, need.id, isWhole) : null, autoFocus, isMoving: isListed && !isWhole });
                             // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
                             return isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box>;
                         });
@@ -422,7 +435,7 @@ const panelHooks = (on) => {
                     };
                     // What the person last pressed or answered on a small card, in one grey line cut to one row, with the press that takes a
                     // button's answer back. The line opens the card's Details, where the question and the answer are whole
-                    const answeredRow = (one) => (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? (<Box key={`pressed-${one.id}`} flexDirection="row" gap={2} height={1} overflow="hidden">
+                    const answeredRow = (one) => isAnswerShown(one) && sentLine(one, at) ? (<Box key={`pressed-${one.id}`} flexDirection="row" gap={2} height={1} overflow="hidden">
           <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
             <Button key={`answered-${one.id}-${presses}`} plain dimColor hover={{ scope: `answered-${one.id}`, underline: true }} onPress={() => openWork($, one.id)}>
               <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
@@ -466,9 +479,10 @@ const panelHooks = (on) => {
                             return null;
                         return (<Box key={key} flexDirection="column" paddingLeft={left}>
           <Text dimColor>{asked.length === 1 ? 'It asks' : `It asks ${asked.length} things`}</Text>
+          {/* (in the list drawn with less in it, one row each, cut: whole in Details) */}
           {asked.map((text, n) => (<Box key={`${key}-${n}`} flexDirection="row" gap={1} alignItems="flex-start">
               {asked.length > 1 ? <Box flexShrink={0}><Text dimColor>{`${n + 1}.`}</Text></Box> : null}
-              <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{text}</Text></Box>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>{paneId === LIST && squeeze >= 2 ? <Text wrap="truncate-end">{cut(text, perRow)}</Text> : <Text wrap="wrap">{text}</Text>}</Box>
             </Box>))}
         </Box>);
                     };
@@ -500,6 +514,8 @@ const panelHooks = (on) => {
               <Box flexDirection="row" gap={1} height={1} overflow="hidden">
                 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
                   <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
+                    {/* With task colours on, the colour of the task's box in the chat leads its name (colours.tsx) */}
+                    {taskColour(one.id) ? <Text color={taskColour(one.id)}>● </Text> : null}
                     <Text bold wrap="truncate-end">{titleOf(one)}</Text>
                   </Button>
                 </Box>
@@ -512,6 +528,19 @@ const panelHooks = (on) => {
                 {canChange(one) && !looksDelivered(one) && 'Input' in table && repliesInBar(e.surface) ? (<Box flexShrink={0}>
                     <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)}/>
                   </Box>) : null}
+                {/* Cut off by the app's close: a press carries it on, as a fresh task told all the ledger holds of it */}
+                {!one.chat && !one.parentId && stage(one) === 'interrupted' ? (<Box flexShrink={0}>
+                    <Button key={`carry-small-${one.id}-${presses}`} label="Carry on" plain hover={{ scope: `carry-${one.id}`, underline: true }} onPress={() => ((presses += 1), void carryOn($, one.id))}/>
+                  </Box>) : null}
+                {/* Another chat's task cut off by the app's close: a press opens that chat, where its card has Carry on */}
+                {one.chat && stage(one) === 'interrupted'
+                                ? (() => {
+                                    const there = otherChats.find(c => c.chat === one.chat?.id && c.host === one.chat?.host);
+                                    return there && pressOf(there) ? (<Box flexShrink={0}>
+                          <Button key={`carry-there-${one.id}-${presses}`} label="Open chat" plain hover={{ scope: `carry-there-${one.id}`, underline: true }} onPress={() => void ((presses += 1), openChat($, there))}/>
+                        </Box>) : null;
+                                })()
+                                : null}
                 {/* Failed, or stopped by the person: only their press starts it again */}
                 {!one.chat && (stage(one) === 'failed' || (stage(one) === 'stopped' && one.byYou)) ? (<Box flexShrink={0}>
                     <Button key={`again-small-${one.id}-${presses}`} label="Start again" plain dimColor hover={{ scope: `again-${one.id}`, underline: true }} onPress={() => ((presses += 1), void startAgain($, one.id))}/>
@@ -524,8 +553,9 @@ const panelHooks = (on) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} to-dos done` : '')}
             </Box>
-            {/* What it made so far, right under its title: side by side, each a press that opens it */}
-            {madeNow($, one)?.made.length || madeNow($, one)?.code ? (<Box key={`made-lead-${one.id}`} paddingLeft={lead}>
+            {/* What it made so far, right under its title: side by side, each a press that opens it (in Details alone, in the list
+                                drawn with the least in it) */}
+            {(madeNow($, one)?.made.length || madeNow($, one)?.code) && !(paneId === LIST && squeeze >= 3) ? (<Box key={`made-lead-${one.id}`} paddingLeft={lead}>
                 {madeChips($, table, one, `made-${one.id}`, () => openWork($, one.id))}
               </Box>) : null}
             {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
@@ -536,7 +566,7 @@ const panelHooks = (on) => {
                 {needBlocks(one)}
               </Box>) : null}
             {/* A command the person allowed, while it runs or its output is kept for the task's next step */}
-            {runsShownOn(one, at).length && !one.chat ? (<Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+            {(runsShownOn(one, at).length || isRetrying(one)) && !one.chat ? (<Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                 {runBlock($, table, one, `runs-${one.id}`, at)}
               </Box>) : null}
             {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
@@ -549,11 +579,11 @@ const panelHooks = (on) => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
                                     it last said */}
-                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (<Box flexDirection="row" minWidth={0}>
+                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' || stage(one) === 'interrupted' ? (<Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
-                    <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
+                    <Box flexShrink={stage(one) === 'failed' || (stage(one) === 'interrupted' && !noteOf(one)) ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                        {stageLine(stage(one), one.why, Boolean(noteOf(one)))}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
@@ -909,12 +939,21 @@ const panelHooks = (on) => {
                         const runs = endedRunsOf(one, one.chat ? helpersThere : all);
                         if (!under.length && !own.length && !runs.length)
                             return [];
+                        const closing = { depth: 1, rails: [], isLast: true, hasKids: false };
+                        // In the list drawn with less in it, all of it is the one closing row: what works under the card and what ended, counted,
+                        // and a press opens its Details, where each is a row
+                        if (paneId === LIST && squeeze >= 2) {
+                            const helpers = under.filter(kid => kid.status === 'working').length;
+                            const commands = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((m, job) => m + (job.count ?? 1), 0), 0);
+                            const ended = under.length - helpers;
+                            const said = [workingSummary(helpers, commands), ended || runs.length ? endedSummary(ended, runs, under.filter(kid => kid.status === 'failed').length) : ''].filter(Boolean).join(' · ');
+                            return [twigRowOf(closing, `rest-${one.id}`, said, true, '', () => openWork($, one.id))];
+                        }
                         const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid).length > 0))];
                         const twigs = twigsOf(branches, true);
                         const rest = under.length - twigs.filter(t => !t.job).length;
                         if (!rest && !runs.length)
                             return twigsOf(branches).map(rowOf);
-                        const closing = { depth: 1, rails: [], isLast: true, hasKids: false };
                         // A command that failed is counted on the closing row with the others that ended, never a row of its own (one stood among
                         // what still ran long after it failed) and never by name: which one, how and why is in Details and its log (19 Nov)
                         // (and the helpers that failed and have left the tree, counted too)
@@ -1236,6 +1275,8 @@ const panelHooks = (on) => {
                         const side = [jobs ? `${jobs} ${jobs === 1 ? 'command' : 'commands'} running` : '', failed ? `${failed} failed` : '', under.length ? helpers : ''].filter(Boolean).join(' · ');
                         return part('part-helpers', !jobs && !runs.length ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands', side, <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.ended ? endedGroupRow(t) : t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>);
                     };
+                    // A reply's Copy: the whole of it on the clipboard, the button saying so for two seconds
+                    const copyButton = (key, text) => <Button key={`copy-${key}-${presses}`} label={copiedKey === key ? '✓ Copied' : 'Copy'} plain dimColor onPress={press => copyAsk($, key, text, press.surface)}/>;
                     // The work's own chat, drawn as the app draws a chat, the oldest first: what it was told in a filled block, what it wrote as
                     // text, and each run of tool steps folded into one quiet row that opens on a press. A long message to it is folded too
                     const talk = (one, lines, shots) => {
@@ -1256,7 +1297,9 @@ const panelHooks = (on) => {
                         };
                         // Each line knows how many tool steps came before it: that names a run of steps whatever is drawn above it
                         let uses = 0;
-                        const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze);
+                        // A call it runs now stands with what it does now, under the conversation, and leaves the run of steps it ended in
+                        const running = liveCalls.get(one.id);
+                        const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze).filter(line => !(line.id && running?.has(line.id)));
                         const blocks = shown.reduce((all, line) => {
                             const last = all.at(-1);
                             return line.kind === 'step' && last?.[0]?.kind === 'step' ? [...all.slice(0, -1), [...last, line]] : [...all, [line]];
@@ -1280,8 +1323,13 @@ const panelHooks = (on) => {
                   {picturesOfRun(block, at)}
                 </Box>);
                                 }
+                                // Each reply has a Copy under it that puts the whole of it on the clipboard (24 Nov, the person: replies are passed on
+                                // elsewhere, and were retyped)
                                 if (first?.kind === 'said')
-                                    return (<Markdown key={`talk-${i}`} text={first.text}/>);
+                                    return (<Box key={`talk-${i}`} flexDirection="column" alignItems="flex-start" width="100%">
+                  <Markdown text={first.text}/>
+                  {copyButton(`said-${one.id}-${at}-${i}`, first.full ?? first.text)}
+                </Box>);
                                 // A move to another model is one quiet line where it happened, with its time
                                 if (first?.kind === 'model')
                                     return (<Box key={`talk-${i}`}>
@@ -1302,7 +1350,59 @@ const panelHooks = (on) => {
               </Box>);
                             })}
           {!lines && one.answer ? (<Markdown text={one.answer}/>) : null}
+          {liveNow(one, lines ?? [])}
         </Box>);
+                    };
+                    // What it does right now, last, as the app's own chat shows it while it happens: thinking, its words as they are written, each
+                    // call as it is written and while it runs with how long, then what each of its helpers at work is doing, a press opening it
+                    const liveNow = (one, lines) => {
+                        if (one.status !== 'working' || one.chat)
+                            return null;
+                        const ids = new Set(lines.flatMap(line => (line.id ? [line.id] : [])));
+                        const now = liveLinesOf(one.id, ids, at);
+                        const kids = all.filter(kid => kid.parentId === one.id && kid.status === 'working' && !kid.chat);
+                        if (!now.length && !kids.length)
+                            return null;
+                        const since = (from) => (from !== undefined && at - from >= 3000 ? ` · ${took(at - from)}` : '');
+                        // A helper's own line: what it does now as its conversation would show it, the end of its words while it writes them
+                        const kidNow = (kid) => {
+                            const last = liveLinesOf(kid.id, new Set(), at).at(-1);
+                            if (!last)
+                                return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking…';
+                            return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : last.kind === 'call' ? `${last.text}${since(last.since)}` : last.text;
+                        };
+                        // Drawn as the app's own chat draws them: no marks, quiet words for what goes on, and what it runs under them
+                        return [
+                            ...now.map((line, n) => {
+                                if (line.kind === 'said')
+                                    return <Markdown key={`live-${n}`} text={line.text}/>;
+                                if (line.kind === 'call')
+                                    return (<Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Text dimColor wrap="wrap">{`${line.head ?? 'Using a tool'}${since(line.since)}`}</Text>
+                <Box paddingLeft={2}>
+                  <Text wrap="wrap">{line.text}</Text>
+                </Box>
+              </Box>);
+                                // Its thinking opens on a press once it has thought, as in the app's chat
+                                const isOpen = open.includes(OPEN_THOUGHT);
+                                if (line.kind === 'thought' && line.detail)
+                                    return (<Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Button key={`live-thought-${presses}`} label={`${isOpen ? '▾' : '▸'} ${line.text}`} plain dimColor onPress={() => fold(OPEN_THOUGHT)}/>
+                {isOpen ? (<Box paddingLeft={2}>
+                    <Text dimColor wrap="wrap">{line.detail}</Text>
+                  </Box>) : null}
+              </Box>);
+                                return (<Box key={`live-${n}`}>
+              <Text dimColor wrap="wrap">{line.text}</Text>
+            </Box>);
+                            }),
+                            ...kids.map(kid => (<Box key={`live-kid-${kid.id}`} flexDirection="column" alignItems="flex-start">
+            <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain dimColor hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)}/>
+            <Box paddingLeft={2}>
+              <Text wrap="wrap">{kidNow(kid)}</Text>
+            </Box>
+          </Box>)),
+                        ];
                     };
                     // Another chat's work whose chat cannot be read here (a chat on another Mac, or one its file no longer holds): where it is. Its
                     // head has the press that opens that chat
@@ -1320,9 +1420,12 @@ const panelHooks = (on) => {
                         const whole = one.answer.trim();
                         const short = cut(whole, RESULT_SHOWN);
                         const isLong = short !== whole;
-                        return part('part-result', 'Result', '', <Box flexDirection="column">
+                        return part('part-result', 'Result', '', <Box flexDirection="column" alignItems="flex-start">
           <Markdown text={isLong && !open.includes(OPEN_RESULT) ? short : whole}/>
-          {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
+          <Box flexDirection="row" gap={2}>
+            {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
+            {copyButton(`result-${one.id}`, whole)}
+          </Box>
         </Box>);
                     };
                     // The big card, in parts that stand apart: what the work is, with its buttons; where it started; its to-dos; its chat. The
@@ -1347,8 +1450,10 @@ const panelHooks = (on) => {
                 </Box>) : null}
               {(one.status === 'working' && !one.chat) || left(one) || ((one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat) ? (<Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)}/> : null}
+                  {/* Cut off by the app's close: carried on by a fresh task */}
+                  {isInterrupted(one) && !one.chat && !one.parentId ? <Button key={`carry-${one.id}-${presses}`} label="Carry on" onPress={() => ((presses += 1), void carryOn($, one.id))}/> : null}
                   {/* Work the person stopped, or that failed, stays so until they start it again from here or ask in a message */}
-                  {(one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))}/> : null}
+                  {((one.status === 'failed' && !isInterrupted(one)) || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))}/> : null}
                   {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Result" onPress={() => void openReport($, left(one)?.id ?? '')}/> : null}
                 </Box>) : null}
             </Box>
@@ -1361,12 +1466,12 @@ const panelHooks = (on) => {
                 {needBlocks(one, true)}
               </Box>
             </Box>) : null}
-          {runsShownOn(one, at).length && !one.chat ? (<Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+          {(runsShownOn(one, at).length || isRetrying(one)) && !one.chat ? (<Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>) : null}
           {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
           {/* (a message to the task is in its list under Message, never here as well) */}
-          {!one.ask && sentLine(one, at) && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (<Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+          {isAnswerShown(one) && !isActingOnReply(one) && sentLine(one, at) && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (<Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (<Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
                   <Text dimColor>Question</Text>
                   <Text wrap="wrap" bold>{sentReplies.get(one.id)?.ask ?? ''}</Text>
@@ -1385,6 +1490,8 @@ const panelHooks = (on) => {
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
                                 ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
                                 : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
+          {/* Every link the chat's replies about it gave, newest first, while links at the end are on (colours.tsx) */}
+          {taskLinks(one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks(one.id))}/>) : null}
           {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
                                 asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
           {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1}/> : null}
@@ -1417,10 +1524,12 @@ const panelHooks = (on) => {
                     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
                     // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
                     // Work shown finished only because it left its chat's file is not kept there: its chat said nothing of how it ended
-                    const endedElsewhere = elsewhere.filter(one => stageOf(elsewhere, one) !== 'working' && stageOf(elsewhere, one) !== 'waiting' && !lingers(one, at) && !isVanished(one.id));
+                    // (a task its chat's close cut off stays among that chat's cards until that chat carries it on or dismisses it)
+                    const isUpThere = (one) => stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || stageOf(elsewhere, one) === 'interrupted';
+                    const endedElsewhere = elsewhere.filter(one => !isUpThere(one) && !lingers(one, at) && !isVanished(one.id));
                     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
                     // is not listed at all, however many are open: the app's own list of chats has them
-                    const shownOf = (c) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || lingers(one, at)));
+                    const shownOf = (c) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (isUpThere(one) || lingers(one, at)));
                     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length);
                     const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt);
                     const finishedPart = (isOpen) => finished.length || endedFlows.length ? (<Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -1525,6 +1634,8 @@ const panelHooks = (on) => {
                     // Its chat and pictures are read outside the drawing, which draws at once from what was read last: a long chat takes seconds to
                     // read, and a drawing that waits on it is never shown
                     // Another chat's is read from that chat's own file, on this Mac
+                    if (alone && !alone.chat)
+                        paneWork.set(paneId, alone.id);
                     if (alone)
                         void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined);
                     const talked = alone ? talks.get(alone.id) : undefined;
@@ -1596,15 +1707,15 @@ const panelHooks = (on) => {
                     // adds what it shows under them too. Of a card's own blocks, its question's is left out (`isOwn`), pictures and all: that one
                     // changing is the question itself, there before the person's eyes
                     const blocksSign = (one, isOwn = false) => {
-                        const isKept = (need) => !isOwn || need !== `ask-${one.id}`;
-                        const rows = cardNeeds(one).filter(need => isKept(need.id)).map(need => ({ at: need.at, rows: blockRows(need) }));
+                        const isKept = (need) => !isOwn || !isAskOf(need, one.id);
+                        const rows = cardNeeds(one).filter(isKept).map(need => ({ at: need.at, rows: blockRows(need) }));
                         const made = madeNow($, one);
                         return [one.id, made?.made.length || made?.code ? 'made' : '', one.items.some(item => item.state === 'doing') ? 'doing' : '', rows.sort((a, b) => a.at - b.at).map(block => block.rows).join(','), isOwn ? '' : (picsShown.get(one.id) ?? []).join('')].join(':');
                     };
                     const cardSign = (one) => [
                         blocksSign(one),
                         runsShownOn(one, at).length,
-                        (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? 'answered' : '',
+                        isAnswerShown(one) && sentLine(one, at) ? 'answered' : '',
                         needsPerson(one) ? 0 : looksDelivered(one) ? 1 : 2,
                         treeRows.get(one.id) ?? 0,
                         looksDelivered(one) ? `asks ${one.questions?.length ?? 0}` : '',
@@ -1637,6 +1748,8 @@ const panelHooks = (on) => {
                         here: own.filter(one => stage(one) === 'working').length + runningFlows.length,
                         // (what was handed in and waits for the person's look, counted after what works)
                         delivered: shownWork.filter(one => stage(one) === 'delivered').length,
+                        // (what the app's close cut off, here and in other chats, until carried on or dismissed)
+                        interrupted: shownWork.filter(one => stage(one) === 'interrupted').length + elsewhere.filter(one => stageOf(elsewhere, one) === 'interrupted').length,
                         there: runningThere.length,
                         chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
                         // Each thing at the top counts once, as the line above the prompt counts them
@@ -1688,10 +1801,11 @@ const panelHooks = (on) => {
                   </Box>)}
                 {/* (what waits is amber, what was delivered is its own blue, on the one line) */}
                 <Box flexDirection="row" minWidth={0}>
-                  {headLine(head).length > deliveredSaid(head).length ? (<Box flexShrink={1} minWidth={0}>
-                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length)}</Text>
+                  {headLine(head).length > deliveredSaid(head).length + interruptedSaid(head).length ? (<Box flexShrink={1} minWidth={0}>
+                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length - interruptedSaid(head).length)}</Text>
                     </Box>) : null}
                   {head.delivered ? <Box flexShrink={0}><Text color={DELIVERED} dimColor={false}>{deliveredSaid(head)}</Text></Box> : null}
+                  {head.interrupted ? <Box flexShrink={0}><Text color={CUT} dimColor={false}>{interruptedSaid(head)}</Text></Box> : null}
                 </Box>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 && chat.window ? `This chat is ${fill(chat.tokens, chat.window)}` : chat.tokens > 0 ? 'This chat has started' : 'This chat has just begun'}</Text>}
               </Box>
@@ -1700,7 +1814,9 @@ const panelHooks = (on) => {
             {/* Wrapped rows keep the same gap as the buttons beside each other; a terminal's gap would be a whole blank line, so it has none */}
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={e.surface === 'terminal' ? 0 : 1}>
               {reportsButton($, ui, kept, isKeyed)}
+              {progressButton($, ui, isKeyed)}
               {statsButton($, ui, isKeyed)}
+              {boardButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}
@@ -1745,12 +1861,20 @@ const panelHooks = (on) => {
                 // The app throws away whole a drawing past its limits, and the tab then says "Nothing to show yet" (drawingFits): a Details
                 // tab too big for it is drawn again with less in it, its ended commands folded and fewer lines of its conversation, until it fits
                 // (from one step lighter than it last needed, so a tab that needs less is drawn with less at once and one that shrank gets more)
-                let squeeze = Math.max(0, (paneSqueezed.get(paneId) ?? 0) - 1);
+                // The list the same: its lines cut to what a panel beside the chat holds, then each card's helpers and commands one row, then
+                // what each card made left to its Details. The list, drawn often, keeps how much less it needed on the same width for a minute
+                const last = paneSqueezed.get(paneId) ?? 0;
+                const tried = lessTried.get(paneId);
+                const isLessKept = paneId === LIST && last > 0 && tried?.columns === e.props.bodyColumns && heldAt - tried.at < LESS_RETRY;
+                if (paneId === LIST && !isLessKept)
+                    lessTried.set(paneId, { columns: e.props.bodyColumns, at: heldAt });
+                let squeeze = isLessKept ? last : Math.max(0, last - 1);
                 let drawing = await drawFor(squeeze);
-                while (paneId.startsWith(WORK_PANE) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST)
+                const tooBig = drawingFits(drawing) ? undefined : drawing;
+                while ((paneId === LIST || paneId.startsWith(WORK_PANE)) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST)
                     ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))));
-                if ((paneSqueezed.get(paneId) ?? 0) !== squeeze)
-                    (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws`));
+                if (last !== squeeze)
+                    (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws${tooBig ? ` (whole: ${sizeSaid(tooBig)}, ${e.props.bodyColumns} columns wide)` : ''}`));
                 // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
                 // ones the engine holds, and this one is made again once the click is over (holdForPress)
                 const newestMade = paneNewest.get(paneLine);

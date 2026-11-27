@@ -22,7 +22,7 @@ const started = (id, parentId, title, words, at, isFork = false) => ({
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 const ended = (one, status, at) => {
     const servers = status === 'done' ? (one.bg ?? []).filter(b => isServerRun(b.cmd, b.what)) : [];
-    return resultAsk({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }, at);
+    return resultAsk({ ...mapAsks(one, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)), status, endedAt: at, up: true, why: undefined, stoppedUnasked: undefined, bg: servers.length ? servers : undefined }, at);
 };
 // What a result still asks of the person is their question on its card, the same as any: amber at the top with what waits, its
 // buttons and Answer in words, and Delivered only once nothing is left to answer (20 Nov, the person: "'Delivered' should only mean
@@ -46,7 +46,7 @@ const resultAsk = (one, at) => {
 };
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work.
 // What its result still asked goes: the message is the person's answer to it, and the card works, never yellow (isStaleResultAsk)
-const resumed = (one, at) => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask?.isResult ? undefined : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at });
+const resumed = (one, at) => ({ ...withAsks(one, asksOf(one).filter(ask => ask.replied?.isWaking || !ask.isResult).map(ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask))), byYou: undefined, stoppedUnasked: undefined, begunAt: one.begunAt ?? one.startedAt, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at });
 // How work that is stopped ends: done when its result was already received, stopped otherwise
 const stoppedAs = (one) => (hasReport(one) ? 'done' : 'stopped');
 // Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
@@ -221,11 +221,12 @@ const sync = async ($) => {
         await lookOver($, live, now).catch(err => log($, `runs that are over not looked at: ${String(err)}`));
     // A command run on the person's press that a reload left running is followed again by this load
     await followRuns($).catch(err => log($, `commands run on a press not followed: ${String(err)}`));
+    await followRetries($).catch(err => log($, `tries again not followed: ${String(err)}`));
     await lookEnds($);
     await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`));
 };
 // The folder the engine keeps this chat's agents' records in
-const agentsFolder = async ($, chat) => `${(await $.env.get('HOME')) ?? ''}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`;
+const agentsFolder = async ($, chat) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`;
 // An agent's last words from the end of its record: what it handed in, or the text of its last reply, whether Claude Code pressed
 // it for a report after them, and when the record was last written
 const lastWordsOf = async ($, folder, agent, now) => {
@@ -255,7 +256,8 @@ const lastWordsOf = async ($, folder, agent, now) => {
 // ---- A run that is over while its card is still at work ----
 // A task pauses by ending its step, and Claude Code starts its next step when a command or a helper of its own ends, or when the
 // person's answer or words reach it: its card stays at work meanwhile. A run is over for good only when nothing of its own runs
-// and nothing on its card waits for the person. Then its card ends: done when its result was received (handed in while Claudopus
+// and nothing on its card waits for the person, nor a command the person allowed (holdsCard), nor a try again after a passing
+// network error (retryLater). Then its card ends: done when its result was received (handed in while Claudopus
 // was away, or its last words where Claude Code never pressed it for a hand-back, so took them as its result), and failed
 // otherwise, saying it ended without its result. A helper's card ends done either way: its words went to its task
 // A run only the list shows as over is given OVER_GRACE first, as Claude Code may be about to start its next step (a helper's
@@ -269,7 +271,7 @@ const lookOver = async ($, live, now, heard = '') => {
         return;
     const list = await read($, todos);
     const statusOf = (one) => live.find(agent => agent.id === one.id)?.status;
-    const isOver = (one) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id);
+    const isOver = (one) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at;
     for (const id of [...overSince.keys()])
         if (!list.some(one => one.id === id && isOver(one)))
             overSince.delete(id);
@@ -315,6 +317,88 @@ const lookOver = async ($, live, now, heard = '') => {
             await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`));
     await log($, `runs that were over ended on their cards: ${endedNow.join(', ')}`);
     await lookEnds($);
+    redraw($);
+};
+// ---- A step stopped by a passing network error ----
+// A task's or helper's step that stops on an error of its connection to the model's servers (no address for the server's name, a
+// connection reset or refused, a certificate for another name, a request that timed out, the servers overloaded, the Mac asleep
+// mid-answer) is tried again by itself: its card stays at work with one grey line that says so, and a message from the next hook of
+// the mod's (sendOwn, never the timer's own) starts it again where it stopped. Past RETRY_MOST tries in RETRY_SPAN it fails as any
+// error does; so does an error of the request itself, as a usage limit or a refused key (25 Nov: Dima pressed Start again on tasks
+// that had only stopped on ENOTFOUND, a certificate for another host name and HTTP 408s)
+const PASSING_ERROR = /ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENETUNREACH|ENETDOWN|EHOSTUNREACH|EPIPE|socket hang up|fetch failed|reach the API server|connection(?: error|_failed| failed| reset| refused| closed| timed out)|host ?name|certificate|\bSSL\b|\bTLS\b|\b(?:408|500|502|503|504|529)\b|timed? ?out|overloaded|bad gateway|service unavailable|went to sleep|computer_slept|network/i;
+const NOT_PASSING = /usage.?limit|rate.?limit|\b(?:400|401|403|404|413|429)\b|prompt is too long|credit balance|billing|api.?key/i;
+const RETRY_MOST = 3;
+const RETRY_SPAN = 30 * 60000;
+const RETRY_AFTER = [20000, 60000, 180000];
+// The error a step stopped on, in a few words, when it is one that passes: from the turn's own last words, else the last line of
+// the task's record, where Claude Code writes the error as an answer of its own
+const passingError = async ($, id, said) => {
+    const isPassing = (text) => /^API Error\b/.test(text.trim()) && PASSING_ERROR.test(text) && !NOT_PASSING.test(text);
+    const short = (text) => cut(oneLine(text.trim().replace(/^API Error:?\s*/, '')), 100);
+    if (isPassing(said))
+        return short(said);
+    const { id: chat } = await read($, me);
+    if (!chat || !dir)
+        return '';
+    const rows = (await fileEnd($, `${await agentsFolder($, chat)}/agent-${id}.jsonl`, 64000).catch(() => '')).trim().split('\n');
+    const last = parsedOr(rows.at(-1) ?? '', {});
+    if (last.type !== 'assistant' || !last.isApiErrorMessage)
+        return '';
+    const text = (Array.isArray(last.message?.content) ? last.message.content : []).map(b => (b.type === 'text' ? (b.text ?? '') : '')).join(' ');
+    return isPassing(`${text} ${last.apiError ?? ''}`) ? short(text) : '';
+};
+// Due again: true when a try is set for it, its card kept at work meanwhile
+const retryLater = async ($, id, why) => {
+    const now = await $.clock.now();
+    let isDue = false;
+    await changeTodos($, list => ((isDue = false), list).map(one => {
+        if (one.id !== id || one.status !== 'working' || isHeld(one))
+            return one;
+        const tries = (one.retry?.tries ?? []).filter(at => now - at < RETRY_SPAN);
+        if (tries.length >= RETRY_MOST)
+            return one;
+        isDue = true;
+        return { ...one, retry: { tries: [...tries, now], at: now + (RETRY_AFTER[tries.length] ?? 180000), why } };
+    }));
+    if (!isDue)
+        return false;
+    await log($, `work ${id} stopped on a passing network error (${why}): tried again by itself`);
+    await followRetry($, id);
+    return true;
+};
+// Each try due is set once by this load; a reload's load sets those it finds again (followRetries)
+const retrySet = new Set();
+const followRetry = async ($, id) => {
+    const due = (await read($, todos)).find(one => one.id === id)?.retry?.at;
+    if (due === undefined || retrySet.has(`${id}:${due}`))
+        return;
+    retrySet.add(`${id}:${due}`);
+    $.clock.after(Math.max(0, due - (await $.clock.now())), () => void sendRetry($, id, due).catch(err => log($, `work ${id} not tried again: ${String(err)}`)));
+};
+const followRetries = async ($) => {
+    for (const one of await read($, todos))
+        if (one.retry?.at !== undefined && one.status === 'working')
+            await followRetry($, one.id);
+};
+const RETRY_TEXT = (why) => `Your last step stopped on a network error (${why}). This message starts you again: carry on from where you were, then end with your report as before.`;
+const sendRetry = async ($, id, due) => {
+    const isStill = async () => (await read($, todos)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due);
+    const why = (await read($, todos)).find(one => one.id === id)?.retry?.why ?? 'a passing error';
+    if (!(await isStill()))
+        return;
+    const r = await sendOwn($, { to: { agentId: id }, text: RETRY_TEXT(why) }, isStill).catch(err => ({ isDelivered: false, reason: String(err) }));
+    const now = await $.clock.now();
+    await changeTodos($, list => list.map(one => {
+        if (one.id !== id || one.retry?.at !== due)
+            return one;
+        const kept = { ...one, retry: { tries: one.retry.tries } };
+        // (one that could not be started again ends as the error left it)
+        return r.isDelivered || one.status !== 'working' ? kept : { ...ended(kept, 'failed', now), why: WHY_ERROR };
+    }));
+    await log($, r.isDelivered ? `work ${id} started again after a passing network error` : `work ${id} not started again after a passing network error: ${r.reason ?? 'not sent'}`);
+    if (!r.isDelivered)
+        await lookEnds($);
     redraw($);
 };
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
@@ -529,8 +613,7 @@ const recoverEnded = async ($) => {
         return;
     // The engine lists only the work of its own process; the transcripts of the rest are in the chat's folder, one per agent
     const live = await $.agent.list().catch(() => []);
-    const home = (await $.env.get('HOME')) ?? '';
-    const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`;
+    const folder = `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`;
     const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(Boolean);
     // Only the work this chat's own thread started (its helpers are a level deeper), the newest first
     const metas = await Promise.all(ids.map(async (one) => ({

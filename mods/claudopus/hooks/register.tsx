@@ -31,6 +31,8 @@ import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, Prog
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
+import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, textHash as colourTextHash } from './colours'
+import type { ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressNext, ProgressPicture } from './progress'
 
 
@@ -296,6 +298,8 @@ const loadSettings = async ($: EngineInterface) => {
 if (dir) await personCheck($).catch(err => log($, `files not compared as the mod loads: ${String(err)}`))
 const config = await readConfig($, dir)
 isOff = config.agents === false
+isColoured = config.taskColours === true
+isLinked = config.replyLinks !== false
 void forgetKeptPasswords($).catch(() => undefined)
 person = typeof config.name === 'string' ? config.name.trim() : ''
 models = modelsOf(config)
@@ -3490,6 +3494,130 @@ ui,
 }
 
 
+let isColoured = false
+let isLinked = true
+const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {} }
+let colourIndex: ColourIndex = EMPTY_COLOURS
+let colourBuilder: ColourBuilder | undefined
+let colourRunning: Promise<void> | undefined
+let colourWanted: 'none' | 'more' | 'all' = 'none'
+let colourTimer: Timer | undefined
+let colourWritten = ''
+
+const colourHex = (slot: number) => PALETTE[slot % PALETTE.length] ?? PALETTE[0]
+const taskColour = (id: string) => {
+if (!isColoured) return undefined
+const slot = colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id]
+return slot === undefined ? undefined : colourHex(slot)
+}
+const taskLinks = (id: string) => (isLinked ? (colourIndex.tasks[id]?.links ?? []) : [])
+const isColourRead = () => isColoured || isLinked
+
+const replyTasks = (requestId: string, text: string) =>
+(colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id])
+
+const colourPass = async ($: EngineInterface, isWhole: boolean) => {
+const every = await $.session.messages().catch(() => [])
+const rows = Array.isArray(every) ? every : []
+let builder = colourBuilder
+if (!builder || isWhole || rows.length < builder.read) builder = new ColourBuilder(builder?.colours ?? {})
+const fresh = rows.slice(builder.read)
+colourBuilder = builder
+builder.ingest(fresh)
+const value = builder.index()
+const json = JSON.stringify(value)
+if (json === colourWritten) return
+colourWritten = json
+colourIndex = value
+redraw($)
+}
+const colourBuild = ($: EngineInterface, isWhole: boolean) => {
+if (!isColourRead()) return Promise.resolve()
+if (colourRunning) {
+colourWanted = isWhole || colourWanted === 'all' ? 'all' : 'more'
+return colourRunning
+}
+colourRunning = (async () => {
+let next: 'none' | 'more' | 'all' = isWhole ? 'all' : 'more'
+while (next !== 'none') {
+colourWanted = 'none'
+await colourPass($, next === 'all')
+next = colourWanted as 'none' | 'more' | 'all'
+}
+})()
+.catch(err => log($, `replies not sorted by task: ${String(err)}`))
+.finally(() => {
+colourRunning = undefined
+})
+return colourRunning
+}
+const colourSoon = ($: EngineInterface) => {
+colourTimer?.cancel()
+colourTimer = $.clock.after(400, () => void colourBuild($, false))
+}
+
+const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
+const one = (await read($, todos)).find(card => card.id === id)
+if (one && canChange(one) && repliesInBar(surface)) return openBar($, { kind: 'change', id }, surface)
+openWork($, id)
+}
+
+const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
+
+const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {
+if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
+const given = isLinked ? replyLinksIn(e.props.text) : []
+const ids = isColoured ? replyTasks(e.requestId, e.props.text) : []
+const [first] = ids
+if (!first && !given.length) return reply
+const { Box, Button, Markdown, Text } = ui
+const links = given.length ? (
+<Box key="reply-links" flexDirection="column">
+<Text dimColor>Links</Text>
+<Markdown text={linkList(given)} />
+</Box>
+) : null
+if (!first)
+return (
+<Box key={`linked-${mark(e.requestId)}`} flexDirection="column" gap={1}>
+{reply}
+{links}
+</Box>
+)
+return (
+<Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={colourHex(colourIndex.tasks[first]?.colour ?? 0)} paddingX={1} gap={1}>
+<Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
+{ids.map(id => {
+const task = colourIndex.tasks[id]
+return (
+<Box key={`task-${id}`} flexDirection="row" columnGap={2}>
+{/* The dot outside the button, as the app draws a button's words in its own colour */}
+<Box key={`task-name-${id}`} flexDirection="row">
+<Text color={colourHex(task?.colour ?? 0)}>● </Text>
+<Button key={`task-open-${id}-${presses}`} plain hover={{ scope: `task-open-${id}`, underline: true }} onPress={() => openWork($, id)}>
+<Text bold>{cut(task?.title ?? 'Task', 60)}</Text>
+</Button>
+</Box>
+<Button key={`task-reply-${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
+</Box>
+)
+})}
+</Box>
+{reply}
+{links}
+</Box>
+)
+}
+
+const colourHooks = (on: On) => {
+on('session.append', async ($, e, next) => {
+const kept = await next(e)
+if (isColourRead() && e.agentId === undefined && (e.message.type === 'user' || e.message.type === 'assistant')) colourSoon($)
+return kept
+})
+}
+
+
 
 const MEMORY_PANE = 'memory-'
 const MEMORY_PANES = 3
@@ -3584,11 +3712,11 @@ if (!isOff && !e.props.isSummary && e.props.text.trim() === NO_ANSWER) {
 const { Box } = uiOf($, e)
 return <Box key={`quiet-${mark(e.requestId)}`} />
 }
-if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return next(e)
+if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return withTaskBox($, e, await next(e), uiOf($, e))
 const { text, hrefs } = memoryLinked(e.props.text)
-if (!hrefs.length) return next(e)
+if (!hrefs.length) return withTaskBox($, e, await next(e), uiOf($, e))
 const { Markdown } = uiOf($, e)
-return (
+return withTaskBox($, e, (
 <Markdown
 key={`memory-reply-${mark(e.requestId)}`}
 text={text}
@@ -3598,7 +3726,7 @@ const path = memoryPressed(link.href)
 if (path) openMemory($, path)
 }}
 />
-)
+), uiOf($, e))
 })
 
 on('ui.render', { component: 'Pane' }, async ($, e, next) => {
@@ -11107,6 +11235,7 @@ cwd = e.cwd
 if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1)
 ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
 await loadSettings($)
+void colourBuild($, true)
 await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
 await closeUndrawn($)
 $.clock.after(3000, () => closeUndrawn($))
@@ -15318,6 +15447,9 @@ return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined,
 <Box flexDirection="column">
 <Box flexDirection="row" gap={1} height={1} overflow="hidden">
 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+{/* With task colours on, the colour of the task's box in the chat leads its name (colours.tsx), outside the button,
+                      as the app draws a button's words in its own colour */}
+{taskColour(one.id) ? <Text color={taskColour(one.id)}>● </Text> : null}
 <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
 <Text bold wrap="truncate-end">{titleOf(one)}</Text>
 </Button>
@@ -16344,6 +16476,8 @@ return (
 {one.chat && !lines && (talks.has(one.id) || one.chat.host)
 ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
 : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
+{/* Every link the chat's replies about it gave, newest first, while links at the end are on (colours.tsx) */}
+{taskLinks(one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks(one.id))} />) : null}
 {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
 {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
@@ -16950,6 +17084,7 @@ bandHooks(on)
 panelHooks(on)
 tabHooks(on)
 memoryHooks(on)
+colourHooks(on)
 serversTabHooks(on)
 workflowHooks(on)
 }

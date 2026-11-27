@@ -354,7 +354,8 @@ const loadWork = async ($, id) => {
         const one = (await read($, todos)).find(card => card.id === id);
         if (!one)
             return;
-        const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status].join(':');
+        const mark = talkMarks.get(id) ?? 0;
+        const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':');
         const kept = await read($, reports);
         const shotsKey = `${key}:${kept.length}`;
         const now = await $.clock.now();
@@ -363,6 +364,8 @@ const loadWork = async ($, id) => {
             during('read a task for its Details');
             const rows = await $.session.messages({ agentId: id }).catch(() => undefined);
             talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now });
+            if (Array.isArray(rows))
+                liveCaughtUp(id, mark, now);
             isChanged = true;
         }
         const lines = talks.get(id)?.lines;
@@ -445,13 +448,13 @@ const loadTheirs = async ($, one) => {
         const was = talks.get(id);
         if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ))
             return;
-        const home = (await $.env.get('HOME')) ?? '';
+        const projects = `${claudeDir || (await configDir($))}/projects`;
         // Its folder named as the engine names its projects, and failing that any project that holds that chat
         const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-');
         const name = `${c.id}/subagents/agent-${c.agent}.jsonl`;
         during("read another chat's task");
         const r = await $.process
-            .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
+            .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
             .catch(() => undefined);
         const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined;
         talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now });
@@ -552,4 +555,123 @@ const askPicturesOf = ($, one) => {
             .finally(() => (askLoading.delete(key), redraw($)));
     }
     return undefined;
+};
+// ---- A picture of each question with buttons (Config's Pictures of questions, off as it comes) ----
+// A task's question with buttons is drawn by Claudopus as one picture: the question, what it is about, and each button as a box of
+// its own with what the task said of it. It is made once, as the question comes, opened on the person's screen, and kept with the
+// question, so the card and the chat show it with the question (24 Nov, the person: "a picture for every question that has options
+// ... built in, ideally as a setting"; tasks were left to remember it). A question for a key or password has none, and one whose
+// picture can't be made is asked as text alone
+const QUESTION_W = 1200;
+const QUESTION_PAD = 56;
+const QUESTION_FONT = "-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif";
+// About how wide a letter is, as a share of its size: lines are broken by it, as an SVG breaks none itself
+const LETTER_W = 0.5;
+const wrapped = (text, size, width, most) => {
+    const per = Math.max(8, Math.floor(width / (size * LETTER_W)));
+    const lines = [];
+    for (const para of text.split('\n')) {
+        let line = '';
+        for (const word of para.split(/\s+/).filter(Boolean)) {
+            const next = line ? `${line} ${word}` : word;
+            if (next.length <= per)
+                line = next;
+            else {
+                if (line)
+                    lines.push(line);
+                line = word.length > per ? `${word.slice(0, per - 1)}…` : word;
+            }
+        }
+        lines.push(line);
+    }
+    while (lines.length && !lines.at(-1)?.trim())
+        lines.pop();
+    return lines.length > most ? [...lines.slice(0, most - 1), `${(lines[most - 1] ?? '').replace(/\s*\S*$/, '')} …`] : lines;
+};
+// What the task said of each button in what the question is about: a line that begins with the button's words ("- Release it: …"),
+// taken out of the rest
+const choiceSaid = (details, choices) => {
+    const lines = details.split('\n');
+    const said = choices.map(choice => {
+        const words = choice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const at = lines.findIndex(line => new RegExp(`^\\s*(?:[-*•]|\\d+[.)])?\\s*[*_"“']*${words}[*_"”']*\\s*(?:[:—–]|-\\s)\\s*(.+)$`, 'i').test(line));
+        if (at < 0)
+            return '';
+        const [, text = ''] = new RegExp(`^\\s*(?:[-*•]|\\d+[.)])?\\s*[*_"“']*${words}[*_"”']*\\s*(?:[:—–]|-\\s)\\s*(.+)$`, 'i').exec(lines[at] ?? '') ?? [];
+        lines[at] = '\u0000';
+        return text.trim().replace(/^\w/, c => c.toUpperCase());
+    });
+    return { said, rest: lines.filter(line => line !== '\u0000').join('\n').replace(/\n{3,}/g, '\n\n').trim() };
+};
+const questionSvg = (title, text, details, choices) => {
+    const inner = QUESTION_W - QUESTION_PAD * 2;
+    const { said, rest } = choiceSaid(details, choices);
+    const cols = choices.length === 3 ? 3 : choices.length >= 2 ? 2 : 1;
+    const gap = 24;
+    const boxW = (inner - gap * (cols - 1)) / cols;
+    const parts = [];
+    let y = QUESTION_PAD;
+    const line = (words, size, color, x, weight = 400) => {
+        y += Math.round(size * 1.35);
+        parts.push(`<text x="${x}" y="${y}" font-family="${QUESTION_FONT}" font-size="${size}" font-weight="${weight}" fill="${color}">${escapeXml(words)}</text>`);
+    };
+    line(cut(`Question · ${title}`, 90), 22, '#a8a6a0', QUESTION_PAD);
+    y += 10;
+    for (const one of wrapped(text, 40, inner, 4))
+        line(one, 40, '#f5a524', QUESTION_PAD, 600);
+    if (rest) {
+        y += 14;
+        for (const one of wrapped(rest, 24, inner, 12))
+            line(one, 24, '#d6d4ca', QUESTION_PAD);
+    }
+    y += 36;
+    // The buttons, a box each, in rows of `cols`
+    for (let row = 0; row < choices.length; row += cols) {
+        const inRow = choices.slice(row, row + cols);
+        const bodies = inRow.map((choice, n) => ({ choice, n: row + n, lines: wrapped(said[row + n] ?? '', 22, boxW - 48, 8), head: wrapped(choice, 30, boxW - 104, 2) }));
+        const boxH = Math.max(...bodies.map(one => 40 + one.head.length * 40 + (one.lines.length ? 14 + one.lines.length * 30 : 0) + 28));
+        bodies.forEach((one, n) => {
+            const x = QUESTION_PAD + n * (boxW + gap);
+            parts.push(`<rect x="${x}" y="${y}" width="${boxW}" height="${boxH}" rx="16" fill="#34332f" stroke="#55534c" stroke-width="2"/>`);
+            parts.push(`<circle cx="${x + 46}" cy="${y + 54}" r="22" fill="#f5a524"/><text x="${x + 46}" y="${y + 63}" text-anchor="middle" font-family="${QUESTION_FONT}" font-size="26" font-weight="700" fill="#262624">${one.n + 1}</text>`);
+            one.head.forEach((words, k) => parts.push(`<text x="${x + 84}" y="${y + 64 + k * 40}" font-family="${QUESTION_FONT}" font-size="30" font-weight="600" fill="#f0eee6">${escapeXml(words)}</text>`));
+            one.lines.forEach((words, k) => parts.push(`<text x="${x + 24}" y="${y + 40 + one.head.length * 40 + 14 + 24 + k * 30}" font-family="${QUESTION_FONT}" font-size="22" fill="#c9c7bd">${escapeXml(words)}</text>`));
+        });
+        y += boxH + gap;
+    }
+    y += 8;
+    line('Press a button on the card, or answer in your own words.', 22, '#a8a6a0', QUESTION_PAD);
+    const height = Math.ceil(y + QUESTION_PAD - 12);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${QUESTION_W}" height="${height}" viewBox="0 0 ${QUESTION_W} ${height}"><rect width="${QUESTION_W}" height="${height}" fill="#262624"/>${parts.join('')}</svg>`;
+};
+// Where the pictures of questions are kept: the person's own memory folder
+const questionsDir = () => `${dir}/questions`;
+// Whether the person wants them: Config's Pictures of questions, off as it comes (25 Nov, the person: "off by default")
+const wantsQuestionPictures = async ($) => Boolean(dir) && (await readConfig($, dir)).askPictures === true;
+// Makes the picture of one question, as a PNG; nothing when it can't be made, and the question goes as text alone
+const questionPicture = async ($, id, title, text, details, choices, at) => {
+    if (!dir || !choices.length)
+        return '';
+    const base = `${questionsDir()}/${id.replace(/[^A-Za-z0-9_-]/g, '-')}-${at}`;
+    try {
+        await $.process.run(['mkdir', '-p', questionsDir()]);
+        await $.fs.write(`${base}.svg`, questionSvg(title, text, details, choices));
+        const r = await $.process.run([sips($), '-s', 'format', 'png', `${base}.svg`, '--out', `${base}.png`], { timeoutMs: 20000 });
+        await $.process.run(['rm', '-f', `${base}.svg`]).catch(() => undefined);
+        if (r.exitCode !== 0 || (await $.fs.stat(`${base}.png`).catch(() => undefined))?.kind !== 'file')
+            return void (await log($, `picture of a question not made: ${oneLine(r.stderr ?? '').slice(0, 160)}`)), '';
+        return `${base}.png`;
+    }
+    catch (err) {
+        await log($, `picture of a question not made: ${String(err)}`);
+        return '';
+    }
+};
+// The question's picture opened on the person's screen, once, as it comes: nowhere when the chat is run from another device
+const openQuestionPicture = async ($, path) => {
+    if (isRunFromAfar || !path)
+        return;
+    const r = await openOn($, path);
+    if (r.exitCode !== 0)
+        await log($, `picture of a question not opened: ${oneLine(r.stderr ?? '').slice(0, 160)}`);
 };

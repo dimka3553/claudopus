@@ -19,14 +19,14 @@ const TESTS_OUT = join(hooks, 'tests')
 // The parts in the order they are joined: a part that uses another's value while the module loads comes after it
 const PARTS = [
   'common.tsx', 'recorder.tsx', 'rules.tsx', 'settings.tsx', 'subjects.tsx', 'progress.tsx', 'cards.tsx', 'state.tsx', 'talk.tsx', 'servers.tsx', 'reports.tsx', 'welcome.tsx',
-  'results-tab.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'term-art.tsx', 'pictures.tsx', 'files.tsx', 'workflows.tsx', 'notify.tsx',
+  'results-tab.tsx', 'colours.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'term-art.tsx', 'pictures.tsx', 'files.tsx', 'workflows.tsx', 'notify.tsx',
   'updating.tsx', 'changelog.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'afar.tsx', 'boxes.tsx', 'gate.tsx', 'prompts.tsx', 'runit.tsx', 'lean.tsx', 'needs.tsx', 'typed.tsx', 'chat.tsx', 'stuck.tsx', 'jobs.tsx', 'naming.tsx', 'heavy.tsx', 'tidy.tsx', 'steps.tsx', 'keep.tsx', 'keys.tsx', 'crossing.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'usage.tsx', 'pace.tsx', 'band.tsx',
   'progress-tab.tsx', 'panel.tsx', 'tabs.tsx', 'register.tsx',
 ]
 const TEST_PARTS = [
   'world.tsx', 'chat.test.tsx', 'cards.test.tsx', 'left.test.tsx', 'finish.test.tsx', 'notify.test.tsx', 'commands.test.tsx', 'servers.test.tsx',
   'reports.test.tsx', 'pictures.test.tsx', 'memory.test.tsx', 'workflows.test.tsx', 'tabs.test.tsx', 'settings.test.tsx',
-  'asking.test.tsx', 'welcome.test.tsx', 'sharing.test.tsx', 'prompts.test.tsx', 'macs.test.tsx', 'stuck.test.tsx', 'term-art.test.tsx', 'terminal-look.test.tsx', 'gate.test.tsx', 'security.test.tsx', 'steps.test.tsx', 'keep.test.tsx', 'keys.test.tsx', 'usage.test.tsx', 'updating.test.tsx', 'stop.test.tsx', 'hold.test.tsx',
+  'asking.test.tsx', 'welcome.test.tsx', 'sharing.test.tsx', 'prompts.test.tsx', 'macs.test.tsx', 'stuck.test.tsx', 'term-art.test.tsx', 'terminal-look.test.tsx', 'gate.test.tsx', 'security.test.tsx', 'steps.test.tsx', 'keep.test.tsx', 'keys.test.tsx', 'usage.test.tsx', 'updating.test.tsx', 'stop.test.tsx', 'hold.test.tsx', 'colours.test.tsx',
 ]
 
 const read = path => readFileSync(path, 'utf8')

@@ -60,6 +60,9 @@ const agentTurnEnded = async ($, e, id, done) => {
     const answer = ((said === PRESS_ANSWER ? '' : said) || handedBack.get(id) || '').slice(0, ANSWER_CHARS);
     const isHanded = handedBack.delete(id);
     const how = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done';
+    // A step stopped by a passing network error is tried again, its card at work meanwhile (retryLater)
+    const passing = how === 'failed' && e.reason === 'error' && dir && !isOff ? await passingError($, id, said).catch(() => '') : '';
+    const isRetried = Boolean(passing) && (await retryLater($, id, passing).catch(err => (void log($, `work ${id} not tried again: ${String(err)}`), false)));
     await changeTodos($, list => list.map(one => {
         // (a task whose result went through is done already, and one ended meanwhile stays as it ended)
         if (one.id !== id || one.status !== 'working')
@@ -67,8 +70,14 @@ const agentTurnEnded = async ($, e, id, done) => {
         // (stopped for a message the person sent with Stop and send, which starts it again: it stays at work)
         if (how === 'stopped' && interrupting.has(id))
             return one;
+        // (stopped by no one here, as when the app quits and stops every task, it says so: a load in the next process takes one that
+        // stopped so as the process ended for cut off, never for stopped: noteClosed)
+        if (how === 'stopped' && !one.parentId && !stoppedHere.has(id) && !pressed.has(id))
+            return { ...ended(one, stoppedAs(one), now), ...(hasReport(one) ? {} : { stoppedUnasked: true }) };
         if (how === 'stopped')
             return ended(one, stoppedAs(one), now);
+        if (how === 'failed' && isRetried)
+            return one;
         if (how === 'failed')
             return { ...ended(one, 'failed', now), answer: answer || one.answer, why: WHY_ERROR };
         // A helper's hand-back ends it: its result went to its task
@@ -160,6 +169,7 @@ const chatHooks = (on) => {
         const begun = await next(e);
         const home = (await $.env.get('HOME')) ?? '';
         dir = `${home}/.claude/claudopus`;
+        claudeDir = await configDir($);
         // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold). From the start of the load, so a
         // long hold in the load's own reads is logged with them too
         holdAt = 0;
@@ -191,6 +201,8 @@ const chatHooks = (on) => {
             (loadMark = presses = 1 + ((await $.clock.now()) % 1000000000) * 1000), (freshness += 1);
         (freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0));
         await loadSettings($);
+        // Which reply is about which task, read from the chat's transcript, for task colours and links at the end (colours.tsx)
+        void colourBuild($, true);
         await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`));
         // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
         await closeUndrawn($);
@@ -218,7 +230,7 @@ const chatHooks = (on) => {
         keysOnStart($);
         await $.tool.register({
             name: 'update',
-            description: 'Records a topic in the memory index: creates it, or changes the fields given. `brief` replaces the whole page of notes on it: read it first and keep what other tasks wrote.',
+            description: "Records a topic in the memory index: creates it, or changes the fields given. Each topic has a short page a fresh task reads first, and a history that is only added to: `add` puts what this task found, decided, built and left open at the end of the history, dated, with nothing to read first; `brief` replaces the whole page, so read it first and keep what still holds.",
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -226,7 +238,8 @@ const chatHooks = (on) => {
                     repo: { type: 'string', description: 'The folder the task happens in' },
                     state: { type: 'string', description: 'How far it has got, in at most six words; start with "done" once it is pushed or deployed. Put detail in `brief`' },
                     summary: { type: 'string', description: 'One line on what the topic is for' },
-                    brief: { type: 'string' },
+                    add: { type: 'string', description: "What this task found, decided, built and left open, with the paths that matter: added to the end of the topic's history" },
+                    brief: { type: 'string', description: 'The whole short page a fresh task reads first, at most 8000 characters: where things are, where each line of work stands, what is decided, what is open. Leave it out when none of that changed' },
                 },
                 required: ['name'],
             },
@@ -235,7 +248,7 @@ const chatHooks = (on) => {
         await $.tool.register({
             name: 'recall',
             description: named("Searches the memory for a phrase: {name}'s messages word for word, what they asked, topic notes, pastes, and the results finished tasks left for {name} (reports/<id>/report.md, each dated). Returns matching lines with their files."),
-            inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+            inputSchema: { type: 'object', properties: { query: { type: 'string' }, area: { type: 'string', description: "Only this area of Progress or topic of the index, by its name: its topic page and history, its results and what the person said of it" } }, required: ['query'] },
             isDeferred: false,
         });
         await $.tool.register({
@@ -275,7 +288,7 @@ const chatHooks = (on) => {
         });
         await $.tool.register({
             name: 'ask',
-            description: named("For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself."),
+            description: named("For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a key to give, a button to press, an approval; for a key give `key` and `from`, and its box shows with the question), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself."),
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -286,7 +299,9 @@ const chatHooks = (on) => {
                     command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
                     cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
                     pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
-                    release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your next run of the release runner from that folder, once, with no second question' },
+                    key: { type: 'string', description: named("Only when you ask {name} for a key, token or password a command of yours needs: the name it is saved under, such as SENTRY_READ_TOKEN. The box to paste it into shows with your question on your card at once; a saved key of that name is replaced, one of another name stays. Give no `choices` with it") },
+                    from: { type: 'string', description: named('With `key`: where {name} gets it, the full link of the page and what to press there, shown in the box') },
+                    release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your runs of the release runner from that folder until one has gone out, with no second question' },
                 },
                 required: ['text'],
             },
@@ -308,6 +323,10 @@ const chatHooks = (on) => {
         await sync($).catch(() => undefined);
         during('load: read the results');
         await loadReports($).catch(() => undefined);
+        // A topic page grown past what a fresh task reads whole is made short in the background, the whole of it kept in its history
+        afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)));
+        // and what waits in the queue of progress/ is indexed, the picture written when it is due, the history read in once (progress.tsx)
+        afterLoad($, PROGRESS_LOAD_AFTER, () => void drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`)));
         // What the person had typed into a reply box before a reload of the mod is in its box again
         await readDrafts($).catch(() => undefined);
         // Work that is running when the chat loads brings the panel up, if it has never opened
@@ -381,6 +400,8 @@ const chatHooks = (on) => {
             // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
             if (!isBehind() && (await read($, todos)).some(one => !one.parentId && one.status === 'working'))
                 void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`));
+            // and Claude's commands take their turn on the processor, so the person keeps cores of their own (pace.tsx)
+            void paceWork($).catch(err => log($, `commands not paced: ${String(err)}`));
             // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
             const now = await $.clock.now();
             for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
@@ -406,6 +427,8 @@ const chatHooks = (on) => {
         isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'));
         // Every chat has a watcher that brings Claudopus back should Claude switch it off
         await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`));
+        // and its tasks keep their prompt cache an hour, as the chat does, unless the person's settings say otherwise
+        await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`));
         if (macs.length)
             everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)));
         if (macs.length)
@@ -418,6 +441,8 @@ const chatHooks = (on) => {
         everyLoad($, TIDY_EVERY, () => startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`)));
         afterLoad($, 5000, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)));
         everyLoad($, DISK_EVERY, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)));
+        // The person's figures to the leaderboard, only once they joined it (stats-tab)
+        everyLoad($, 60000, () => sendBoard($).catch(err => log($, `leaderboard not sent: ${String(err)}`)));
         await shareMine($).catch(() => undefined);
         await readAnswers($).catch(() => undefined);
         await readOthers($).catch(() => undefined);
@@ -491,17 +516,18 @@ const chatHooks = (on) => {
                 return next(e);
             }
         }
-        if (e.isMeta || e.command || !dir)
-            return next(e);
         // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
         const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text);
         const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed;
-        // The message Claudopus sent for a part of a task's result carries that part, as does any other of its own that comes first
-        if (!isPerson && e.origin.kind === 'plugin' && !isOff) {
+        // The message a task sends the chat for a part of its result carries that part, as does Claudopus's own, and any other of
+        // either that comes first (a task's comes marked as no one's words, isMeta)
+        if (dir && !isPerson && (e.origin.kind === 'plugin' || e.origin.kind === 'peer') && !isOff && !e.command) {
             const parts = await partsFor($);
             if (parts.length)
                 e = { ...e, context: [...(e.context ?? []), ...parts] };
         }
+        if (e.isMeta || e.command || !dir)
+            return next(e);
         if (!isPerson) {
             // A message a program, a schedule or a channel sent is saved too, marked with where it came from, so recall finds every chat;
             // notices and the mod's own messages are no one's words
@@ -519,27 +545,42 @@ const chatHooks = (on) => {
             if (stillHeld.length)
                 context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))));
         }
+        // A short answer typed by the person themselves, such as "allow" or "release it", is their press on the block it fits (typed.tsx)
+        if (!isOff && !isPressed) {
+            const typed = await typedAnswer($, e.text).catch(err => (void log($, `typed answer not taken: ${String(err)}`), undefined));
+            if (typed)
+                context.push(typed);
+        }
         if (!isOff) {
             const board = await cardsNow($).catch(err => (void log($, `cards not told to the chat: ${String(err)}`), ''));
             if (board)
                 context.push(named(board));
         }
         let text = e.text;
+        let pasted = '';
         const m = await read($, me);
         if (!isOff) {
             // The role goes out with the person's first message and after a compaction, each time as this chat first got it (keptRule)
             const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)));
+            // The topics and areas as this message finds them: what changed since the chat was last given the list is told with it
+            const index = (await readIndex($)).filter(s => !isScratchTopic(s.repo));
+            const areas = await readAreas($);
+            let changed = '';
             if (!m.isChat || m.needsContext) {
                 // Each subject with the path of its brief, so a brief for work on it can name that path without a search
-                const subjects = (await readIndex($)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n');
-                context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`);
+                context.push(`${role}\n${WORDS_LINE(m.id)}\n${PROGRESS_LINE()}\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${await topicsGiven($)}`);
             }
+            else
+                changed = listChanges(index, areas, await read($, listSeen));
+            if (!m.isChat || m.needsContext || changed)
+                await update($, listSeen, () => listKeys(index, areas));
             const told = reportsTold(await read($, reports), await $.clock.now());
-            context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}`);
+            context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}\nProgress: ${progressDir()}${changed ? `\nChanged since you were given the topic list: ${changed}` : ''}`);
             await update($, me, one => ({ ...one, isChat: true, needsContext: false }));
             if (text.length > PASTE_CHARS) {
                 const stamp = new Date().toISOString().replaceAll(':', '-');
                 const path = `${dir}/pastes/${stamp}.md`;
+                pasted = path;
                 await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text));
                 text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`;
                 context.push(PASTED);
@@ -551,6 +592,10 @@ const chatHooks = (on) => {
         fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? '';
         const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`;
         await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`));
+        // and on their own, without Claude's replies, so a task reads what they said whole (a paste as its start and where it is)
+        await appendTo($, `${dir}/words/${m.id}.said.md`, hideKeys(saidEntry(await $.clock.now(), how, pasted ? e.text : text, pasted))).catch(err => log($, `message not saved: ${String(err)}`));
+        // and goes into the queue of progress/, where their words may tick, add or set aside next steps (progress.tsx)
+        queueSoon($, { kind: 'said', text });
         return next(context.length ? { ...e, text, context } : { ...e, text });
     });
     // A turn of the chat's made only of quiet notices (above) is known as it starts; its first step is answered with Claude Code's own
@@ -574,6 +619,8 @@ const chatHooks = (on) => {
             return done;
         if (e.agentId !== undefined) {
             const id = e.agentId;
+            // Its last words are in its conversation now: its Details reads it again
+            talkMoved(id);
             turnEnding.add(id);
             try {
                 return await agentTurnEnded($, e, id, done);

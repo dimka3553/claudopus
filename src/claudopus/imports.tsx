@@ -33,4 +33,6 @@ import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, Prog
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
+import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, textHash as colourTextHash } from './colours'
+import type { ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressNext, ProgressPicture } from './progress'
