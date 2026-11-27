@@ -125,11 +125,15 @@ const draftDrawn = (key: string) => {
 // tab's own to-dos
 // (whether a card has a call running, not which: named by when it began, every call of every task was a new shape, and the
 // whole pane was drawn afresh for it)
+// (a card's rows of commands are counted once for each card as kept: naming and folding them for every card at every drawing was
+// most of the 35 ms this took)
+const jobCounts = new WeakMap<Todo, number>()
+const jobCount = (one: Todo) => jobCounts.get(one) ?? (jobCounts.set(one, jobsOf(one).length), jobCounts.get(one) ?? 0)
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const ranFrom = runFrom()
   try {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobCount(one)]
   const own = await drawnCards($)
   const chats = await drawnOthers($)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -215,6 +219,10 @@ const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 // Only while scrolled down: at the top what comes in comes below the header, as the person expects, and every behaviour that shows
 // what work did (a card that finishes comes up green, one stopped leaves after its pause) shows as before
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
+// (the update's steps are read from their file at most every two seconds: read at every drawing, the file was most of the 32 ms
+// this took)
+let stepsRead = ['', 0] as [string, number]
+const stepsNow = async ($: EngineInterface) => (isTimed && Date.now() - stepsRead[1] < 2000 ? stepsRead[0] : (stepsRead = [dir ? await readOr($, stepsPath()) : '', Date.now()])[0])
 const personSign = async ($: EngineInterface) => {
   const ranFrom = runFrom()
   try {
@@ -233,7 +241,7 @@ const personSign = async ($: EngineInterface) => {
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
     [...pictureIn.keys()], isUpdating, loadMark,
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
-    [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+    [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, await stepsNow($),
   ])
   } finally {
     runTo('personSign', ranFrom)

@@ -1,0 +1,3 @@
+- With tasks at work the panel and the bar are asked for far less often, so buttons stay put under the pointer and a busy chat uses less of the processor: a change that shows nothing new (a task's tokens or steps) no longer draws them again.
+- Each change to the list of tasks and each look at the panel costs less in a chat with many tasks.
+- On battery, Claudopus looks at your other Mac for presses every 15 seconds, not every 5.
