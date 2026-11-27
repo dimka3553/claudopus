@@ -31,7 +31,7 @@ import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, Prog
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
-import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, textHash as colourTextHash } from './colours'
+import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, textHash as colourTextHash } from './colours'
 import type { ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
@@ -298,7 +298,7 @@ const loadSettings = async ($: EngineInterface) => {
 if (dir) await personCheck($).catch(err => log($, `files not compared as the mod loads: ${String(err)}`))
 const config = await readConfig($, dir)
 isOff = config.agents === false
-isColoured = config.taskColours === true
+isColoured = config.taskColours !== false
 isLinked = config.replyLinks !== false
 void forgetKeptPasswords($).catch(() => undefined)
 person = typeof config.name === 'string' ? config.name.trim() : ''
@@ -3482,7 +3482,7 @@ ui,
 }
 
 
-let isColoured = false
+let isColoured = true
 let isLinked = true
 const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
@@ -3505,8 +3505,21 @@ return colourIndex.tasks[id]?.links ?? []
 }
 const isColourRead = () => isColoured || isLinked
 
-const replyTasks = (requestId: string, text: string) =>
-(colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id])
+const givenResults: { id: string; text: string }[] = []
+const resultGiven = (id: string, text: string) => {
+givenResults.push({ id, text: text.slice(0, 20_000) })
+givenResults.splice(0, Math.max(0, givenResults.length - 30))
+}
+const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
+const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
+const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults])
+if (passed && cards.some(one => one.id === passed)) {
+colourBuilder ??= new ColourBuilder()
+colourBuilder.pick(passed)
+return { ids: [passed], cards }
+}
+return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards }
+}
 
 const colourPass = async ($: EngineInterface, isWhole: boolean) => {
 const every = await $.session.messages().catch(() => [])
@@ -3558,8 +3571,12 @@ return colourBuild($, false)
 }
 
 const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
+if (surface === 'terminal') return openWork($, id)
 const one = (await read($, todos)).find(card => card.id === id)
-if (one && canChange(one) && repliesInBar(surface)) return openBar($, { kind: 'change', id }, surface)
+if (one?.ask && needsPerson(one)) return openBar($, { kind: 'answer', id, one }, surface)
+if (one && canChange(one)) return openBar($, { kind: 'change', id }, surface)
+const kept = (await read($, reports)).find(r => r.agent === id)
+if (kept) return openBar($, { kind: 'continue', id: kept.id }, surface)
 openWork($, id)
 }
 
@@ -3568,7 +3585,7 @@ const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.k
 const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {
 if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
 const given = isLinked ? replyLinksIn(e.props.text) : []
-const ids = isColoured ? replyTasks(e.requestId, e.props.text) : []
+const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
 const hash = colourTextHash(e.props.text)
 if (isColoured && !ids.length && !colourIndex.texts[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
 const [first] = ids
@@ -3580,6 +3597,11 @@ const links = given.length ? (
 <Markdown text={linkList(given)} />
 </Box>
 ) : null
+const colourOfTask = (id: string) => colourHex(colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id] ?? 0)
+const titleOfTask = (id: string) => colourIndex.tasks[id]?.title ?? (() => {
+const card = cards.find(one => one.id === id)
+return card ? titleOf(card) : 'Task'
+})()
 if (!first)
 return (
 <Box key={`linked-${mark(e.requestId)}`} flexDirection="column" gap={1}>
@@ -3588,17 +3610,16 @@ return (
 </Box>
 )
 return (
-<Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={colourHex(colourIndex.tasks[first]?.colour ?? 0)} paddingX={1} gap={1}>
+<Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={colourOfTask(first)} paddingX={1} gap={1}>
 <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
 {ids.map(id => {
-const task = colourIndex.tasks[id]
 return (
 <Box key={`task-${id}`} flexDirection="row" columnGap={2}>
 {/* The dot outside the button, as the app draws a button's words in its own colour */}
 <Box key={`task-name-${id}`} flexDirection="row">
-<Text color={colourHex(task?.colour ?? 0)}>● </Text>
+<Text color={colourOfTask(id)}>● </Text>
 <Button key={`task-open-${id}-${presses}`} plain hover={{ scope: `task-open-${id}`, underline: true }} onPress={() => openWork($, id)}>
-<Text bold>{cut(task?.title ?? 'Task', 60)}</Text>
+<Text bold>{cut(titleOfTask(id), 60)}</Text>
 </Button>
 </Box>
 <Button key={`task-reply-${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
@@ -10643,6 +10664,7 @@ const given = (await read($, todos)).filter(one => one.reportForChat !== undefin
 if (!given.length) return []
 await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
 await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
+for (const one of given) resultGiven(one.id, one.reportForChat ?? '')
 return given.map(one => named(REPORT_FOR_CHAT(titleOf(one), one.id, one.reportForChat ?? '')))
 }
 const partsFor = async ($: EngineInterface) => {
@@ -10650,6 +10672,7 @@ const given = (await read($, todos)).filter(one => one.partsForChat?.length)
 if (!given.length) return []
 await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)))
 await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
+for (const one of given) for (const part of one.partsForChat ?? []) resultGiven(one.id, part)
 return given.flatMap(one => (one.partsForChat ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))))
 }
 const quietNotices = (text: string, atWork: Set<string>, given: Set<string> = new Set()): Quiet => {

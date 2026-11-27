@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.291 · 27 November 2026
+- Reply on a coloured reply opens the box above the chat for that task: the answer box while it asks you something, the message box otherwise.
+- A chat reply that passes on a task's result now sits in that task's box, not the box of a task the chat heard from just before.
+- Task colours is now on unless you turn it off in Config.
+
 ## 0.2.290 · 27 November 2026
 - The boxes for every area are back under the Progress chart: each area with its picture and newest result, opened by a press on its name. This month's stand under their goals, with those under no goal folded; an earlier month shows its own.
 

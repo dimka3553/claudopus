@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { SessionMessage } from 'claude-code'
 
-import { Builder, NO_ANSWER, linksIn } from './colours'
+import { Builder, NO_ANSWER, linksIn, passedOn } from './colours'
 
 const PUPIL = 'a3333333333333333'
 const GAPS = 'a4444444444444444'
@@ -134,5 +134,29 @@ describe('which task a reply is about', () => {
     const again = new Builder(builder.colours)
     again.ingest(CHAT.slice(5))
     expect(again.index().tasks[GAPS]?.colour).toBe(tasks[GAPS]?.colour)
+  })
+
+  test("what the chat says after its answer to a notice that needs none is not the noticed task's, though a task's own message to it is missing from the rows", async () => {
+    const builder = new Builder()
+    builder.ingest([
+      notify(PUPIL, 'Pupil size: labelling and detection'),
+      says('quiet', NO_ANSWER),
+      says('shown', '', [{ tool_use_id: 'show', tool: 'SendUserFile', input: {} }]),
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'show', text: '1 file delivered', isError: false }] },
+      says('after', 'The gaps page now has its When column, and the Notion page lists every gap.'),
+    ])
+    expect(builder.index().replies.after).not.toEqual([PUPIL])
+  })
+
+  test('a reply that passes on a result as it came is about that result\'s task, the newest given first; a short one tells nothing', async () => {
+    const results = [
+      { id: PUPIL, text: 'The **pupil page** now works like the iris page.\n\nEvery face is upscaled.' },
+      { id: GAPS, text: 'The gaps page has its new When column, and it lists each gap with the day it was found.' },
+    ]
+    expect(passedOn('The pupil page now works like the iris page. Every face is upscaled.', results)).toBe(PUPIL)
+    expect(passedOn('The gaps page has its new When column, and it lists each gap', results)).toBe(GAPS)
+    expect(passedOn('The gaps page has its new When column, and it lists each gap', [...results, { id: HAIR, text: results[1]?.text ?? '' }])).toBe(HAIR)
+    expect(passedOn('Done.', results)).toBeUndefined()
+    expect(passedOn('Something else entirely, said in words of the chat\'s own.', results)).toBeUndefined()
   })
 })

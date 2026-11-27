@@ -1371,8 +1371,9 @@ test('a button the panel draws again with the same key and the same look keeps t
     return found
   }
   const first = await numbers()
-  const bar = [...first.keys()].filter(key => /^(stats|config|about|memory)-open-\d+$/.test(key))
-  expect(bar.length).toBe(4)
+  // (Memory is a line of Config's since 0.2.289, not a button of the bar's)
+  const bar = [...first.keys()].filter(key => /^(stats|config|about)-open-\d+$/.test(key))
+  expect(bar.length).toBe(3)
   // A task starts: its card is drawn, so the whole panel is made anew, every button in it handed to the engine again
   await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Fix the nose' }))).toBeDefined()

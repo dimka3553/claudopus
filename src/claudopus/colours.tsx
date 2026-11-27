@@ -1,11 +1,11 @@
-// Task colours and links at the end. Config's Task colours (`taskColours`, off as shipped) puts each chat reply about a task in a
+// Task colours and links at the end. Config's Task colours (`taskColours`, on as shipped) puts each chat reply about a task in a
 // box of that task's colour, headed by its name (a press opens its Details) and Reply (the box above the chat, to that task), and
 // gives its card the same colour dot. Links at the end (`replyLinks`, on as shipped) ends each chat reply with the links it gave,
 // each led by where it goes, and lists in a task's Details every link the chat gave about it. Which reply is about which task is
 // read from the chat's own transcript (../../mods/claudopus/hooks/colours.ts)
 
 // The two settings as this chat has them, read with the others (loadSettings)
-let isColoured = false
+let isColoured = true
 let isLinked = true
 const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
@@ -31,9 +31,24 @@ const taskLinks = ($: EngineInterface, id: string) => {
 }
 const isColourRead = () => isColoured || isLinked
 
-// The tasks a drawn reply is about: by its row id, else by its words (the desktop app names a reply by its message's id)
-const replyTasks = (requestId: string, text: string) =>
-  (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id])
+// The results this chat was given to pass on, the newest last: a reply that passes one on, as it came, is about its task
+const givenResults: { id: string; text: string }[] = []
+const resultGiven = (id: string, text: string) => {
+  givenResults.push({ id, text: text.slice(0, 20_000) })
+  givenResults.splice(0, Math.max(0, givenResults.length - 30))
+}
+// The tasks a drawn reply is about: the one whose result it passes on (given this load, or the end report a card keeps), else by
+// its row id, else by its words (the desktop app names a reply by its message's id)
+const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
+  const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
+  const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults])
+  if (passed && cards.some(one => one.id === passed)) {
+    colourBuilder ??= new ColourBuilder()
+    colourBuilder.pick(passed)
+    return { ids: [passed], cards }
+  }
+  return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards }
+}
 
 // One pass: reads the rows not yet read (every row the first time) and keeps what it found, redrawing when that changed
 const colourPass = async ($: EngineInterface, isWhole: boolean) => {
@@ -90,11 +105,15 @@ const colourSoon = ($: EngineInterface, gap = 400) => {
   })
 }
 
-// Reply on a reply's box: the box above the chat, to that task, where the bar takes one and the task takes a message; its Details
-// otherwise, whose message box is at its bottom
+// Reply on a reply's box opens the box above the chat, to that task: its answer box while it asks something, else the box Message
+// opens on its card, else the box that continues from its result. Only the terminal, whose bar has no box, opens its Details
 const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
+  if (surface === 'terminal') return openWork($, id)
   const one = (await read($, todos)).find(card => card.id === id)
-  if (one && canChange(one) && repliesInBar(surface)) return openBar($, { kind: 'change', id }, surface)
+  if (one?.ask && needsPerson(one)) return openBar($, { kind: 'answer', id, one }, surface)
+  if (one && canChange(one)) return openBar($, { kind: 'change', id }, surface)
+  const kept = (await read($, reports)).find(r => r.agent === id)
+  if (kept) return openBar($, { kind: 'continue', id: kept.id }, surface)
   openWork($, id)
 }
 
@@ -105,7 +124,7 @@ const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.k
 const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {
   if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
   const given = isLinked ? replyLinksIn(e.props.text) : []
-  const ids = isColoured ? replyTasks(e.requestId, e.props.text) : []
+  const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
   // A reply the last pass did not read: the rows since are read, and it is drawn again in its box
   // (once for each text: a reply about no task stays out of its box, and asks no pass again)
   const hash = colourTextHash(e.props.text)
@@ -119,6 +138,12 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
       <Markdown text={linkList(given)} />
     </Box>
   ) : null
+  // A task's colour and name: from what the transcript told, else its card
+  const colourOfTask = (id: string) => colourHex(colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id] ?? 0)
+  const titleOfTask = (id: string) => colourIndex.tasks[id]?.title ?? (() => {
+    const card = cards.find(one => one.id === id)
+    return card ? titleOf(card) : 'Task'
+  })()
   if (!first)
     return (
       <Box key={`linked-${mark(e.requestId)}`} flexDirection="column" gap={1}>
@@ -127,17 +152,16 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
       </Box>
     )
   return (
-    <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={colourHex(colourIndex.tasks[first]?.colour ?? 0)} paddingX={1} gap={1}>
+    <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={colourOfTask(first)} paddingX={1} gap={1}>
       <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
         {ids.map(id => {
-          const task = colourIndex.tasks[id]
           return (
             <Box key={`task-${id}`} flexDirection="row" columnGap={2}>
               {/* The dot outside the button, as the app draws a button's words in its own colour */}
               <Box key={`task-name-${id}`} flexDirection="row">
-                <Text color={colourHex(task?.colour ?? 0)}>● </Text>
+                <Text color={colourOfTask(id)}>● </Text>
                 <Button key={`task-open-${id}-${presses}`} plain hover={{ scope: `task-open-${id}`, underline: true }} onPress={() => openWork($, id)}>
-                  <Text bold>{cut(task?.title ?? 'Task', 60)}</Text>
+                  <Text bold>{cut(titleOfTask(id), 60)}</Text>
                 </Button>
               </Box>
               <Button key={`task-reply-${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
