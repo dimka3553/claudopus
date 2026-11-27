@@ -636,17 +636,25 @@ const recoverEnded = async ($: EngineInterface) => {
   if (!id) return
   // The engine lists only the work of its own process; the transcripts of the rest are in the chat's folder, one per agent
   const live = await $.agent.list().catch(() => [])
-  const folder = await agentsFolder($, id)
   type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
-  const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(Boolean)
+  // (and those of the chat this one is a rewind of, whose records stayed in that chat's folder: keep.tsx)
+  const metas: { one: string; folder: string; chatWas: string; meta: Meta; at: number }[] = []
+  for (const chatWas of chatFrom ? ['', chatFrom] : ['']) {
+    const folder = await agentsFolder($, chatWas || id)
+    const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(one => one && !metas.some(m => m.one === one))
+    metas.push(
+      ...(await Promise.all(
+        ids.map(async one => ({
+          one,
+          folder,
+          chatWas,
+          meta: JSON.parse((await readOr($, `${folder}/agent-${one}.meta.json`)) || '{}') as Meta,
+          at: (await $.fs.stat(`${folder}/agent-${one}.jsonl`).catch(() => undefined))?.mtimeMs ?? 0,
+        })),
+      )),
+    )
+  }
   // Only the work this chat's own thread started (its helpers are a level deeper), the newest first
-  const metas = await Promise.all(
-    ids.map(async one => ({
-      one,
-      meta: JSON.parse((await readOr($, `${folder}/agent-${one}.meta.json`)) || '{}') as Meta,
-      at: (await $.fs.stat(`${folder}/agent-${one}.jsonl`).catch(() => undefined))?.mtimeMs ?? 0,
-    })),
-  )
   // The newest few, so a chat with a long past is read once and never again: what is read back is kept with the rest
   const fresh = metas
     .filter(({ meta }) => meta.spawnDepth === 1)
@@ -656,7 +664,7 @@ const recoverEnded = async ($: EngineInterface) => {
   if (!fresh.length) return
   during('read back ended work')
   const found: Todo[] = []
-  for (const { one: agentId, meta } of fresh) {
+  for (const { one: agentId, meta, folder, chatWas } of fresh) {
     try {
       const mtime = (await $.fs.stat(`${folder}/agent-${agentId}.jsonl`).catch(() => undefined))?.mtimeMs ?? 0
       // A transcript too long to read still gives a card: its name, how it ended and when
@@ -706,7 +714,7 @@ const recoverEnded = async ($: EngineInterface) => {
         }
       }
       const status: Todo['status'] = one.status === 'failed' ? 'failed' : one.status === 'killed' ? 'stopped' : 'done'
-      found.push({ ...started(one.id, '', one.description, '', first || mtime, one.type === 'fork'), status, endedAt: last || mtime, model, tokens, items, entries: entries.slice(-ENTRIES_KEPT) })
+      found.push({ ...started(one.id, '', one.description, '', first || mtime, one.type === 'fork'), status, endedAt: last || mtime, model, tokens, items, entries: entries.slice(-ENTRIES_KEPT), ...(chatWas ? { chatWas } : {}) })
     } catch (err) {
       await log($, `ended work ${agentId} not read back: ${String(err)}`)
     }

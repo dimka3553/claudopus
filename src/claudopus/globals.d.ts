@@ -317,10 +317,12 @@ declare global {
   export import batteryShown = M12.batteryShown
   export import batterySvg = M12.batterySvg
   export import chartSvg = M12.chartSvg
+  export import FOOTPRINT_BATTERY_EVERY = M12.FOOTPRINT_BATTERY_EVERY
   export import FOOTPRINT_EVERY = M12.FOOTPRINT_EVERY
   export import HISTORY_SPAN = M12.HISTORY_SPAN
   export import gbText = M12.gbText
   export import isBatteryLow = M12.isBatteryLow
+  export import isOnBatteryLook = M12.isOnBatteryLook
   export import isMemoryHigh = M12.isMemoryHigh
   export import keptOf = M12.keptOf
   export import leftText = M12.leftText
@@ -329,6 +331,7 @@ declare global {
   export import pctText = M12.pctText
   export import rateText = M12.rateText
   export import USAGE_AMBER = M12.USAGE_AMBER
+  export import USAGE_BATTERY_EVERY = M12.USAGE_BATTERY_EVERY
   export import USAGE_EVERY = M12.USAGE_EVERY
   export import USAGE_LINUX = M12.USAGE_LINUX
   export import USAGE_PURPLE = M12.USAGE_PURPLE
@@ -401,8 +404,11 @@ declare global {
   export import replyLinksIn = M18.linksIn
   export import PALETTE = M18.PALETTE
   export import passedOn = M18.passedOn
+  export import personWords = M18.personWords
+  export import quoteFor = M18.quoteFor
   export import slotsFor = M18.slotsFor
   export import colourTextHash = M18.textHash
+  export import CardWords = M18.CardWords
   export import ColourIndex = M18.ColourIndex
   export import TaskLink = M18.TaskLink
   export import ProgressArea = M15.ProgressArea

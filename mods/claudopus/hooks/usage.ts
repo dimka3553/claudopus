@@ -6,6 +6,10 @@
 // a second of the processor where ps costs a hundredth
 export const USAGE_EVERY = 5_000
 export const FOOTPRINT_EVERY = 60_000
+// On battery, less often: the whole look costs about 0.4 s of the processor and top 2.6 s on a Mac with many processes (27 Nov),
+// a sixth of a core while work ran, measured with the Mac drawing 50 to 60 W on battery
+export const USAGE_BATTERY_EVERY = 15_000
+export const FOOTPRINT_BATTERY_EVERY = 5 * 60_000
 // Two looks further apart than this give no rates
 const USAGE_GAP = 120_000
 // Memory past this part of the whole turns amber
@@ -154,6 +158,9 @@ export const batteryOfMac = (text: string): UsageBattery | undefined => {
   const left = t && (state === 'battery' || state === 'charging') ? Number(t[1]) * 60 + Number(t[2]) : 0
   return { pct, state, ...(left > 0 ? { left } : {}), ...(said === 'finishing charge' ? { finishing: true as const } : {}) }
 }
+// Whether a look at the power (pmset -g batt on a Mac, power_supply's files on Linux, as the usage look reads them) says the computer
+// runs on its battery now: then Claudopus looks at things less often and Claude's commands get fewer cores at full speed
+export const isOnBatteryLook = (text: string, isLinux: boolean) => (isLinux ? batteryOfLinux(text) : batteryOfMac(text))?.state === 'battery'
 // The battery as the bar shows it: no time beside a charge the system already calls full while it charges, or empty on battery,
 // so the figure and the time never contradict each other. The time stays in what was read, for whoever wants it in full
 export const batteryShown = (b: UsageBattery): UsageBattery => {
@@ -513,10 +520,10 @@ const claudeShareOf = (prev: UsageRaw, cur: UsageRaw, span: number): Partial<Usa
   return out
 }
 
-// The next kept state from a look: top's memory kept for a minute, the figures against the look before
+// The next kept state from a look: top's memory kept until the next top is due, on battery too, the figures against the look before
 export const nextKept = (was: UsageKept | undefined, text: string, at: number, isLinux: boolean, isTop = false, isWindows = false): UsageKept | undefined => {
   const top = isLinux || isWindows ? {} : footprintOf(sectionsOf(text).TOP ?? '')
-  const footprint = Object.keys(top).length ? { at, byPid: top } : was?.footprint && at - was.footprint.at < FOOTPRINT_EVERY * 3 ? was.footprint : undefined
+  const footprint = Object.keys(top).length ? { at, byPid: top } : was?.footprint && at - was.footprint.at < FOOTPRINT_BATTERY_EVERY + FOOTPRINT_EVERY ? was.footprint : undefined
   const raw = isWindows ? rawOfWindows(text, at) : isLinux ? rawOfLinux(text, at) : rawOfMac(text, at, footprint?.byPid)
   if (!raw) return undefined
   const topAt = isTop ? at : was?.topAt

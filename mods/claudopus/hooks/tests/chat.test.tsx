@@ -1423,6 +1423,11 @@ test("work reaches main only through the release runner: its rules name it, and 
   ]
   for (const [i, command] of kept.entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `k${i}`, command, agentId: 'w1' } as never)).deny, command).toBeUndefined()
+  // and no file of it is written by work, by any file tool: a worktree made inside it and another repo are written
+  for (const [i, call] of [{ tool: 'Write', file_path: '/code/src/claudopus/chat.tsx', content: 'x' }, { tool: 'Edit', file_path: '/code/mods/claudopus/bin/revive', old_string: 'a', new_string: 'b' }, { tool: 'NotebookEdit', notebook_path: '/code/n.ipynb', new_source: 'x' }].entries())
+    expect((await $.tool.call({ ...call, tool_use_id: `w${i}`, agentId: 'w1' } as never)).deny, call.tool).toMatch(/^Not changed: \/code holds the Claudopus code/)
+  for (const [i, file] of ['/code/wt/src/x.tsx', '/other/x.tsx', '/codex/x.tsx'].entries())
+    expect((await $.tool.call({ tool: 'Write', file_path: file, content: 'x', tool_use_id: `v${i}`, agentId: 'w1' } as never)).deny, file).toBeUndefined()
   const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main', 'git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push', 'grep -n RELEASE_PUSH= bin/release']
   for (const [i, command] of allowed.entries()) {
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `a${i}`, command, agentId: 'w1' } as never)).deny).toBeUndefined()

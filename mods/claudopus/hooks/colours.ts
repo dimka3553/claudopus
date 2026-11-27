@@ -33,11 +33,37 @@ export type ColourIndex = {
   replies: Record<string, string[]>
   /** A short hash of a reply's text to the ids of its tasks (texts said once). */
   texts: Record<string, string[]>
-  /** A reply's row id, and the hash of its text, to the person's message it answers. */
-  quotes: Record<string, string>
-  /** Each task's newest message from the person, as the transcript has it. */
-  asked: Record<string, string>
+  /** Each reply's row id, and the hash of its text, to its place in the transcript. */
+  rows: Record<string, number>
+  /**
+   * What the person sent each task, oldest first, each where it falls in the transcript: their chat messages the chat passed on
+   * to it or asked about it in, and what they wrote to it on its card. A reply quotes the newest of its task's before it (quoteFor).
+   */
+  said: Record<string, Said[]>
 }
+
+/**
+ * A message of the person's to a task, and where it falls in the transcript: after the row `row` counts (a half: between rows).
+ * `until`: the last row of its turn, for a note the chat passed to several tasks at once, which only the replies of that turn answer.
+ */
+export type Said = { row: number; text: string; until?: number }
+
+/**
+ * What the person wrote to a task on its card (its Message box, its answer box, Reply on a chat reply), and where the transcript
+ * stood as it went: how many rows it had, and the mark of the last of them (Builder.stamp).
+ */
+export type CardWords = { id: string; text: string; row: number; mark: string }
+
+/** The message of the person's a reply about a task answers: the newest they sent that task before the reply's row, or before now. */
+export const quoteFor = (index: Pick<ColourIndex, 'said'>, id: string, row?: number) =>
+  [...(index.said[id] ?? [])].reverse().find(one => (row === undefined ? one.until === undefined : one.row <= row && (one.until === undefined || row <= one.until)))?.text
+
+/** How many tasks or more one message the chat passes on must go to, in one turn, to be a note to them all rather than a task's own. */
+const NOTE_TO_ALL = 3
+
+/** The tasks a hand-off from Claudopus names: a task's part of its result, or its report, given to the chat to pass on. */
+const handedIn = (text: string) =>
+  [...text.matchAll(/From Claudopus: the task "([^"\n]*)" \(([A-Za-z0-9_-]+)\) (?:is still working, and handed in this part of its result|has finished, and its report follows)/g)].map(m => ({ title: m[1] ?? '', id: m[2] ?? '' }))
 
 /** Twelve colours that read on a light and a dark chat alike. */
 export const PALETTE = [
@@ -237,6 +263,10 @@ const idOf = (row: SessionMessage) => {
   return typeof id === 'string' && id ? id : undefined
 }
 
+/** A row's mark: a short hash of who wrote it, its words and the tools it called or answered, to find the row again. */
+const markOf = (row: SessionMessage) =>
+  textHash(`${row.role}\n${row.text ?? ''}\n${(row.toolUses ?? []).map(use => use.tool_use_id).join(' ')}\n${(row.toolResults ?? []).map(result => result.tool_use_id).join(' ')}`)
+
 /** The person's own words in a message of theirs, without what the app or a mod put beside them. */
 export const personWords = (text: string) =>
   text
@@ -244,11 +274,34 @@ export const personWords = (text: string) =>
     .replace(/<(command-[a-z]+|local-command-[a-z]+)>[\s\S]*?<\/\1>/g, '')
     // Text the person pasted is theirs: its words stay, the app's marks around it go
     .replace(/<\/?pasted_content[^>]*>/g, '')
+    // A picture they sent is no words of theirs to quote, nor the app's marks
+    .replace(/\[Image(?: #\d+)?(?:: source: [^\]]*)?\]/g, '')
+    .replace(/<artifact-content-authored-by-others\/>/g, '')
     .trim()
+    // Words written on a result go to the chat after the result they continue from: the words alone are theirs
+    .replace(/^Continue from the result "[^\n]*?" \([^)\n]*\), [^\n]*?\/report\.md: /, '')
 
-/** A user row that only reminds the model of something: it opens no turn. */
+// Compared as whole words: letters and digits alone, any quote, apostrophe or dash the chat retyped left out
+const STRETCH = 40
+const wordsOnly = (text: string) => ` ${text.toLowerCase().replace(/[’‘']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
+/** Whether a message the chat sent carries the person's words: whole when short, else a stretch of STRETCH letters of them. */
+export const carries = (message: string, words: string) => {
+  const m = wordsOnly(message)
+  const w = wordsOnly(words)
+  if (!w.trim()) return false
+  if (w.length <= STRETCH) return m.includes(w)
+  const starts = [0, ...[...w].flatMap((c, i) => (c === ' ' ? [i + 1] : []))].filter(i => i + STRETCH <= w.length)
+  return starts.some(i => m.includes(w.slice(i, i + STRETCH)))
+}
+
+/**
+ * A user row that only reminds the model of something: it opens no turn. One that also carries a message, a notification, or a task's
+ * result handed to the chat in a reminder beside it, does (27 Nov: a task's part of its result went under the task before it)
+ */
 const isReminder = (text: string) =>
-  text.trimStart().startsWith('<system-reminder>') && !text.includes('<task-notification>')
+  // (and the summary a compaction leaves, which is no one's message)
+  text.includes('This session is being continued from a previous conversation') ||
+  !text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim() && !text.includes('<task-notification>') && !handedIn(text).length
 
 const agentIdOf = (result: unknown, text: string | undefined) => {
   if (result && typeof result === 'object' && 'agentId' in result) {
@@ -258,9 +311,11 @@ const agentIdOf = (result: unknown, text: string | undefined) => {
   return /agentId:\s*([A-Za-z0-9_-]+)/.exec(text ?? '')?.[1]
 }
 
-type Reply = { uuid?: string; text: string; stems?: Set<string>; links?: TaskLink[] }
-/** A turn's tasks: those whose notification or message opened it, and those the chat acted on in it. */
-type Turn = { opening: string; notified: string[]; acted: string[]; hasPrompt: boolean; prompt: string; replies: Reply[] }
+type Reply = { uuid?: string; row: number; text: string; stems?: Set<string>; links?: TaskLink[] }
+/** What the chat sent a task, and in which row: an Agent call's prompt, a SendMessage's message, nothing for a TaskStop. */
+type Route = { id: string; row: number; text: string }
+/** A turn's tasks: those whose notification or message opened it, and those the chat acted on in it, and how. */
+type Turn = { opening: string; notified: string[]; acted: string[]; routes: Route[]; hasPrompt: boolean; prompt: string; promptRow: number; replies: Reply[] }
 type Known = { title: string; rank: number; status: string }
 
 /**
@@ -282,7 +337,9 @@ export class Builder {
   read = 0
   private readonly known = new Map<string, Known>()
   private readonly names = new Map<string, string>()
-  private readonly launches = new Map<string, { title: string; name?: string; turn: Turn }>()
+  private readonly launches = new Map<string, { title: string; name?: string; turn: Turn; row: number; text: string }>()
+  /** Each row's mark, to find again where a message on a card fell after a compaction or a reload (stamp, place). */
+  private readonly marks: string[] = []
   private readonly turns: Turn[] = []
   private turn: Turn | undefined
   private saidLast = false
@@ -293,15 +350,29 @@ export class Builder {
 
   ingest(rows: readonly SessionMessage[]) {
     for (const row of rows) {
+      const at = this.read
       this.read += 1
-      if (row.role === 'user') this.user(row)
-      else this.assistant(row)
+      this.marks.push(markOf(row))
+      if (row.role === 'user') this.user(row, at)
+      else this.assistant(row, at)
     }
+  }
+
+  /** Where the transcript stands now, as read: for a message the person writes on a card. */
+  stamp(): Pick<CardWords, 'row' | 'mark'> {
+    return { row: this.read, mark: this.marks[this.read - 1] ?? '' }
+  }
+
+  /** The place of a message on a card among the rows: after the row it was stamped at, found by its mark; before them all, gone. */
+  private place(one: Pick<CardWords, 'row' | 'mark'>) {
+    if (one.row > 0 && this.marks[one.row - 1] === one.mark) return one.row - 0.5
+    const at = one.mark ? this.marks.lastIndexOf(one.mark) : -1
+    return at >= 0 ? at + 0.5 : -1
   }
 
   private open() {
     if (!this.turn) {
-      this.turn = { opening: '', notified: [], acted: [], hasPrompt: false, prompt: '', replies: [] }
+      this.turn = { opening: '', notified: [], acted: [], routes: [], hasPrompt: false, prompt: '', promptRow: 0, replies: [] }
       this.turns.push(this.turn)
     }
     return this.turn
@@ -321,7 +392,7 @@ export class Builder {
     if (!ids.includes(id)) ids.push(id)
   }
 
-  private user(row: SessionMessage) {
+  private user(row: SessionMessage, at: number) {
     for (const result of row.toolResults ?? []) this.answered(result)
     const text = row.text ?? ''
     if (!text.trim() || isReminder(text)) return
@@ -339,32 +410,40 @@ export class Builder {
       this.know(peer.id, peer.title, 1)
       this.join(turn.notified, peer.id)
     }
+    // A task's result Claudopus handed the chat to pass on: the turn is that task's
+    const handed = handedIn(text)
+    for (const one of handed) {
+      this.know(one.id, one.title, 2)
+      this.join(turn.notified, one.id)
+    }
     if (!notified.length && !peer) {
-      turn.hasPrompt = true
       // The person's own words, the newest of the turn: what its replies answer
       const words = personWords(text)
-      if (words) turn.prompt = words
+      if (words.startsWith('From Claudopus:')) return
+      if (words || !handed.length) turn.hasPrompt = true
+      if (words) (turn.prompt = words), (turn.promptRow = at)
     }
   }
 
-  private assistant(row: SessionMessage) {
+  private assistant(row: SessionMessage, at: number) {
     this.saidLast = true
     const turn = this.open()
-    if ((row.text ?? '').trim()) turn.replies.push({ uuid: idOf(row), text: row.text ?? '' })
-    for (const use of row.toolUses ?? []) this.used(use, turn)
+    if ((row.text ?? '').trim()) turn.replies.push({ uuid: idOf(row), row: at, text: row.text ?? '' })
+    for (const use of row.toolUses ?? []) this.used(use, turn, at)
     // The chat's answer to a notice that needs none closes that turn: what it says next, with no message of the person's between
     // (a task's own message to the chat is not always in the rows it is given), is a turn of its own, never the noticed task's
     if ((row.text ?? '').trim() === NO_ANSWER) this.turn = undefined
   }
 
-  private used(use: ToolUseSummary, turn: Turn) {
+  private used(use: ToolUseSummary, turn: Turn, row: number) {
     const input = use.input ?? {}
     if (use.tool === 'Agent') {
       const title = typeof input.description === 'string' ? input.description : ''
       const name = typeof input.name === 'string' ? input.name : undefined
+      const text = typeof input.prompt === 'string' ? input.prompt : ''
       const id = use.agentId ?? agentIdOf(use.result, use.text)
-      if (id) this.started(id, title, name, turn)
-      else this.launches.set(use.tool_use_id, { title, name, turn })
+      if (id) this.started(id, title, name, turn, row, text)
+      else this.launches.set(use.tool_use_id, { title, name, turn, row, text })
       return
     }
     const to =
@@ -374,6 +453,7 @@ export class Builder {
     if (this.known.has(id) || /^a[0-9a-f]{12,}$/.test(id)) {
       if (!this.known.has(id)) this.know(id, undefined, 0)
       this.join(turn.acted, id)
+      turn.routes.push({ id, row, text: use.tool === 'SendMessage' && typeof input.message === 'string' ? input.message : '' })
     }
   }
 
@@ -382,13 +462,14 @@ export class Builder {
     if (!launch) return
     this.launches.delete(result.tool_use_id)
     const id = agentIdOf(result.result, result.text)
-    if (id) this.started(id, launch.title, launch.name, launch.turn)
+    if (id) this.started(id, launch.title, launch.name, launch.turn, launch.row, launch.text)
   }
 
-  private started(id: string, title: string, name: string | undefined, turn: Turn) {
+  private started(id: string, title: string, name: string | undefined, turn: Turn, row: number, text: string) {
     this.know(id, title, 3)
     if (name) this.names.set(name, id)
     this.join(turn.acted, id)
+    turn.routes.push({ id, row, text })
   }
 
   /** The task's stored colour, or for a new one the colour least used by the tasks active beside it. */
@@ -412,8 +493,11 @@ export class Builder {
     return this.colourOf(id, Object.keys(this.colours).slice(-12))
   }
 
-  /** Which task each reply is about, as the drawing reads it. */
-  index(): ColourIndex {
+  /**
+   * Which task each reply is about, as the drawing reads it. `cards`: what the person wrote to tasks on their cards; `heard`: the
+   * person's chat messages, the newest last, those sent while the chat was at work among them (the transcript has no row of theirs)
+   */
+  index({ cards = [], heard = [] }: { cards?: readonly CardWords[]; heard?: readonly string[] } = {}): ColourIndex {
     const named = [...this.known].filter(([, one]) => one.title)
     const owners = new Map<string, number>()
     const wordsOf = new Map<string, Set<string>>()
@@ -439,12 +523,17 @@ export class Builder {
     const seen = new Map<string, number>()
     const colours = new Map<string, number>()
     let before: string[] = []
-    // The person's newest message to each task: one the chat acted on the task in, or asked about it in
-    const asked = new Map<string, string>()
-    const quotes: Record<string, string> = {}
+    // What the person sent each task, as the transcript and their cards tell it
+    const said = new Map<string, Said[]>()
+    const sayTo = (id: string, row: number, text: string, until?: number) => said.set(id, [...(said.get(id) ?? []), { row, text, ...(until === undefined ? {} : { until }) }])
+    const rows: Record<string, number> = {}
+    const heardWords = heard.map(personWords).filter(Boolean)
+    const heardAt = (text: string) => heardWords.map(wordsOnly).lastIndexOf(wordsOnly(text))
+    // The newest of the person's messages each task was given, by its place among those messages
+    const newestHeard = new Map<string, number>()
 
     this.turns.forEach((turn, at) => {
-      const said = turn.replies.filter(reply => reply.text.trim() !== NO_ANSWER)
+      const replied = turn.replies.filter(reply => reply.text.trim() !== NO_ANSWER)
       const acted = titled(turn.acted)
       const notified = titled(turn.notified)
       // The person's own message with tasks the chat acted on: a notification that came in
@@ -452,9 +541,9 @@ export class Builder {
       const base = turn.hasPrompt && acted.length ? acted : [...new Set([...notified, ...acted])]
       const aside = turn.hasPrompt && acted.length ? notified.filter(id => !acted.includes(id)) : []
       let guessed: string[] = []
-      if (!base.length && said.length) {
+      if (!base.length && replied.length) {
         const have = stems(turn.opening)
-        for (const reply of said) for (const word of stemsOf(reply)) have.add(word)
+        for (const reply of replied) for (const word of stemsOf(reply)) have.add(word)
         const scored = named
           .map(([id]) => ({ id, score: names(id, have) + (before.length === 1 && before[0] === id ? 1 : 0) }))
           .sort((a, b) => b.score - a.score)
@@ -462,8 +551,31 @@ export class Builder {
         if (best && best.score >= 1.5 && (!second || second.score < best.score)) guessed = [best.id]
       }
       const ids = base.length ? base : guessed
-      if (turn.prompt) for (const id of ids) asked.set(id, turn.prompt)
-      for (const reply of said) {
+      const gifts: Route[] = []
+      if (turn.prompt) {
+        // The person's message goes to the tasks the chat acted on in its turn, and where some of what the chat sent carries their
+        // words, to those alone: a message they sent while the chat was at work was passed on to another task in the same turn
+        // (27 Nov: a result quoted "Why was there only one Don't Allow button", which had gone to the task that fixes that button)
+        const carriers = turn.hasPrompt && acted.length ? [...new Set(turn.routes.filter(route => acted.includes(route.id) && carries(route.text, turn.prompt)).map(route => route.id))] : []
+        for (const id of carriers.length ? carriers : ids) gifts.push({ id, row: turn.promptRow, text: turn.prompt })
+      }
+      // A message of theirs that came while the chat was at work goes to the task the chat passed it on to, from that row: only one
+      // newer than any it was given before, as the chat's own notes to a task quote older messages of theirs too
+      for (const route of turn.routes) {
+        if (!this.known.get(route.id)?.title || !route.text) continue
+        const theirs = heardWords.findLast(words => wordsOnly(words) !== wordsOnly(turn.prompt) && carries(route.text, words))
+        // (and newer than the message of the turn: one sent while the chat was at work came after it)
+        if (theirs && heardAt(theirs) > Math.max(newestHeard.get(route.id) ?? -1, turn.prompt ? heardAt(turn.prompt) : -1)) gifts.push({ id: route.id, row: route.row, text: theirs })
+      }
+      // A message the chat passed on to several tasks at once is a note to them all: the replies of its turn answer it, and their
+      // later results do not (27 Nov: "cause like 50 or 60 watts how??", passed to four tasks, headed each of their results)
+      const end = Math.max(turn.promptRow, ...turn.replies.map(reply => reply.row), ...turn.routes.map(route => route.row))
+      for (const gift of gifts) {
+        const many = new Set(gifts.filter(other => other.text === gift.text).map(other => other.id)).size >= NOTE_TO_ALL
+        sayTo(gift.id, gift.row, gift.text, many ? end : undefined)
+        newestHeard.set(gift.id, Math.max(newestHeard.get(gift.id) ?? -1, heardAt(gift.text)))
+      }
+      for (const reply of replied) {
         let mine = ids
         if (ids.length > 1) {
           // A reply that names some of its turn's tasks and not the rest is about those.
@@ -472,15 +584,12 @@ export class Builder {
         }
         const extra = aside.filter(id => names(id, stemsOf(reply)) >= 1)
         if (extra.length) mine = [...mine, ...extra]
+        const hash = textHash(reply.text)
+        // Its place, for the message it answers: the newest its task was sent before it (quoteFor)
+        if (reply.uuid) rows[reply.uuid] = reply.row
+        rows[hash] = reply.row
         if (!mine.length) continue
         if (reply.uuid) replies[reply.uuid] = mine
-        const hash = textHash(reply.text)
-        // What it answers: the person's message of its own turn, else the newest they sent its task before it
-        const quote = turn.prompt || (mine[0] ? asked.get(mine[0]) : undefined)
-        if (quote) {
-          if (reply.uuid) quotes[reply.uuid] = quote
-          quotes[hash] = quote
-        }
         if (!clashed.has(hash)) {
           const was = texts[hash]
           if (was && was.join() !== mine.join()) {
@@ -498,8 +607,10 @@ export class Builder {
           if (given.length) links.set(id, [...(links.get(id) ?? []), ...given])
         }
       }
-      if (said.length) before = ids
+      if (replied.length) before = ids
     })
+    // What the person wrote on a card, where it fell among the rows
+    for (const one of cards) if (one.text.trim()) sayTo(one.id, this.place(one), one.text.trim())
 
     const tasks: Record<string, ColouredTask> = {}
     for (const [id, colour] of colours) {
@@ -511,6 +622,8 @@ export class Builder {
       }
       tasks[id] = { title: one.title, colour, status: one.status, links: newest }
     }
-    return { tasks, replies, texts, quotes, asked: Object.fromEntries(asked) }
+    // Each task's, in the order they came, the newest dozen
+    const sent = Object.fromEntries([...said].map(([id, list]) => [id, [...list].sort((a, b) => a.row - b.row).slice(-16)]))
+    return { tasks, replies, texts, rows, said: sent }
   }
 }

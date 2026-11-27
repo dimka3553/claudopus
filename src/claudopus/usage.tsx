@@ -22,9 +22,12 @@ const usagePathOf = async ($: EngineInterface) => {
 const usageEvery = () => (isWindows ? USAGE_EVERY * 3 : USAGE_EVERY)
 // One look when the last is due: a fresh one another chat left is taken as it is, and a chat that is looking says so first in a
 // small file beside it, so chats that fall due together look once
+// How often it looks: less often on battery, as the look itself costs the processor
+const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
 const lookUsage = async ($: EngineInterface) => {
   const now = await $.clock.now()
-  const isFresh = (at: number) => now >= at && now - at < usageEvery() - 500
+  const every = usageEvery()
+  const isFresh = (at: number) => now >= at && now - at < every - 500
   if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
   usageBusy = true
   usageTriedAt = now
@@ -33,12 +36,12 @@ const lookUsage = async ($: EngineInterface) => {
     const shared = keptOf(await $.fs.read(path).catch(() => ''))
     if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
     const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
-    if (taking && now >= taking && now - taking < usageEvery() / 2) return
+    if (taking && now >= taking && now - taking < every / 2) return
     await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
     const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
-    // top, the costly part, at most once a minute, answered or not
+    // top, the costly part, at most once a minute, answered or not, and on battery once in five
     const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
-    const isTop = !isLinux && !isWindows && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+    const isTop = !isLinux && !isWindows && (!topAt || now < topAt || now - topAt >= (isOnBattery ? FOOTPRINT_BATTERY_EVERY : FOOTPRINT_EVERY))
     if (isTop) usageTopTriedAt = now
     const r = await runOn($, isWindows ? [...POWERSHELL, USAGE_WINDOWS] : ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: isWindows ? 15_000 : 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop, isWindows) : undefined

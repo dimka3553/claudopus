@@ -1017,12 +1017,18 @@ test("every task is written to the chat's ledger as it changes, with the chat's 
   expect([...files.keys()].filter(path => /\/keep\/engine-id\.(state|handover)$/.test(path))).toEqual([])
 })
 
-test('each chat beats for the watcher that brings Claudopus back, naming its process, the key its copy has in the settings, the settings file and its load, and starts the watcher', async ($, on) => {
+test('each chat beats for the watcher that brings Claudopus back from the start of its load, naming its process, the key its copy has in the settings, the settings file and its load, and starts the watcher', async ($, on) => {
   const { files, clock } = world(on)
   // This copy is loaded from a marketplace that is a folder on this Mac, as Claudopus's own checkout: its key is that marketplace's
   files.set(`${HOME}/.claude/plugins/known_marketplaces.json`, JSON.stringify({ other: { installLocation: '/elsewhere' }, mine: { installLocation: PLUGIN.replace(/\/mods\/claudopus$/, '') } }))
-  await $.session.start(start)
   const beat = `${MEMORY}/keep/engine-id.beat`
+  // The beat is written before the rest of the start (here, the index a first start writes): a busy Mac took over a minute to reach
+  // the end of a start, and the watcher took each fresh load for one switched off and loaded it again (27 Nov)
+  files.delete(`${MEMORY}/index.md`)
+  await $.session.start(start)
+  const order = [...files.keys()]
+  expect(order.indexOf(beat)).toBeGreaterThan(-1)
+  expect(order.indexOf(beat)).toBeLessThan(order.indexOf(`${MEMORY}/index.md`))
   // (the load, so the watcher tells a load that beats again after its change, never off, from one that came back)
   // (on a line of its own, so a watcher of an older version still reads the first as before)
   const [first, load, ...rest] = (files.get(beat) ?? '').split('\n')
@@ -1210,4 +1216,68 @@ test("on a Windows PC a chat that is not open whose engine is gone lists its tas
   expect(said.some(text => /Train the splats/.test(text))).toBe(false)
   expect(pc.runs.some(run => /^tasklist/i.test(run.argv[0] ?? ''))).toBe(true)
   await list.unmount()
+})
+
+test("a chat the app's rewind starts again under a new id has every card of the chat it came from, as a restart finds them: one at work Interrupted with Carry on, told its instructions and its transcript; delivered and finished ones as they ended; the person's words kept; once, and the first chat no longer listed under its own name; a copy of a chat still running takes nothing", SLOW, async ($, on) => {
+  const { files, clock } = world(on)
+  const at = KEEP_NOW - 600_000
+  // The first chat: a task at work, one delivered, the person's words
+  files.set('session:id', 'chat-old')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'solve the cameras', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Solve the cameras', prompt: 'Solve the cameras with the new rig: all 158 frames placed.' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the totals', prompt: 'check' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a2', message: 'March adds up, and the report is written with every number.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(21_000)
+  type Kept = { pid?: string; tasks?: { id: string; state: string }[] }
+  const kept = () => JSON.parse(files.get(`${MEMORY}/ledger/chat-old.json`) ?? '{}') as Kept
+  expect(await until(async () => (kept().tasks?.some(one => one.id === 'a2' && one.state === 'delivered') ? kept().tasks?.map(one => one.id) : undefined))).toEqual(['a1', 'a2'])
+  const ended = { id: 'a3', parentId: '', isFork: false, tokens: 0, title: 'Draw the chart', words: '', items: [], entries: [], answer: '', startedAt: at - 60_000, endedAt: at, status: 'done', closedAt: at }
+  files.set(`${MEMORY}/finished/chat-old.json`, JSON.stringify([ended]))
+  // The rewind: the app ends that process and starts the chat again in another, as a copy under a new id
+  const rewind = (pid: string) => {
+    files.set(`${MEMORY}/ledger/chat-old.json`, JSON.stringify({ ...kept(), pid }))
+    files.set('session:id', 'engine-id')
+    files.set(`${HOME}/.claude/projects/-repo/engine-id.jsonl`, `${JSON.stringify({ type: 'custom-title', customTitle: 'Rig', sessionId: 'engine-id' })}\n${JSON.stringify({ type: 'derived-from', v: 1, sessionId: 'engine-id', sessions: [{ type: 'claude_code_session', id: 'chat-old', via: 'resume' }, { type: 'claude_code_session', id: 'chat-old', via: 'fork' }] })}\n`)
+  }
+  rewind('3131')
+  await $.session.start(start)
+  const lines = async () => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const texts = (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+    const buttons = (await pane.findAll({ type: 'Button' })).map(one => String(one.props.label ?? ''))
+    await pane.unmount()
+    return { texts, buttons }
+  }
+  const now = await until(async () => ((await lines()).texts.some(text => text.startsWith('⏸ Interrupted')) ? await lines() : undefined))
+  expect(now?.texts).toEqual(expect.arrayContaining(['Solve the cameras', 'Check the totals', '◐ Delivered']))
+  expect([now?.buttons.filter(label => label === 'Carry on').length, now?.buttons.includes('Open chat')]).toEqual([1, false])
+  // (the finished one under Finished, kept with this chat's own)
+  await clock.advance(21_000)
+  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/finished/engine-id.json`) ?? '[]') as { id: string; title: string }[]).find(one => one.id === 'a3')?.title)).toBe('Draw the chart')
+  expect(files.get(`${MEMORY}/words/engine-id.said.md`)).toContain('solve the cameras')
+  // Loaded again, nothing is brought over twice
+  await $.session.start(start)
+  await clock.advance(5_000)
+  expect((files.get(`${MEMORY}/words/engine-id.said.md`) ?? '').split('solve the cameras').length).toBe(2)
+  expect((await lines()).buttons.filter(label => label === 'Carry on').length).toBe(1)
+  // Carry on: the fresh task is told the instructions and the transcript the first chat kept
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pane.press({ key: (await keyed(pane, 'carry-small-a1'))?.key ?? '' })
+  await pane.unmount()
+  const carry = await until(async () => files.get(`${MEMORY}/ledger/engine-id/a1.carry.md`))
+  for (const part of ['Solve the cameras with the new rig: all 158 frames placed.', `${HOME}/.claude/projects/-repo/chat-old/subagents/agent-a1.jsonl`]) expect(carry).toContain(part)
+})
+
+test("a copy of a chat that still runs in its own process is a chat of its own: it takes none of that chat's cards", SLOW, async ($, on) => {
+  const { files, clock } = world(on)
+  const card = { id: 'b1', parentId: '', isFork: false, tokens: 0, title: 'Send the invoices', words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW, endedAt: 0, status: 'working' }
+  // (700 still runs)
+  files.set(`${MEMORY}/ledger/chat-old.json`, JSON.stringify({ chat: 'chat-old', title: '', folder: '/repo', pid: '700', savedAt: KEEP_NOW, tasks: [{ id: 'b1', title: 'Send the invoices', state: 'working', note: '', transcript: '', card }] }))
+  files.set(`${HOME}/.claude/projects/-repo/engine-id.jsonl`, `${JSON.stringify({ type: 'derived-from', v: 1, sessionId: 'engine-id', sessions: [{ type: 'claude_code_session', id: 'chat-old', via: 'fork' }] })}\n`)
+  await $.session.start(start)
+  await clock.advance(5_000)
+  expect((files.get(`${MEMORY}/log.md`) ?? '').includes('goes on from')).toBe(false)
+  expect(files.has(`${MEMORY}/keep/engine-id.from`)).toBe(false)
 })

@@ -2,6 +2,32 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.305 · 27 November 2026
+- On battery, Claude's commands get only a few fast cores at once, and the rest move to the Mac's slow, low-power cores. Test runs that start a Claude of their own for each test file were never slowed before, and about thirty at once drew 50 to 60 W.
+- On battery, Claudopus looks at the computer a third as often for the line above the prompt, and takes its costliest look once in five minutes instead of every minute.
+- Claudopus reads your results list again only where something changed, not all of them every 20 seconds, and its watcher that brings it back after Claude switches it off starts far fewer processes.
+- Tasks are told to run big test suites and builds on GitHub or in the cloud while the Mac is on battery, or here only a few at a time.
+
+## 0.2.304 · 27 November 2026
+- A task's part of its result, passed on by the chat, shows in that task's coloured box, not the box of the task that spoke before it, also after a reload.
+- A message the chat passes on to three or more tasks at once is quoted only over the chat's reply to it, not over each of those tasks' later results.
+- A note from the chat that repeats one of your older messages no longer makes later replies quote that older message.
+- A picture you sent and the summary left when a chat runs out of room are no longer quoted as your words.
+
+## 0.2.303 · 27 November 2026
+- When your Mac is busy, Claudopus no longer reloads itself again and again in a chat whose Claudopus is still running, which cut off the chat's turn and hid its task kinds for a while.
+- A task can no longer change the files of the Claudopus copy your chats run from; it works in a copy of its own.
+
+## 0.2.302 · 27 November 2026
+- The grey quote over a coloured reply is now the message it answers wherever you sent it: a task's Message box, its answer box, Reply on a reply, or the chat.
+- A chat message you sent while Claude was working is quoted only over replies about the task it went to, never over another task's.
+
+## 0.2.301 · 27 November 2026
+- A command Claude Code blocked now always shows Allow beside Don't allow on its card, also when the card comes up just as Claudopus updates. Before, such a card could show Don't allow alone.
+
+## 0.2.300 · 27 November 2026
+- Rewinding a chat in the Claude app no longer empties its panel: the rewound chat shows every card it had before, just as after a restart. Finished and delivered tasks stay as they ended, a task that was still working shows as Interrupted with Carry on, and the tasks it starts keep your earlier messages in the chat.
+
 ## 0.2.299 · 27 November 2026
 - A file Claude sends you or a report names now opens when you click it, even when a task saved it outside the chat's folder. Claudopus puts a copy in the chat's folder, where the app can open it, instead of showing "This file is outside this session's folders".
 

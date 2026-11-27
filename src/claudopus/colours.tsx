@@ -7,7 +7,7 @@
 // The two settings as this chat has them, read with the others (loadSettings)
 let isColoured = true
 let isLinked = true
-const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, quotes: {}, asked: {} }
+const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, rows: {}, said: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
 let colourBuilder: ColourBuilder | undefined
 let colourRunning: Promise<void> | undefined
@@ -54,13 +54,46 @@ const resultGiven = (id: string, text: string) => {
 // its row id, else by its words (the desktop app names a reply by its message's id)
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
   const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
-  const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults])
+  const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
   if (passed && cards.some(one => one.id === passed)) {
     colourBuilder ??= new ColourBuilder()
     colourBuilder.pick(passed)
     return { ids: [passed], cards }
   }
   return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards }
+}
+
+// The person's messages in the chat, the newest last, those sent while the chat was at work among them: the transcript keeps no row
+// of those, so which task each went to is read from what the chat passed on (Builder.index). Kept as each is sent (chat.tsx), and
+// read back from what they said in this chat once a load, from words/<chat>.said.md
+const HEARD_KEPT = 40
+let personHeard: string[] = []
+let isHeardRead = false
+const heardSaid = (text: string) => {
+  const words = personWords(text)
+  if (words) personHeard = [...personHeard, words].slice(-HEARD_KEPT)
+}
+const readHeard = async ($: EngineInterface) => {
+  if (isHeardRead || !dir) return
+  isHeardRead = true
+  const { id } = await read($, me)
+  const text = id ? await readOr($, `${dir}/words/${id}.said.md`) : ''
+  // Each message under its own `## <time>` line; the newest of the file, then what came since it was read
+  const kept = text.slice(-60_000).split(/^## \S+.*$/m).slice(1).map(one => personWords(one)).filter(Boolean)
+  personHeard = [...kept, ...personHeard].slice(-HEARD_KEPT)
+}
+// What the person wrote to each of this chat's tasks on their cards, as the transcript reader takes it
+const cardWords = (list: readonly Todo[]): CardWords[] => list.flatMap(one => (one.parentId || one.chat ? [] : (one.written ?? []).map(w => ({ id: one.id, ...w }))))
+// A message written on a card is kept with where the transcript stands as it goes, read to its end first, so a reply that comes
+// after it, and only such a reply, quotes it (27 Nov: a result quoted a chat message of the day's, not what was written on its card)
+const WRITTEN_KEPT = 6
+const writtenOnCard = async ($: EngineInterface, id: string, text: string) => {
+  if (!isColoured || !text.trim()) return
+  await colourBuild($, false)
+  const at = colourBuilder?.stamp()
+  if (!at) return
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, written: [...(one.written ?? []), { text: text.trim(), ...at }].slice(-WRITTEN_KEPT) } : one)))
+  await colourBuild($, false)
 }
 
 // One pass: reads the rows not yet read (every row the first time) and keeps what it found, redrawing when that changed
@@ -73,7 +106,8 @@ const colourPass = async ($: EngineInterface, isWhole: boolean) => {
   const fresh = rows.slice(builder.read)
   colourBuilder = builder
   builder.ingest(fresh)
-  const value = builder.index()
+  await readHeard($).catch(err => log($, `messages said not read back: ${String(err)}`))
+  const value = builder.index({ cards: cardWords(await read($, todos)), heard: personHeard })
   const json = JSON.stringify(value)
   if (json === colourWritten) return
   colourWritten = json
@@ -175,7 +209,7 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
   // A reply found by the result it passes on too, as the person's newest message to its task may have come since that pass (27 Nov:
   // a result quoted the message before the one it answered). Once for each text: a reply about no task asks no pass again
   const hash = colourTextHash(e.props.text)
-  if (isColoured && !colourIndex.texts[hash] && !colourIndex.quotes[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
+  if (isColoured && !colourIndex.texts[hash] && colourIndex.rows[hash] === undefined && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
   const [first] = ids
   if (!first && !given.length) return reply
   const { Box, Button, Markdown, Text } = ui
@@ -217,12 +251,10 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
         })}
       </Box>
       {(() => {
-        // The person's message this reply answers: as the transcript tells it, else the newest they sent its task, else the one
-        // that started it
-        // (a reply found by the result it passes on, which the transcript put with another task, answers the newest message to its own)
-        const hash = colourTextHash(e.props.text)
-        const isIndexed = (colourIndex.replies[e.requestId] ?? colourIndex.texts[hash])?.[0] === first
-        const words = ((isIndexed ? (colourIndex.quotes[e.requestId] ?? colourIndex.quotes[hash]) : undefined) ?? colourIndex.asked[first] ?? cards.find(one => one.id === first)?.words ?? '').trim()
+        // The person's message this reply answers: the newest they sent its task before it, in the chat or on its card, else the
+        // one that started it. A reply not read yet, as it comes, is the newest of all
+        const row = colourIndex.rows[e.requestId] ?? colourIndex.rows[hash]
+        const words = (quoteFor(colourIndex, first, row) ?? cards.find(one => one.id === first)?.words ?? '').trim()
         return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
       })()}
       {reply}

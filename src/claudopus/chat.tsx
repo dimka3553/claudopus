@@ -207,12 +207,19 @@ const chatHooks = (on: On) => {
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
     heldChat = id
+    // Every chat has a watcher that brings Claudopus back should Claude switch it off. Its beat starts as soon as the chat is known,
+    // before the rest of the start: on 27 Nov a Mac busy with tests took over a minute to reach it at the end, so the watcher took
+    // each fresh load for one switched off and loaded Claudopus again twice, cutting off the chat's turn each time
+    isEnded = false
+    await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
     await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     // What was at work when this chat's process last ended is read before this load writes its own: it ended with that process
     await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
+    // and a chat the app's rewind started as a copy takes over what its first chat left (keep.tsx)
+    await lookRewound($, id).catch(err => log($, `rewind not looked for: ${String(err)}`))
     // A result kept from before that still lists what it asks is that question on its card, as one handed in now
     // and one at work again that still shows it has had its answer
     const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)
@@ -372,7 +379,8 @@ const chatHooks = (on: On) => {
       if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
       // A question nobody has answered is said again now and then (remindAsks)
       if (seconds % 60 === 30) await remindAsks($).catch(err => log($, `questions not reminded of: ${String(err)}`))
-      if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
+      // (a list of every process: on battery every six seconds)
+      if (seconds % (isOnBattery ? 6 : 2) === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
         if (!isBehind()) await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
@@ -412,9 +420,7 @@ const chatHooks = (on: On) => {
     await unshare($, true).catch(() => undefined)
     if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
-    // Every chat has a watcher that brings Claudopus back should Claude switch it off
-    await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
-    // and its tasks keep their prompt cache an hour, as the chat does, unless the person's settings say otherwise
+    // Its tasks keep their prompt cache an hour, as the chat does, unless the person's settings say otherwise
     await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
@@ -565,6 +571,8 @@ const chatHooks = (on: On) => {
 
     said = text
     heard = [...heard, text]
+    // and for the quote over a reply about a task: which task each message went to (colours.tsx)
+    heardSaid(e.text)
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`

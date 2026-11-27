@@ -195,6 +195,24 @@ const ownCheckoutChanged = async ($: EngineInterface, texts: string[], start: st
   return ''
 }
 
+// Claudopus's own checkout, when a file a tool writes is in it, or nothing: the nearest folder of the file git answers for decides, so
+// a worktree made inside the checkout (as Claude Code's own are) and every other repo are left to be written
+const ownCheckoutWritten = async ($: EngineInterface, path: string, start: string) => {
+  const home = (await homeFolder($)) ?? ''
+  if (!path) return ''
+  const known = await knowSource($).catch(() => undefined)
+  const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
+  const full = pathOf(path, home, start || home)
+  if (!own || !full.startsWith(`${own}/`)) return ''
+  for (let folder = full.slice(0, full.lastIndexOf('/')); folder.length >= own.length; folder = folder.slice(0, folder.lastIndexOf('/'))) {
+    const said = await runOn($, ['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+    if (said.exitCode !== 0) continue
+    const [gitDir = '', common = '', top = ''] = said.stdout.trim().split('\n').map(line => line.trim())
+    return gitDir && gitDir === common && top.replace(/\/+$/, '') === own ? own : ''
+  }
+  return ''
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -317,6 +335,15 @@ const workHooks = (on: On) => {
       if (changed) {
         await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
         return { deny: NO_SWITCH(changed) }
+      }
+    }
+    // and no file of it is written by work: an edit there reaches every chat at its next load, half done or not
+    if (dir && !isOff && e.agentId !== undefined && FILE_TOOLS.includes(e.tool)) {
+      const input = e as { file_path?: unknown; notebook_path?: unknown }
+      const written = await ownCheckoutWritten($, String(input.file_path ?? input.notebook_path ?? ''), cwd || '.')
+      if (written) {
+        await log($, `refused work ${e.agentId}'s change to a file of Claudopus's own checkout`)
+        return { deny: NO_EDIT_OWN(written) }
       }
     }
     // The list of admin commands always allowed, and what seals it, are the person's alone

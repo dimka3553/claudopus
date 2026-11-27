@@ -146,6 +146,8 @@ const changesOf = (command: string, start: string, home: string): string[] => {
 }
 const NO_SWITCH = (folder: string) =>
   named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there. No checkout, switch, reset, merge or commit runs in it, except going back to main and a fast-forward to main online. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
+const NO_EDIT_OWN = (folder: string) =>
+  named(`Not changed: ${folder} holds the Claudopus code {name}'s chats run, and a change there reaches every chat as it next loads, finished or not. Make a worktree of your own and change the file there.`)
 // The boxes of the password and key runners are theirs alone: work never writes into their folder, ~/.claude/claudopus/boxes, nor
 // reads their keychain service, claudopus-box. A command is read as the shell splits it, in small letters (this Mac's files take any),
 // with each simple {a,b} tried each way, then as words split at any sign a path or a program joins words with; a word counts when it

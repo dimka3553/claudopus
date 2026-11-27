@@ -49,7 +49,6 @@ const askNeed = ($: EngineInterface, card: Todo, surface: string, now: number, a
   const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
   const inBar = repliesInBar(surface)
   if (ask.refused) {
-    const run = offeredRun(one)
     const talk = talkText(ask.talk)
     // Words go to the task, which answers inside this block; only Allow runs the command
     const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(card, ask), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
@@ -63,7 +62,8 @@ const askNeed = ($: EngineInterface, card: Todo, surface: string, now: number, a
       buttons: elsewhere
         ? []
         : [
-            ...(run ? [{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) }] : []),
+            // (always beside Don't allow: what it runs is looked up as it is pressed, never only in what this copy read before)
+            { key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) },
             { key: `${id}-deny-${ask.at}-${loadMark}`, label: DONT_ALLOW, onPress: () => void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(err => log($, `answer not sent: ${String(err)}`))) },
             ...words.buttons,
           ],

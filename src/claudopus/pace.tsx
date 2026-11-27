@@ -40,7 +40,7 @@ const paceWork = async ($: EngineInterface) => {
     const looked = await runOn($, ['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
     const look = paceLookOf(looked?.stdout ?? '')
     if (!look.procs.length || !look.cores) return
-    const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined)
+    const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined, isOnBattery)
     if (paced.lower.length || paced.lift.length) await runOn($, ['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
     await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, others: paced.others })).catch(() => undefined)
     if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)

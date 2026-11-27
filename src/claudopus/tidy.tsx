@@ -31,8 +31,10 @@ const startTidy = async ($: EngineInterface, flags: string[] = []) => {
   if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
 
-// The disk the person's files are on, as df gives it in kilobytes: its size, what is used, what is left
-const DISK_LOOK = '# disk left\ndf -Pk "$HOME" 2>/dev/null | tail -n 1'
+// The disk the person's files are on, as df gives it in kilobytes: its size, what is used, what is left; and after it the power, as
+// the usage look reads it (whether the computer runs on its battery), so a chat with no work running knows it too
+const DISK_LOOK =
+  "# disk left\ndf -Pk \"$HOME\" 2>/dev/null | tail -n 1; echo @@POWER@@; if [ -d /sys/class/power_supply ]; then grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; else pmset -g batt 2>/dev/null; fi; true"
 const diskOf = (text: string, at: number): DiskKept | undefined => {
   const m = /(\d+)\s+(\d+)\s+(\d+)\s+\d+%/.exec(text)
   return m ? { at, total: Number(m[1]) * 1024, free: Number(m[3]) * 1024 } : undefined
@@ -56,7 +58,9 @@ const lookDisk = async ($: EngineInterface) => {
   const r = await runOn($, ['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
   const was = diskKept
   const wasLast = tidyLast
-  diskKept = diskOf(r?.stdout ?? '', now) ?? diskKept
+  const [disk = '', power] = (r?.stdout ?? '').split('@@POWER@@')
+  diskKept = diskOf(disk, now) ?? diskKept
+  if (power !== undefined) isOnBattery = isOnBatteryLook(power, isLinux)
   if (dir) tidyLast = lastOf(await $.fs.read(`${dir}/tidy/last.json`).catch(() => '')) ?? tidyLast
   if (!isDiskLow(diskKept)) diskLowSince = 0
   else if (!diskLowSince) diskLowSince = now

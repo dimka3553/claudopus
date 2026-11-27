@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { SessionMessage } from 'claude-code'
 
-import { Builder, NO_ANSWER, PALETTE, linksIn, passedOn, personWords, slotsFor } from './colours'
+import { Builder, NO_ANSWER, PALETTE, linksIn, passedOn, personWords, quoteFor, slotsFor } from './colours'
 
 const PUPIL = 'a3333333333333333'
 const GAPS = 'a4444444444444444'
@@ -79,6 +79,20 @@ describe('which task a reply is about', () => {
 
     expect(tasks[HAIR]?.title).toBe('Grey hair: test the hair colour worker')
     expect(tasks[GAPS]?.status).toBe('finished')
+
+    // A task's part of its result, handed to the chat in a reminder on a row of its own, is that task's, not the one before it's
+    // (27 Nov: the email task's part went under the Allow button task's box); a compaction's summary is no one's message
+    const later = new Builder()
+    later.ingest([
+      ...CHAT,
+      person('This session is being continued from a previous conversation that ran out of context. Ask about the pupil page.'),
+      says('r8', 'Noted.'),
+      person(`<system-reminder>\nFrom Claudopus: the task "Analysis gaps: Notion page" (${GAPS}) is still working, and handed in this part of its result for Sam now. The report:\n  The When column is filled.\n</system-reminder>`),
+      says('r9', 'The When column is filled.'),
+    ])
+    const after = later.index()
+    expect(after.replies.r9).toEqual([GAPS])
+    expect(quoteFor(after, PUPIL, after.rows.r8)).toBe('Wait, before I continue labeling more of the pupils, should I upscale them?')
   })
 
   test('each task gathers the links its replies gave, named and newest first', async () => {
@@ -175,17 +189,80 @@ describe('which task a reply is about', () => {
     expect(kept.c).not.toBe(0)
   })
 
-  test('each reply quotes the message of the person\'s it answers: its own turn\'s, else the newest they sent its task before it', async () => {
+  test('each reply quotes the message of the person\'s it answers: the newest they sent its task before it, in the chat or on its card, never one that went to another task', async () => {
     const builder = new Builder()
     builder.ingest(CHAT)
-    const { quotes, asked } = builder.index()
+    const index = builder.index()
     // A reply to the person's own question quotes it
-    expect(quotes.r3).toBe('Wait, before I continue labeling more of the pupils, should I upscale them?')
+    expect(quoteFor(index, PUPIL, index.rows.r3)).toBe('Wait, before I continue labeling more of the pupils, should I upscale them?')
     // A task's result, after the person's words were passed on to it, quotes those words, not the task's first message
-    expect(quotes.r6).toBe('Pass my page edits on, and test the hair worker for grey hair.')
-    expect(asked[GAPS]).toBe('Pass my page edits on, and test the hair worker for grey hair.')
+    expect(quoteFor(index, GAPS, index.rows.r6)).toBe('Pass my page edits on, and test the hair worker for grey hair.')
+    expect(quoteFor(index, GAPS)).toBe('Pass my page edits on, and test the hair worker for grey hair.')
     // Nothing the person said to a task, nothing quoted
-    expect(quotes.r1).toBeUndefined()
+    expect(quoteFor(index, PUPIL, index.rows.r1)).toBeUndefined()
+
+    // A message sent while the chat was at work has no row: the chat passed it on to the task it was for, and the message of the
+    // turn went to the task the chat started for it, never to that one (27 Nov)
+    const GDPR = 'a5555555555555555'
+    const ALLOW = 'a6666666666666666'
+    const WHY = 'Why was there only one "Don\'t Allow" button and no "Allow" button?'
+    const OOPS = 'Accidentally clicked "Don\'t Allow," but I wanted to click "Allow." There was no "Allow" button.'
+    const ON_CARD = "The abandoned email, that's old. It's not used. We did include an under-18 stop, though."
+    const talk: SessionMessage[] = [
+      person('Check the GDPR status of the app'),
+      says('g1', 'Starting a GDPR check.', [{ tool_use_id: 'gdpr', tool: 'Agent', input: { description: 'Check FaceIQ GDPR status now', prompt: 'Dima\'s words: "Check the GDPR status of the app"' }, agentId: GDPR }]),
+      person(WHY),
+      says('g2', 'Starting a task for the missing button.', [{ tool_use_id: 'allow', tool: 'Agent', input: { description: 'Fix missing Allow button on cards', prompt: `Dima's words: "${WHY}"` }, agentId: ALLOW }]),
+      says('g3', '', [{ tool_use_id: 'oops', tool: 'SendMessage', input: { to: GDPR, message: `Dima's words: “${OOPS.replace(/"/g, '')}”` } }]),
+      says('g4', "I've told the GDPR check you meant Allow."),
+    ]
+    const heard = ['Check the GDPR status of the app', WHY, OOPS]
+    const chat = new Builder()
+    chat.ingest(talk)
+    // What the person then writes on the task's card goes after those rows; its result comes after it
+    const card = { id: GDPR, text: ON_CARD, ...chat.stamp() }
+    const later = [notify(GDPR, 'Check FaceIQ GDPR status now'), says('g5', 'The age stop is mostly closed: sign-in asks for 18 or older.')]
+    chat.ingest(later)
+    const told = chat.index({ cards: [card], heard })
+    expect(quoteFor(told, GDPR, told.rows.g4)).toBe(OOPS)
+    expect(quoteFor(told, ALLOW, told.rows.g2)).toBe(WHY)
+    // The result after the message on its card quotes that message
+    expect(quoteFor(told, GDPR, told.rows.g5)).toBe(ON_CARD)
+    // Read again after a reload, the message on the card falls in the same place
+    const again = new Builder()
+    again.ingest([...talk, ...later])
+    const reread = again.index({ cards: [card] })
+    expect(quoteFor(reread, GDPR, reread.rows.g5)).toBe(ON_CARD)
+    // and with the chat's messages not known yet, the one passed on to the other task is still never quoted for this one
+    expect(quoteFor(reread, GDPR, reread.rows.g4)).toBe('Check the GDPR status of the app')
+    // A message the chat passes on to several tasks at once is a note to them all: the chat's reply in that turn quotes it, their
+    // later results quote what each was sent before; a note of the chat's that quotes an older message passes on nothing new
+    const NOTE = 'cause like 50 or 60 watts how??'
+    const CONFUSED = 'im so confused, the colours and the messages dont match'
+    const noted = new Builder()
+    noted.ingest([
+      ...talk,
+      notify(PUPIL, 'Pupil size: labelling and detection'),
+      says('n0', NO_ANSWER),
+      person(NOTE),
+      says('n1', 'Passing that to every task.', [GDPR, ALLOW, PUPIL].map(to => ({ tool_use_id: `note-${to}`, tool: 'SendMessage', input: { to, message: NOTE } }))),
+      notify(GDPR, 'Check FaceIQ GDPR status now'),
+      says('n2', 'The GDPR check is done.'),
+      person(CONFUSED),
+      says('n3', "I've sent that to the GDPR check.", [
+        { tool_use_id: 'confused', tool: 'SendMessage', input: { to: GDPR, message: CONFUSED } },
+        { tool_use_id: 'aside', tool: 'SendMessage', input: { to: GDPR, message: `A note from the chat: it quoted "${NOTE}" again.` } },
+      ]),
+      says('n4', 'It will look at the quotes.'),
+    ])
+    const notes = noted.index({ heard: [...heard, NOTE, CONFUSED] })
+    expect(quoteFor(notes, GDPR, notes.rows.n1)).toBe(NOTE)
+    expect(quoteFor(notes, GDPR, notes.rows.n2)).toBe(OOPS)
+    expect(quoteFor(notes, GDPR, notes.rows.n4)).toBe(CONFUSED)
+    // A picture the person sent is no words to quote
+    expect(personWords('[Image: source: /tmp/shot.png]\n\nlook at this')).toBe('look at this')
+    // Words written on a result go to the chat after the result they continue from: the words alone are the person's
+    expect(personWords('Continue from the result "Fix the nose" (27 Nov, 16:07), /Users/x/.claude/claudopus/reports/20261127-0807-fix-the-nose/report.md: Make the tip rounder')).toBe('Make the tip rounder')
     // Text the person pasted is quoted as their words, without the app's marks around it
     expect(personWords('\n\n<pasted_content id="de2c">\nCan you change the emails?\n</pasted_content id="de2c">\n')).toBe('Can you change the emails?')
     expect(personWords('<system-reminder>A note.</system-reminder>\nMy words')).toBe('My words')

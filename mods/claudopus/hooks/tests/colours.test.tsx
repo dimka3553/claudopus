@@ -1050,6 +1050,24 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   const result = await $.ui.mount({ ...MSG, requestId: 'msg_r6', props: { text: RESULT, isFirstOfReply: true }, surface: 'desktop' } as never)
   await clock.advance(1000)
   expect(await until(async () => result.find({ type: 'Text', text: '“Make the bridge narrower too”' }))).toBeDefined()
+  // What you write to it on its card, here in the box Reply on a reply about it opens, is what the next reply about it quotes
+  const box = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await pressed(reply, `task-reply-${r.agentId}`)
+  const field = await until(async () => (await box.findAll({ type: 'Input' } as never)).find(one => /-reply-change-/.test(one.key ?? '')))
+  await box.input({ key: field?.key ?? '', text: 'Leave the bridge as it is now' })
+  expect(await until(async () => ([...files.values()].some(text => text.includes('"written"')) ? true : undefined))).toBe(true)
+  const AFTER = 'The bridge stays as it is, and the nose is done.'
+  talk.push(
+    { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
+    { role: 'assistant', text: AFTER, uuid: 'r7', toolUses: [] },
+  )
+  const after = await $.ui.mount({ ...MSG, requestId: 'r7', props: { text: AFTER, isFirstOfReply: true }, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => after.find({ type: 'Text', text: '“Leave the bridge as it is now”' }))).toBeDefined()
+  // while the reply before it still quotes the message it answered
+  expect(await result.find({ type: 'Text', text: '“Make the bridge narrower too”' })).toBeDefined()
+  await after.unmount()
+  await box.unmount()
   await result.unmount()
   // View more shows the whole of it
   await reply.press({ key: String((await reply.findAll({ type: 'Button' })).find(one => /^quote-more-/.test(one.key ?? ''))?.key) })

@@ -108,6 +108,10 @@ export type Todo = {
   // Its place in the task colours' palette: given once, the colour least used by the tasks started just before it, so tasks seen
   // together differ
   colour?: number
+  // What the person wrote to it on its card (its Message box, its answer box, Reply on a chat reply), the newest few, each with
+  // where the chat's transcript stood as it went: a chat reply about it quotes the newest message it was sent before it, here or
+  // in the chat (colours.tsx). Never shared with other chats
+  written?: { text: string; row: number; mark: string }[]
   // When it first began, kept when it is started again (whose startedAt moves on so its time runs on): the cards keep their places by it
   begunAt?: number
   // 0 while it works
@@ -124,6 +128,9 @@ export type Todo = {
   // The parts of its result it handed in while still at work (the `report` tool), each kept as a result of its own, until the chat
   // is given them with the message Claudopus sends it for them, or with the next message or notice that comes first
   partsForChat?: string[]
+  // The parts of its result the chat was last given to pass on, as given: the chat's reply that passes one on is drawn in this
+  // task's box, after a reload too (colours.tsx). Never shared with other chats
+  partsGiven?: string[]
   // The hand-back call whose report Claudopus took, until the task takes a step of its own: what comes next is that call's result,
   // or Claude Code's press for a report it did not see delivered, answered with no model
   tookReport?: string
@@ -158,6 +165,8 @@ export type Todo = {
   branch?: string
   // Cut off by the app's close and carried on by a fresh task: that task's id. Its card is under Finished from then
   carriedTo?: string
+  // Brought over from the chat this one is a rewind of: that chat's id, whose folder holds its transcript
+  chatWas?: string
   // Stopped with no Stop of the person's or the chat's, as when the app quits and stops every task: one that stopped so as its
   // chat's process ended is taken for cut off by the next process, never for stopped
   stoppedUnasked?: true

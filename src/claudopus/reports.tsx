@@ -62,17 +62,50 @@ const isInside = (file: unknown): file is string =>
   // (on Windows a backslash parts a path too, and a drive's letter begins one of its own)
   !(isWindows && (file.includes('\\') || /^[A-Za-z]:/.test(file))) &&
   file.split('/').every(part => part !== '..' && part !== '')
-const loadReports = async ($: EngineInterface) => {
+// Each result as last read, with its folder's time then: a look every 20 seconds read every meta.json again, 1744 of them on 27 Nov.
+// Now only a new folder, one whose time moved, or one a chat on this Mac changed (each change is named in reports/_changed.json) is
+// read, and every one again once in REPORTS_WHOLE (on battery REPORTS_WHOLE_BATTERY), for a change made by hand; another Mac's come
+// with a whole read (macs.tsx), as does a search of the memory
+const reportsRead = new Map<string, { mtime: number; one: Report }>()
+const REPORTS_WHOLE = 60_000
+const REPORTS_WHOLE_BATTERY = 180_000
+const CHANGED_KEPT = 100
+let reportsWholeAt = -Infinity
+let changedSeen = ''
+const changedPath = () => `${reportsDir()}/_changed.json`
+// A result this chat changed: read again here, and named for the other chats
+const reportChanged = async ($: EngineInterface, id: string) => {
+  reportsRead.delete(id)
+  const was = parsedOr<{ at: number; id: string }[]>(await readOr($, changedPath()), [])
+  await $.fs.write(changedPath(), JSON.stringify([...(Array.isArray(was) ? was : []).slice(-(CHANGED_KEPT - 1)), { at: await $.clock.now(), id }])).catch(() => undefined)
+}
+const loadReports = async ($: EngineInterface, isWhole = false) => {
   const found: Report[] = []
+  const now = await $.clock.now()
+  if (isWhole || now < reportsWholeAt || now - reportsWholeAt >= (isOnBattery ? REPORTS_WHOLE_BATTERY : REPORTS_WHOLE)) (reportsRead.clear(), (reportsWholeAt = now))
+  const changed = await readOr($, changedPath())
+  if (changed !== changedSeen) {
+    const list = parsedOr<{ id?: unknown }[]>(changed, [])
+    for (const one of Array.isArray(list) ? list : []) if (typeof one?.id === 'string') reportsRead.delete(one.id)
+    changedSeen = changed
+  }
   for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
     if (entry.kind !== 'dir' || entry.name.startsWith('_')) continue
+    const mtime = (entry as { mtimeMs?: number }).mtimeMs ?? 0
+    const was = reportsRead.get(entry.name)
+    if (was && was.mtime === mtime) {
+      found.push(was.one)
+      continue
+    }
     try {
       const one = JSON.parse(await readOr($, `${reportsDir()}/${entry.name}/meta.json`)) as Report
       if (one.id !== entry.name || !one.title) continue
       // A report a piece of work wrote has its finding read again from its text, once a load, as the finding is now found;
       // one brought in by hand keeps the finding written for it
       if (one.agent && !gists.has(one.id)) gists.set(one.id, gistOf(await readOr($, `${reportsDir()}/${entry.name}/report.md`), one.title) || one.gist)
-      found.push({ ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] })
+      const shown = { ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] }
+      reportsRead.set(entry.name, { mtime, one: shown })
+      found.push(shown)
     } catch {
       // A folder without its meta.json is not a report yet
     }
@@ -207,6 +240,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string, isPart =
     ...(one.from ? { from: one.from } : {}),
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
+  await reportChanged($, id)
   await loadReports($)
   // and goes into the queue of progress/, which makes it its area's entry (progress.tsx)
   queueSoon($, { kind: 'result', task: one.id, report: id, title, topic: one.subject ?? '', files: files.filter(file => PICTURE.test(file)), text })
@@ -260,6 +294,7 @@ const markReport = ($: EngineInterface, r: Report, patch: Partial<Report> | ((st
   const run = marking.then(async () => {
     const stored = { ...r, ...(JSON.parse((await readOr($, `${reportPath(r)}/meta.json`)) || '{}') as Partial<Report>) }
     await $.fs.write(`${dir}/reports/${r.id}/meta.json`, `${JSON.stringify({ ...stored, ...(typeof patch === 'function' ? patch(stored) : patch) }, null, 2)}\n`)
+    await reportChanged($, r.id)
     await loadReports($)
   })
   marking = run.catch(() => undefined)

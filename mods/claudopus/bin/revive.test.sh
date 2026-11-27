@@ -15,7 +15,7 @@ fails=0
 ok() { printf 'ok   %s\n' "$1"; }
 no() { printf 'FAIL %s\n' "$1"; fails=$((fails + 1)); }
 within() { local n=0; while ! eval "$1"; do sleep 0.2; n=$((n + 1)); [ "$n" -ge $(($2 * 5)) ] && return 1; done; return 0; }
-export CLAUDOPUS_REVIVE_STEP=1 CLAUDOPUS_REVIVE_QUIET=2 CLAUDOPUS_REVIVE_WOKE_QUIET=2 CLAUDOPUS_REVIVE_GAP=2 CLAUDOPUS_REVIVE_TRIES=2 CLAUDOPUS_REVIVE_IDLE=60 CLAUDOPUS_REVIVE_SLOW_QUIET=10000000000 CLAUDOPUS_REVIVE_SLOW_CLEAR=3
+export CLAUDOPUS_REVIVE_STEP=1 CLAUDOPUS_REVIVE_QUIET=2 CLAUDOPUS_REVIVE_WOKE_QUIET=2 CLAUDOPUS_REVIVE_GAP=2 CLAUDOPUS_REVIVE_TRIES=2 CLAUDOPUS_REVIVE_RELOAD_WAIT=2 CLAUDOPUS_REVIVE_IDLE=60 CLAUDOPUS_REVIVE_SLOW_QUIET=10000000000 CLAUDOPUS_REVIVE_SLOW_CLEAR=3
 # A chat's process: runs until its file is removed
 cat > "$tmp/chat" <<'EOF'
 #!/bin/bash
@@ -137,6 +137,17 @@ cp "$revive" "$tmp/revive-newer"
 within '! kill -0 $watcher 2>/dev/null' 5 && kill -0 "$newer" 2>/dev/null && ok "a newer copy's watcher takes over" || no "a newer copy's watcher takes over"
 kill "$newer" 2>/dev/null
 rm -f "$tmp/chat.run"
+
+# A fresh load is given RELOAD_WAIT to beat before another try, so a Mac slow to start one is not reloaded again and again
+mem3=$tmp/memory3; mkdir -p "$mem3/keep"
+cp "$tmp/chat" "$tmp/chat3"; touch "$tmp/chat3.run"; "$tmp/chat3" & chat3=$!
+set3=$tmp/set3.json
+printf '{ "enabledPlugins": { "claudopus@claudopus": true } }\n' > "$set3"
+printf '%s\t%s\t%s\n%s\n' "$chat3" claudopus@claudopus "$set3" load-r > "$mem3/keep/r1.beat"; touch -t 202001010000 "$mem3/keep/r1.beat"
+CLAUDOPUS_REVIVE_RELOAD_WAIT=30 "$revive" "$mem3" & w4=$!
+within 'grep -q "chat r1: quiet" "$mem3/keep/revive.log" 2>/dev/null' 8; sleep 6
+[ "$(grep -c "chat r1: quiet" "$mem3/keep/revive.log")" = 1 ] && [ ! -e "$mem3/keep/r1.gaveup" ] && ok "a fresh load has time to beat before another try" || no "a fresh load has time to beat before another try"
+kill "$w4" 2>/dev/null; rm -f "$tmp/chat3.run"
 
 # A slow load, on a watcher of its own with short limits: one quiet SLOW_QUIET has its tries, one that goes SLOW_KEEP without a
 # stall is as any other again, a beat with no load line leaves the mark, a change not made is not taken for one, and the last change outlives

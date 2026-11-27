@@ -232,7 +232,7 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
     const kept = isSame ? (target.archived ?? 0) : wasArchived
     if (kept) archived[id] = kept
   }
-  if (changed) await loadReports($)
+  if (changed) await loadReports($, true)
   // When each result still missing on either side was last tried; one that has come across is dropped from it the next trip
   const tried: Record<string, number> = {}
   for (const id of [...missingHere, ...missingThere]) if (was.tried?.[id]) tried[id] = was.tried[id]

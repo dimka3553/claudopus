@@ -23,7 +23,7 @@ import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, namingPrompt } from './naming'
 import type { Naming, NamingAsk } from './naming'
-import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, USAGE_WINDOWS, usageMac, usageSvg } from './usage'
+import { batteryShown, batterySvg, chartSvg, FOOTPRINT_BATTERY_EVERY, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isOnBatteryLook, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_BATTERY_EVERY, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, USAGE_WINDOWS, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
@@ -31,8 +31,8 @@ import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, Prog
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
-import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, slotsFor, textHash as colourTextHash } from './colours'
-import type { ColourIndex, TaskLink } from './colours'
+import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
+import type { CardWords, ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
 
@@ -520,6 +520,7 @@ let isLinux = false
 let isWindows = false
 let hasDesktop = true
 let gitBash = ''
+let isOnBattery = false
 let keyringRoot = ''
 let keyringOldRoot = ''
 const slashed = (path: string) => (/^(?:[A-Za-z]:\\|\\\\)/.test(path) ? path.replace(/\\/g, '/') : path)
@@ -869,6 +870,8 @@ return [folder]
 }
 const NO_SWITCH = (folder: string) =>
 named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there. No checkout, switch, reset, merge or commit runs in it, except going back to main and a fast-forward to main online. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
+const NO_EDIT_OWN = (folder: string) =>
+named(`Not changed: ${folder} holds the Claudopus code {name}'s chats run, and a change there reaches every chat as it next loads, finished or not. Make a worktree of your own and change the file there.`)
 const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
 const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
 const commandAt = (words: string[]) => {
@@ -2317,16 +2320,23 @@ const { id } = await read($, me)
 const list = await read($, todos)
 if (!id) return
 const live = await $.agent.list().catch(() => [])
-const folder = await agentsFolder($, id)
 type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
-const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(Boolean)
-const metas = await Promise.all(
+const metas: { one: string; folder: string; chatWas: string; meta: Meta; at: number }[] = []
+for (const chatWas of chatFrom ? ['', chatFrom] : ['']) {
+const folder = await agentsFolder($, chatWas || id)
+const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(one => one && !metas.some(m => m.one === one))
+metas.push(
+...(await Promise.all(
 ids.map(async one => ({
 one,
+folder,
+chatWas,
 meta: JSON.parse((await readOr($, `${folder}/agent-${one}.meta.json`)) || '{}') as Meta,
 at: (await $.fs.stat(`${folder}/agent-${one}.jsonl`).catch(() => undefined))?.mtimeMs ?? 0,
 })),
+)),
 )
+}
 const fresh = metas
 .filter(({ meta }) => meta.spawnDepth === 1)
 .sort((a, b) => b.at - a.at)
@@ -2335,7 +2345,7 @@ const fresh = metas
 if (!fresh.length) return
 during('read back ended work')
 const found: Todo[] = []
-for (const { one: agentId, meta } of fresh) {
+for (const { one: agentId, meta, folder, chatWas } of fresh) {
 try {
 const mtime = (await $.fs.stat(`${folder}/agent-${agentId}.jsonl`).catch(() => undefined))?.mtimeMs ?? 0
 const path = `${folder}/agent-${agentId}.jsonl`
@@ -2383,7 +2393,7 @@ items = items.some(item => slug(item.text) === old) ? items.map(item => (slug(it
 }
 }
 const status: Todo['status'] = one.status === 'failed' ? 'failed' : one.status === 'killed' ? 'stopped' : 'done'
-found.push({ ...started(one.id, '', one.description, '', first || mtime, one.type === 'fork'), status, endedAt: last || mtime, model, tokens, items, entries: entries.slice(-ENTRIES_KEPT) })
+found.push({ ...started(one.id, '', one.description, '', first || mtime, one.type === 'fork'), status, endedAt: last || mtime, model, tokens, items, entries: entries.slice(-ENTRIES_KEPT), ...(chatWas ? { chatWas } : {}) })
 } catch (err) {
 await log($, `ended work ${agentId} not read back: ${String(err)}`)
 }
@@ -3008,15 +3018,43 @@ Boolean(file) &&
 !file.includes('\0') &&
 !(isWindows && (file.includes('\\') || /^[A-Za-z]:/.test(file))) &&
 file.split('/').every(part => part !== '..' && part !== '')
-const loadReports = async ($: EngineInterface) => {
+const reportsRead = new Map<string, { mtime: number; one: Report }>()
+const REPORTS_WHOLE = 60_000
+const REPORTS_WHOLE_BATTERY = 180_000
+const CHANGED_KEPT = 100
+let reportsWholeAt = -Infinity
+let changedSeen = ''
+const changedPath = () => `${reportsDir()}/_changed.json`
+const reportChanged = async ($: EngineInterface, id: string) => {
+reportsRead.delete(id)
+const was = parsedOr<{ at: number; id: string }[]>(await readOr($, changedPath()), [])
+await $.fs.write(changedPath(), JSON.stringify([...(Array.isArray(was) ? was : []).slice(-(CHANGED_KEPT - 1)), { at: await $.clock.now(), id }])).catch(() => undefined)
+}
+const loadReports = async ($: EngineInterface, isWhole = false) => {
 const found: Report[] = []
+const now = await $.clock.now()
+if (isWhole || now < reportsWholeAt || now - reportsWholeAt >= (isOnBattery ? REPORTS_WHOLE_BATTERY : REPORTS_WHOLE)) (reportsRead.clear(), (reportsWholeAt = now))
+const changed = await readOr($, changedPath())
+if (changed !== changedSeen) {
+const list = parsedOr<{ id?: unknown }[]>(changed, [])
+for (const one of Array.isArray(list) ? list : []) if (typeof one?.id === 'string') reportsRead.delete(one.id)
+changedSeen = changed
+}
 for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
 if (entry.kind !== 'dir' || entry.name.startsWith('_')) continue
+const mtime = (entry as { mtimeMs?: number }).mtimeMs ?? 0
+const was = reportsRead.get(entry.name)
+if (was && was.mtime === mtime) {
+found.push(was.one)
+continue
+}
 try {
 const one = JSON.parse(await readOr($, `${reportsDir()}/${entry.name}/meta.json`)) as Report
 if (one.id !== entry.name || !one.title) continue
 if (one.agent && !gists.has(one.id)) gists.set(one.id, gistOf(await readOr($, `${reportsDir()}/${entry.name}/report.md`), one.title) || one.gist)
-found.push({ ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] })
+const shown = { ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] }
+reportsRead.set(entry.name, { mtime, one: shown })
+found.push(shown)
 } catch {
 }
 }
@@ -3126,6 +3164,7 @@ mark: marked,
 ...(one.from ? { from: one.from } : {}),
 }
 await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
+await reportChanged($, id)
 await loadReports($)
 queueSoon($, { kind: 'result', task: one.id, report: id, title, topic: one.subject ?? '', files: files.filter(file => PICTURE.test(file)), text })
 }
@@ -3172,6 +3211,7 @@ const markReport = ($: EngineInterface, r: Report, patch: Partial<Report> | ((st
 const run = marking.then(async () => {
 const stored = { ...r, ...(JSON.parse((await readOr($, `${reportPath(r)}/meta.json`)) || '{}') as Partial<Report>) }
 await $.fs.write(`${dir}/reports/${r.id}/meta.json`, `${JSON.stringify({ ...stored, ...(typeof patch === 'function' ? patch(stored) : patch) }, null, 2)}\n`)
+await reportChanged($, r.id)
 await loadReports($)
 })
 marking = run.catch(() => undefined)
@@ -3740,7 +3780,7 @@ ui,
 
 let isColoured = true
 let isLinked = true
-const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, quotes: {}, asked: {} }
+const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, rows: {}, said: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
 let colourBuilder: ColourBuilder | undefined
 let colourRunning: Promise<void> | undefined
@@ -3778,13 +3818,39 @@ givenResults.splice(0, Math.max(0, givenResults.length - 30))
 }
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
 const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
-const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults])
+const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
 if (passed && cards.some(one => one.id === passed)) {
 colourBuilder ??= new ColourBuilder()
 colourBuilder.pick(passed)
 return { ids: [passed], cards }
 }
 return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards }
+}
+
+const HEARD_KEPT = 40
+let personHeard: string[] = []
+let isHeardRead = false
+const heardSaid = (text: string) => {
+const words = personWords(text)
+if (words) personHeard = [...personHeard, words].slice(-HEARD_KEPT)
+}
+const readHeard = async ($: EngineInterface) => {
+if (isHeardRead || !dir) return
+isHeardRead = true
+const { id } = await read($, me)
+const text = id ? await readOr($, `${dir}/words/${id}.said.md`) : ''
+const kept = text.slice(-60_000).split(/^## \S+.*$/m).slice(1).map(one => personWords(one)).filter(Boolean)
+personHeard = [...kept, ...personHeard].slice(-HEARD_KEPT)
+}
+const cardWords = (list: readonly Todo[]): CardWords[] => list.flatMap(one => (one.parentId || one.chat ? [] : (one.written ?? []).map(w => ({ id: one.id, ...w }))))
+const WRITTEN_KEPT = 6
+const writtenOnCard = async ($: EngineInterface, id: string, text: string) => {
+if (!isColoured || !text.trim()) return
+await colourBuild($, false)
+const at = colourBuilder?.stamp()
+if (!at) return
+await changeTodos($, list => list.map(one => (one.id === id ? { ...one, written: [...(one.written ?? []), { text: text.trim(), ...at }].slice(-WRITTEN_KEPT) } : one)))
+await colourBuild($, false)
 }
 
 const colourPass = async ($: EngineInterface, isWhole: boolean) => {
@@ -3795,7 +3861,8 @@ if (!builder || isWhole || rows.length < builder.read) builder = new ColourBuild
 const fresh = rows.slice(builder.read)
 colourBuilder = builder
 builder.ingest(fresh)
-const value = builder.index()
+await readHeard($).catch(err => log($, `messages said not read back: ${String(err)}`))
+const value = builder.index({ cards: cardWords(await read($, todos)), heard: personHeard })
 const json = JSON.stringify(value)
 if (json === colourWritten) return
 colourWritten = json
@@ -3882,7 +3949,7 @@ if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
 const given = isLinked ? replyLinksIn(e.props.text) : []
 const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
 const hash = colourTextHash(e.props.text)
-if (isColoured && !colourIndex.texts[hash] && !colourIndex.quotes[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
+if (isColoured && !colourIndex.texts[hash] && colourIndex.rows[hash] === undefined && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
 const [first] = ids
 if (!first && !given.length) return reply
 const { Box, Button, Markdown, Text } = ui
@@ -3923,9 +3990,8 @@ return (
 })}
 </Box>
 {(() => {
-const hash = colourTextHash(e.props.text)
-const isIndexed = (colourIndex.replies[e.requestId] ?? colourIndex.texts[hash])?.[0] === first
-const words = ((isIndexed ? (colourIndex.quotes[e.requestId] ?? colourIndex.quotes[hash]) : undefined) ?? colourIndex.asked[first] ?? cards.find(one => one.id === first)?.words ?? '').trim()
+const row = colourIndex.rows[e.requestId] ?? colourIndex.rows[hash]
+const words = (quoteFor(colourIndex, first, row) ?? cards.find(one => one.id === first)?.words ?? '').trim()
 return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
 })()}
 {reply}
@@ -8118,6 +8184,7 @@ const files = [...new Set([...picked, ...(await pathsIn($, said))])]
 const shown = [said, ...picked.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join('\n')
 const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
+void writtenOnCard($, id, shown).catch(err => log($, `message on a card not kept for quotes: ${String(err)}`))
 const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
 if (isNow && card.status === 'working' && (await interruptStep($, card))) {
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: one.entries.map(entry => (entry.kind === 'steer' && entry.at === at ? { ...entry, isNow: true } : entry)) } : one)))
@@ -8160,6 +8227,7 @@ await changeTodos($, list =>
 )
 askPressed.delete(mark)
 if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
+void writtenOnCard($, one.id, said).catch(err => log($, `answer on a card not kept for quotes: ${String(err)}`))
 await answerCleared($, one, ask, said, isReply, target, at, line, note)
 } catch (err) {
 askPressed.delete(mark)
@@ -8189,6 +8257,8 @@ $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
 const to = ask.refused
 ? isRun && run
 ? await startRun($, one, run)
+: !isReply && said === ALLOW
+? `${RUN_GONE(ask.copy ?? ask.text)}${note}`
 : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
 : ask.rule
 ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
@@ -8273,6 +8343,7 @@ await changeTodos($, list =>
 ((isHeld = false), list).map(card => (card.id === one.id && hasAsk(card, ask) ? ((isHeld = true), { ...mapAsk(card, ask, kept => ({ ...kept, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(kept.refused ? { talk: [...(kept.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) })), entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
 )
 if (!isHeld) return
+void writtenOnCard($, one.id, said).catch(err => log($, `reply on a card not kept for quotes: ${String(err)}`))
 dropDrafts($, one.id, ask)
 replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
 freeTimes($)
@@ -8984,7 +9055,7 @@ if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitC
 const kept = isSame ? (target.archived ?? 0) : wasArchived
 if (kept) archived[id] = kept
 }
-if (changed) await loadReports($)
+if (changed) await loadReports($, true)
 const tried: Record<string, number> = {}
 for (const id of [...missingHere, ...missingThere]) if (was.tried?.[id]) tried[id] = was.tried[id]
 for (const id of [...wanted, ...handed]) tried[id] = now
@@ -10513,6 +10584,9 @@ isReply
 const REFUSAL_ANSWERED = (command: string, said: string, isReply: boolean) =>
 `${isReply ? `${who(true)} replied, in their own words, when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}): ${said}` : `${who(true)} pressed "${DONT_ALLOW}" when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}).`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
 
+const RUN_GONE = (command: string) =>
+`${who(true)} pressed "${ALLOW}" on your card for the command Claude Code refused you (${cut(oneLine(command), 200)}), but Claudopus no longer keeps that command, so it did not run. If you still need it, run exactly the same command once more: Claude Code refuses it again, and your card asks ${who()} afresh, where their press runs it. Do not reach its result another way.`
+
 const REFUSAL_WORDS = (command: string, said: string) =>
 `${who(true)} wrote to you, in their own words, about the command Claude Code refused you (${cut(oneLine(command), 200)}), which waits on your card for their Allow: “${said}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside that permission, which keeps Allow and Don't allow: only their press runs the command, once, as theirs. Do not run it, or another way to the same end, yourself. With nothing else to do, end your step.`
 
@@ -10585,6 +10659,12 @@ redraw($)
 return runList
 }
 const isSameRun = (one: PressRun, other: Pick<PressRun, 'card' | 'askAt'>) => one.card === other.card && one.askAt === other.askAt
+const readRuns = async ($: EngineInterface) => {
+const kept = await read($, runs)
+const missing = kept.filter(one => !runList.some(other => isSameRun(other, one)))
+if (missing.length) runList = [...runList, ...missing]
+return runList
+}
 const offeredRun = (one: Todo) => {
 const ask = one.ask
 if (!ask?.refused || one.chat || !ask.copy) return undefined
@@ -10637,8 +10717,10 @@ const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs
 
 const runIt = async ($: EngineInterface, one: Todo) => {
 presses += 1
+await readRuns($).catch(err => log($, `runs not read for a press: ${String(err)}`))
 const run = offeredRun(one)
-if (!run || runPressed.has(runKey(run))) return
+if (!run) return void (await answerAsk($, one, ALLOW))
+if (runPressed.has(runKey(run))) return
 runPressed.add(runKey(run))
 runAsked.set(one.id, run)
 try {
@@ -11078,6 +11160,7 @@ await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ?
 await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
 const parts = await Promise.all(given.map(one => Promise.all((one.partsForChat ?? []).map(part => withOpenables($, part).catch(() => part)))))
 given.forEach((one, n) => (parts[n] ?? []).forEach(part => resultGiven(one.id, part)))
+await changeTodos($, list => list.map(one => { const n = given.findIndex(g => g.id === one.id); return n < 0 ? one : { ...one, partsGiven: [...(one.partsGiven ?? []), ...(parts[n] ?? []).map(part => part.slice(0, 20_000))].slice(-3) } }))
 return given.flatMap((one, n) => (parts[n] ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))))
 }
 const quietNotices = (text: string, atWork: Set<string>, given: Set<string> = new Set()): Quiet => {
@@ -11141,7 +11224,6 @@ const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.
 const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
 const inBar = repliesInBar(surface)
 if (ask.refused) {
-const run = offeredRun(one)
 const talk = talkText(ask.talk)
 const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(card, ask), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
 if (isActingOnReply(one)) return { ...base, ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}), kind: 'permission', isActing: true, buttons: [] }
@@ -11153,7 +11235,7 @@ kind: 'permission',
 buttons: elsewhere
 ? []
 : [
-...(run ? [{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) }] : []),
+{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) },
 { key: `${id}-deny-${ask.at}-${loadMark}`, label: DONT_ALLOW, onPress: () => void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(err => log($, `answer not sent: ${String(err)}`))) },
 ...words.buttons,
 ],
@@ -11662,10 +11744,13 @@ await watchLoaded($).catch(err => log($, `tabs not watched: ${String(err)}`))
 
 const id = await $.session.id()
 heldChat = id
+isEnded = false
+await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
 const title = await appTitle($)
 await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
 await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
 await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
+await lookRewound($, id).catch(err => log($, `rewind not looked for: ${String(err)}`))
 const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)
 if ((await read($, todos)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
 during('load: read the other chats')
@@ -11802,7 +11887,7 @@ await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)
 await lookBar($).catch(err => log($, `bar not looked at: ${String(err)}`))
 if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
 if (seconds % 60 === 30) await remindAsks($).catch(err => log($, `questions not reminded of: ${String(err)}`))
-if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
+if (seconds % (isOnBattery ? 6 : 2) === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
 if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
 await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
 if (!isBehind()) await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
@@ -11831,7 +11916,6 @@ asked = []
 await unshare($, true).catch(() => undefined)
 if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
 isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
-await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
 await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`))
 if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
 if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
@@ -11949,6 +12033,7 @@ context.push(PASTED)
 
 said = text
 heard = [...heard, text]
+heardSaid(e.text)
 fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
 const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
 await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
@@ -12323,7 +12408,7 @@ for (const one of list) for (const b of one.bg ?? []) if (b.isWatch && b.expires
 let isChanged = false
 const moved = new Set<string>()
 if (files.length) {
-const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
+const mtime = isLinux ? 'm=$(stat -c %Y "$f" 2>/dev/null || echo 0)' : 'm=$(stat -f %m "$f" 2>/dev/null || echo 0)'
 const script = `for f; do ${mtime}; printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done`
 const r = await runOn($, ['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
 if (!r) return
@@ -12739,7 +12824,8 @@ const r = await runOn($, ['/bin/sh', '-c', TIDY_START, 'sh', dir, `${pluginRoot(
 if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
 
-const DISK_LOOK = '# disk left\ndf -Pk "$HOME" 2>/dev/null | tail -n 1'
+const DISK_LOOK =
+"# disk left\ndf -Pk \"$HOME\" 2>/dev/null | tail -n 1; echo @@POWER@@; if [ -d /sys/class/power_supply ]; then grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; else pmset -g batt 2>/dev/null; fi; true"
 const diskOf = (text: string, at: number): DiskKept | undefined => {
 const m = /(\d+)\s+(\d+)\s+(\d+)\s+\d+%/.exec(text)
 return m ? { at, total: Number(m[1]) * 1024, free: Number(m[3]) * 1024 } : undefined
@@ -12762,7 +12848,9 @@ diskTriedAt = now
 const r = await runOn($, ['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
 const was = diskKept
 const wasLast = tidyLast
-diskKept = diskOf(r?.stdout ?? '', now) ?? diskKept
+const [disk = '', power] = (r?.stdout ?? '').split('@@POWER@@')
+diskKept = diskOf(disk, now) ?? diskKept
+if (power !== undefined) isOnBattery = isOnBatteryLook(power, isLinux)
 if (dir) tidyLast = lastOf(await $.fs.read(`${dir}/tidy/last.json`).catch(() => '')) ?? tidyLast
 if (!isDiskLow(diskKept)) diskLowSince = 0
 else if (!diskLowSince) diskLowSince = now
@@ -12899,7 +12987,7 @@ seen.lookups = 0
 const one = work.length === 1 ? work[0] : undefined
 const command = one?.tool === 'Bash' ? String((one.input as { command?: unknown })?.command ?? '') : ''
 const kind = one && command && one.tookMs >= LONG_RUN && !isLookup(one.tool, one.input) ? kindOf(command) : ''
-if (kind && seen.lastRun === kind) say('serial', SERIAL_RUNS(kind))
+if (kind && seen.lastRun === kind && !isOnBattery) say('serial', SERIAL_RUNS(kind))
 seen.lastRun = kind || (one ? undefined : seen.lastRun)
 if (isTop && lean.second !== 'asked' && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
 return lines
@@ -12944,7 +13032,7 @@ const ledgerFile = (chat: string) => `${dir}/${LEDGER_DIR}/${chat}.json`
 const ledgerPart = (chat: string, task: string, kind: 'brief' | 'carry') => `${dir}/${LEDGER_DIR}/${chat}/${task}.${kind}.md`
 const keepFile = (id: string, kind = 'json') => `${dir}/keep/${id}.${kind}`
 type LedgerTask = { id: string; title: string; state: Stage; note: string; transcript: string; card: Todo }
-type Ledger = { chat: string; title: string; folder: string; pid: string; savedAt: number; link?: Link; tasks: LedgerTask[] }
+type Ledger = { chat: string; title: string; folder: string; pid: string; savedAt: number; link?: Link; from?: string; tasks: LedgerTask[] }
 const LEDGER_ENTRIES = 30
 const ledgerCard = (one: Todo): Todo => {
 const { running: _running, bg: _bg, seenJobs: _seen, endedRuns: _runs, newAt: _new, stuckAt: _stuck, stuckTold: _told, quiet: _quiet, owes: _owes, steps: _steps, tokens: _tokens, made: _made, ...kept } = one
@@ -12979,8 +13067,8 @@ const { id, title } = await read($, me)
 if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
 const list = await read($, todos)
 const agents = await agentsFolder($, id)
-const tasks = ledgerTasks(list).map(one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) }))
-const body = { chat: id, title, folder: cwd, pid: enginePid, ...(myLink ? { link: myLink } : {}), tasks }
+const tasks = await Promise.all(ledgerTasks(list).map(async one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${one.chatWas ? await agentsFolder($, one.chatWas) : agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) })))
+const body = { chat: id, title, folder: cwd, pid: enginePid, ...(chatFrom ? { from: chatFrom } : {}), ...(myLink ? { link: myLink } : {}), tasks }
 const sign = JSON.stringify(body)
 if (sign === ledgerSign) return
 const path = ledgerFile(id)
@@ -13059,6 +13147,73 @@ isLedgerRead = true
 }
 
 
+let chatFrom = ''
+const fromFile = (id: string) => keepFile(id, 'from')
+const transcriptOf = async ($: EngineInterface, id: string) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}.jsonl`
+const derivedFrom = (head: string, id: string) => {
+let from = ''
+for (const row of head.split('\n')) {
+if (!row.includes('"derived-from"')) continue
+const o = parsedOr<{ type?: string; sessions?: { id?: unknown; via?: unknown }[] }>(row, {})
+if (o.type !== 'derived-from' || !Array.isArray(o.sessions)) continue
+const before = o.sessions.filter(one => typeof one?.id === 'string' && SAFE_CHAT.test(one.id) && one.id !== id && one.via !== 'background')
+from = String(before.at(-1)?.id ?? from)
+}
+return from
+}
+const FROM_LOOKS = 12
+const FROM_EVERY = 5000
+const lookRewound = async ($: EngineInterface, id: string, looks = 0): Promise<void> => {
+if (!dir || !SAFE_CHAT.test(id) || (await read($, me)).id !== id) return
+const done = (await readOr($, fromFile(id))).trim()
+if (SAFE_CHAT.test(done)) return void (chatFrom = done)
+const head = (await runOn($, ['head', '-n', '60', await transcriptOf($, id)]).catch(() => undefined))?.stdout ?? ''
+const from = derivedFrom(head, id)
+if (!from && !/"type":"(?:user|assistant)"/.test(head) && looks < FROM_LOOKS) return void $.clock.after(FROM_EVERY, () => void lookRewound($, id, looks + 1).catch(err => log($, `rewind not looked for: ${String(err)}`)))
+if (from) await takeOver($, id, from)
+}
+const takeOver = async ($: EngineInterface, id: string, from: string) => {
+const ledgerText = await readOr($, ledgerFile(from))
+const { pid, cards: kept, savedAt } = keptCards(ledgerText, await $.clock.now())
+const wasPid = pid || (await readOr($, beatFile(from))).split('\t')[0] || ''
+const stillRuns = async () => (isWindows ? Boolean((await windowsAlive($))?.has(wasPid)) : (await runOn($, ['ps', '-o', 'pid=', '-p', wasPid]).catch(() => undefined))?.stdout.trim().split(/\s+/)[0] === wasPid)
+if (/^\d+$/.test(wasPid) && wasPid !== enginePid && (await stillRuns())) return
+const now = await $.clock.now()
+const endedThen = Number((await readOr($, keepFile(from, 'ended'))).split('\t')[1] ?? 0) * 1000
+const lastAt = Math.max(savedAt, endedThen)
+const isQuitStop = (one: Todo) => one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && !hasReport(one) && lastAt > 0 && one.endedAt >= lastAt - QUIT_WINDOW
+const isCut = wasPid !== enginePid
+const finished = parsedOr<unknown>(await readOr($, finishedPath(from)), [])
+const ended = (Array.isArray(finished) ? finished : []).filter(isKeptCard).filter(one => one.status !== 'working')
+const mine = (one: Todo): Todo => ({ ...one, chatWas: one.chatWas || from, bg: undefined, running: undefined, stuckAt: undefined })
+const live = await $.agent.list().catch(() => [])
+const isGoneThere = (one: Todo) => isCut && !one.chat && (one.status === 'working' || isQuitStop(one)) && !live.some(agent => agent.id === one.id && WORKING.includes(agent.status))
+const ledgerIds = new Set(kept.map(one => one.id))
+const theirs = new Set([...ledgerIds, ...ended.map(one => one.id)])
+let brought = 0
+await changeTodos($, list => {
+const known = new Set(list.map(one => one.id))
+const fromLedger = kept.filter(one => !known.has(one.id))
+const fromEnded = ended.filter(one => !known.has(one.id) && !ledgerIds.has(one.id))
+brought = fromLedger.length + fromEnded.length
+return capped(byEnd([...fromEnded, ...list, ...fromLedger])).map(one => (theirs.has(one.id) ? mine(ledgerIds.has(one.id) && isGoneThere(one) ? cutOff(one, now) : one) : one))
+})
+for (const path of [`${dir}/words/${from}.said.md`, `${dir}/words/${from}.md`, `${dir}/asks/${from}.md`, `${dir}/work/${from}.md`]) {
+const was = await readOr($, path)
+const to = path.replace(`/${from}.`, `/${id}.`)
+if (was) await $.fs.write(to, `${was.replace(/\n*$/, '\n\n')}${await readOr($, to)}`)
+}
+const parts = (await $.fs.list(`${dir}/${LEDGER_DIR}/${from}`).catch(() => [])).filter(entry => entry.kind === 'file' && /^[\w-]+\.(?:brief|carry)\.md$/.test(entry.name))
+if (parts.length) await runOn($, ['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`])
+for (const entry of parts) if (!(await $.fs.exists(`${dir}/${LEDGER_DIR}/${id}/${entry.name}`))) await $.fs.write(`${dir}/${LEDGER_DIR}/${id}/${entry.name}`, await readOr($, `${dir}/${LEDGER_DIR}/${from}/${entry.name}`))
+await $.fs.write(fromFile(id), `${from}\n`)
+chatFrom = from
+saveLedgerSoon($)
+await log($, `this chat goes on from ${from} (a rewind): ${brought} cards brought over`)
+void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
+}
+
+
 const saveBrief = async ($: EngineInterface, task: string, prompt: string) => {
 const { id } = await read($, me)
 if (!dir || !SAFE_CHAT.test(id) || !isTaskId(task) || !prompt.trim()) return
@@ -13096,7 +13251,7 @@ return list.map(one => (one.id === top && !one.chat ? { ...one, worktree: found.
 const carryText = async ($: EngineInterface, one: Todo, answer: string) => {
 const { id: chat } = await read($, me)
 const brief = (await readOr($, ledgerPart(chat, one.id, 'brief'))).trim()
-const transcript = `${await agentsFolder($, chat)}/agent-${one.id}.jsonl`
+const transcript = `${await agentsFolder($, one.chatWas || chat)}/agent-${one.id}.jsonl`
 const worktree = one.worktree || asksOf(one).findLast(ask => ask.release)?.release || one.admins?.find(gate => gate.folder)?.folder || ''
 const when = (at: number) => new Date(at).toISOString().slice(0, 16).replace('T', ' ')
 const items = one.items.map(item => `- [${item.state}] ${item.text}`)
@@ -13152,12 +13307,14 @@ if (!dir) return []
 const files = (await $.fs.list(`${dir}/${LEDGER_DIR}`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${me}.json`)
 for (const name of [...ledgersRead.keys()]) if (!files.some(entry => entry.name === name)) ledgersRead.delete(name)
 const found: { ledger: Partial<Ledger>; cards: Todo[] }[] = []
+const goneOn = new Set([chatFrom])
 for (const entry of files) {
 if (entry.mtimeMs && now - entry.mtimeMs > LEDGER_SHOWN) continue
 const key = `${entry.mtimeMs}:${entry.size}`
 const was = ledgersRead.get(entry.name)
 const ledger = was?.key === key ? was.ledger : parsedOr<Partial<Ledger>>(await readOr($, `${dir}/${LEDGER_DIR}/${entry.name}`), {})
 ledgersRead.set(entry.name, { key, ledger })
+if (typeof ledger.from === 'string') goneOn.add(ledger.from)
 if (typeof ledger.chat !== 'string' || !SAFE_CHAT.test(ledger.chat) || open.has(`/${ledger.chat}`) || !Array.isArray(ledger.tasks)) continue
 const savedAt = Number(ledger.savedAt) || 0
 const cards = ledger.tasks
@@ -13166,6 +13323,7 @@ const cards = ledger.tasks
 .filter(one => !one.parentId && !one.closedAt && (one.status === 'working' || isInterrupted(one) || (one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && one.endedAt >= savedAt - QUIT_WINDOW)))
 if (cards.length) found.push({ ledger, cards })
 }
+for (let at = found.length - 1; at >= 0; at -= 1) if (goneOn.has(String(found[at]?.ledger.chat))) found.splice(at, 1)
 if (!found.length) return []
 const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort()
 if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
@@ -13900,6 +14058,22 @@ if (said.exitCode === 0 && gitDir && gitDir === common && top.replace(/\/+$/, ''
 return ''
 }
 
+const ownCheckoutWritten = async ($: EngineInterface, path: string, start: string) => {
+const home = (await homeFolder($)) ?? ''
+if (!path) return ''
+const known = await knowSource($).catch(() => undefined)
+const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
+const full = pathOf(path, home, start || home)
+if (!own || !full.startsWith(`${own}/`)) return ''
+for (let folder = full.slice(0, full.lastIndexOf('/')); folder.length >= own.length; folder = folder.slice(0, folder.lastIndexOf('/'))) {
+const said = await runOn($, ['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+if (said.exitCode !== 0) continue
+const [gitDir = '', common = '', top = ''] = said.stdout.trim().split('\n').map(line => line.trim())
+return gitDir && gitDir === common && top.replace(/\/+$/, '') === own ? own : ''
+}
+return ''
+}
+
 const workHooks = (on: On) => {
 
 on('tool.call', async ($, e, raw) => {
@@ -14000,6 +14174,14 @@ const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command],
 if (changed) {
 await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
 return { deny: NO_SWITCH(changed) }
+}
+}
+if (dir && !isOff && e.agentId !== undefined && FILE_TOOLS.includes(e.tool)) {
+const input = e as { file_path?: unknown; notebook_path?: unknown }
+const written = await ownCheckoutWritten($, String(input.file_path ?? input.notebook_path ?? ''), cwd || '.')
+if (written) {
+await log($, `refused work ${e.agentId}'s change to a file of Claudopus's own checkout`)
+return { deny: NO_EDIT_OWN(written) }
 }
 }
 if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
@@ -14562,7 +14744,7 @@ const block = latestIn(page)
 if (block) latest.set(file, page.slice(0, page.indexOf(block) + block.length).split('\n').length)
 }
 const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
-const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
+const archived = new Set((await loadReports($, true).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
 const seen = new Set<string>()
 const perFile = new Map<string, number>()
 const lines = found
@@ -14756,9 +14938,11 @@ return usageFile
 }
 
 const usageEvery = () => (isWindows ? USAGE_EVERY * 3 : USAGE_EVERY)
+const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
 const lookUsage = async ($: EngineInterface) => {
 const now = await $.clock.now()
-const isFresh = (at: number) => now >= at && now - at < usageEvery() - 500
+const every = usageEvery()
+const isFresh = (at: number) => now >= at && now - at < every - 500
 if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
 usageBusy = true
 usageTriedAt = now
@@ -14767,11 +14951,11 @@ const path = await usagePathOf($)
 const shared = keptOf(await $.fs.read(path).catch(() => ''))
 if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
 const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
-if (taking && now >= taking && now - taking < usageEvery() / 2) return
+if (taking && now >= taking && now - taking < every / 2) return
 await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
 const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
 const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
-const isTop = !isLinux && !isWindows && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+const isTop = !isLinux && !isWindows && (!topAt || now < topAt || now - topAt >= (isOnBattery ? FOOTPRINT_BATTERY_EVERY : FOOTPRINT_EVERY))
 if (isTop) usageTopTriedAt = now
 const r = await runOn($, isWindows ? [...POWERSHELL, USAGE_WINDOWS] : ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: isWindows ? 15_000 : 5000 }).catch(() => undefined)
 const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop, isWindows) : undefined
@@ -15063,7 +15247,7 @@ await $.fs.write(path, JSON.stringify({ ...last, at: now })).catch(() => undefin
 const looked = await runOn($, ['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
 const look = paceLookOf(looked?.stdout ?? '')
 if (!look.procs.length || !look.cores) return
-const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined)
+const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined, isOnBattery)
 if (paced.lower.length || paced.lift.length) await runOn($, ['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
 await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, others: paced.others })).catch(() => undefined)
 if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)

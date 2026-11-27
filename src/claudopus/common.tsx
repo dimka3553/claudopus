@@ -721,6 +721,9 @@ let isWindows = false
 let hasDesktop = true
 // Git for Windows' bash.exe, as Claude Code finds it (CLAUDE_CODE_GIT_BASH_PATH, its SHELL, Git's own folders), '' where none is
 let gitBash = ''
+// Whether the computer runs on its battery, as the last look at the disk and the power said (tidy.tsx, a few seconds after the load
+// and every half minute after, in every chat): on battery the mod looks at things less often, and Claude's commands get fewer cores at full speed
+let isOnBattery = false
 // Where bin/keyring keeps its files on Linux and Windows, ~/.local/share/claudopus/keyring (never under $XDG_DATA_HOME, which a
 // caller sets), and where earlier versions kept them when XDG_DATA_HOME was set, guarded the same (the mod moves them home as it loads)
 let keyringRoot = ''
