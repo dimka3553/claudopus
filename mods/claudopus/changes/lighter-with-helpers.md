@@ -1,1 +1,0 @@
-- The panel's recorder, switched on to find faults, also notes how often each part of Claudopus ran and for how long, so what slows a busy chat can be found in the real app.
