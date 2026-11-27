@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.309 · 28 November 2026
+- Every value on a question or a result that you would paste somewhere else, such as an account or case number, an id, an email, a link, a path or a key's name, now has its own button under the text: one press copies it, and the button says Copied. The panel itself lets no text be selected.
+
 ## 0.2.308 · 27 November 2026
 - Claudopus installs and runs on Windows, in the Claude app's Code tab or in a terminal, with one line in PowerShell: `irm https://www.claudopus.ai/install.ps1 | iex`. Where Git for Windows or jq is missing, it installs them with winget first
 - On Windows, the panel, your tasks and their commands run through Git for Windows' bash, as Claude Code's own commands do, and the memory folder is in your profile's .claude folder

@@ -1655,6 +1655,8 @@ const panelHooks = (on: On) => {
             {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
             {copyButton(`result-${one.id}`, whole)}
           </Box>
+          {/* Each value in it to paste elsewhere, such as a link, a path or an id, is copied with one press */}
+          {pasteRow($, table, `result-${one.id}`, whole, '', room, 8)}
         </Box>,
       )
     }

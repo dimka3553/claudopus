@@ -475,14 +475,18 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         'In full',
         '',
         // A link it names never leaves the app: one of its pictures is shown above, anything else stays as text
-        <Markdown
+        <Box flexDirection="column" alignItems="flex-start" gap={1}>
+          <Markdown
             key={`report-text-${r.id}`}
             text={text.length > REPORT_CHARS ? `${text.slice(0, REPORT_CHARS)}\n\n…` : text}
             onLinkPress={link => {
               const to = pictures.findIndex(one => link.href.endsWith(`/${fileName(one.file)}`) || link.href === one.path)
               if (to >= 0) show(to)
             }}
-          />,
+          />
+          {/* Each value in it to paste elsewhere, such as a link, a path or an id, is copied with one press */}
+          {pasteRow($, ui, `report-${r.id}`, text, '', 80, 8)}
+        </Box>,
       )}
       {band(
         ui,
