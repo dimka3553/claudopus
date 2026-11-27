@@ -9,7 +9,7 @@ const topic = (name: string, state = '', summary = '') => ({ name, repo: '/repo'
 const area = { id: 'nose', name: 'Nose', aim: 'A nose that fits every face', next: [{ text: 'A nose that moves with the mouth', state: 'open' }, { text: 'Old step', state: 'done' }], updated: '2026-11-26T10:00:00.000Z' }
 const entry = (n: number) => ({ title: `Look ${n}`, at: `2026-11-${String(10 + n).padStart(2, '0')}T10:00:00.000Z`, kind: n === 2 ? 'aside' : 'task', outcome: `came to ${n}`, report: `r${n}`, reason: n === 2 ? 'Not now' : '' })
 
-test("a topic page's Latest block names the area's five newest entries with their dates and results and its open steps, and takes the old block's place under the title, the tasks' text kept", async () => {
+test("a topic page's Latest block names the area's five newest entries with their dates and results, never next steps, and takes the old block's place under the title, the tasks' text kept", async () => {
   const block = latestBlock([{ area, entries: [6, 5, 4, 3, 2, 1].map(entry) }], REPORTS, NOW)
   expect(block.split('\n').slice(1, -1)).toEqual([
     '## Latest (2026-11-26)',
@@ -19,7 +19,6 @@ test("a topic page's Latest block names the area's five newest entries with thei
     `  - 2026-11-14 Look 4: came to 4 · ${REPORTS}/r4/report.md`,
     `  - 2026-11-13 Look 3: came to 3 · ${REPORTS}/r3/report.md`,
     `  - 2026-11-12 Look 2: came to 2 (set aside: Not now) · ${REPORTS}/r2/report.md`,
-    '  - Next: A nose that moves with the mouth',
   ])
   const page = '# 3D heads\n\nWhere things are: the old prose.\n'
   const once = withLatest(page, block)
