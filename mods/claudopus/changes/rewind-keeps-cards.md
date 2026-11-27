@@ -1,0 +1,1 @@
+- Rewinding a chat in the Claude app no longer empties its panel: the rewound chat shows every card it had before, just as after a restart. Finished and delivered tasks stay as they ended, a task that was still working shows as Interrupted with Carry on, and the tasks it starts keep your earlier messages in the chat.

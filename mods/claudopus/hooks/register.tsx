@@ -2218,16 +2218,23 @@ const { id } = await read($, me)
 const list = await read($, todos)
 if (!id) return
 const live = await $.agent.list().catch(() => [])
-const folder = `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
 type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
-const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(Boolean)
-const metas = await Promise.all(
+const metas: { one: string; folder: string; chatWas: string; meta: Meta; at: number }[] = []
+for (const chatWas of chatFrom ? ['', chatFrom] : ['']) {
+const folder = await agentsFolder($, chatWas || id)
+const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(one => one && !metas.some(m => m.one === one))
+metas.push(
+...(await Promise.all(
 ids.map(async one => ({
 one,
+folder,
+chatWas,
 meta: JSON.parse((await readOr($, `${folder}/agent-${one}.meta.json`)) || '{}') as Meta,
 at: (await $.fs.stat(`${folder}/agent-${one}.jsonl`).catch(() => undefined))?.mtimeMs ?? 0,
 })),
+)),
 )
+}
 const fresh = metas
 .filter(({ meta }) => meta.spawnDepth === 1)
 .sort((a, b) => b.at - a.at)
@@ -2236,7 +2243,7 @@ const fresh = metas
 if (!fresh.length) return
 during('read back ended work')
 const found: Todo[] = []
-for (const { one: agentId, meta } of fresh) {
+for (const { one: agentId, meta, folder, chatWas } of fresh) {
 try {
 const mtime = (await $.fs.stat(`${folder}/agent-${agentId}.jsonl`).catch(() => undefined))?.mtimeMs ?? 0
 const path = `${folder}/agent-${agentId}.jsonl`
@@ -2284,7 +2291,7 @@ items = items.some(item => slug(item.text) === old) ? items.map(item => (slug(it
 }
 }
 const status: Todo['status'] = one.status === 'failed' ? 'failed' : one.status === 'killed' ? 'stopped' : 'done'
-found.push({ ...started(one.id, '', one.description, '', first || mtime, one.type === 'fork'), status, endedAt: last || mtime, model, tokens, items, entries: entries.slice(-ENTRIES_KEPT) })
+found.push({ ...started(one.id, '', one.description, '', first || mtime, one.type === 'fork'), status, endedAt: last || mtime, model, tokens, items, entries: entries.slice(-ENTRIES_KEPT), ...(chatWas ? { chatWas } : {}) })
 } catch (err) {
 await log($, `ended work ${agentId} not read back: ${String(err)}`)
 }
@@ -11371,6 +11378,7 @@ const title = await appTitle($)
 await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
 await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
 await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
+await lookRewound($, id).catch(err => log($, `rewind not looked for: ${String(err)}`))
 const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)
 if ((await read($, todos)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
 during('load: read the other chats')
@@ -12642,7 +12650,7 @@ const ledgerFile = (chat: string) => `${dir}/${LEDGER_DIR}/${chat}.json`
 const ledgerPart = (chat: string, task: string, kind: 'brief' | 'carry') => `${dir}/${LEDGER_DIR}/${chat}/${task}.${kind}.md`
 const keepFile = (id: string, kind = 'json') => `${dir}/keep/${id}.${kind}`
 type LedgerTask = { id: string; title: string; state: Stage; note: string; transcript: string; card: Todo }
-type Ledger = { chat: string; title: string; folder: string; pid: string; savedAt: number; link?: Link; tasks: LedgerTask[] }
+type Ledger = { chat: string; title: string; folder: string; pid: string; savedAt: number; link?: Link; from?: string; tasks: LedgerTask[] }
 const LEDGER_ENTRIES = 30
 const ledgerCard = (one: Todo): Todo => {
 const { running: _running, bg: _bg, seenJobs: _seen, endedRuns: _runs, newAt: _new, stuckAt: _stuck, stuckTold: _told, quiet: _quiet, owes: _owes, steps: _steps, tokens: _tokens, made: _made, ...kept } = one
@@ -12663,8 +12671,8 @@ const { id, title } = await read($, me)
 if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
 const list = await read($, todos)
 const agents = await agentsFolder($, id)
-const tasks = ledgerTasks(list).map(one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) }))
-const body = { chat: id, title, folder: cwd, pid: enginePid, ...(myLink ? { link: myLink } : {}), tasks }
+const tasks = await Promise.all(ledgerTasks(list).map(async one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${one.chatWas ? await agentsFolder($, one.chatWas) : agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) })))
+const body = { chat: id, title, folder: cwd, pid: enginePid, ...(chatFrom ? { from: chatFrom } : {}), ...(myLink ? { link: myLink } : {}), tasks }
 const sign = JSON.stringify(body)
 if (sign === ledgerSign) return
 const path = ledgerFile(id)
@@ -12743,6 +12751,72 @@ isLedgerRead = true
 }
 
 
+let chatFrom = ''
+const fromFile = (id: string) => keepFile(id, 'from')
+const transcriptOf = async ($: EngineInterface, id: string) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}.jsonl`
+const derivedFrom = (head: string, id: string) => {
+let from = ''
+for (const row of head.split('\n')) {
+if (!row.includes('"derived-from"')) continue
+const o = parsedOr<{ type?: string; sessions?: { id?: unknown; via?: unknown }[] }>(row, {})
+if (o.type !== 'derived-from' || !Array.isArray(o.sessions)) continue
+const before = o.sessions.filter(one => typeof one?.id === 'string' && SAFE_CHAT.test(one.id) && one.id !== id && one.via !== 'background')
+from = String(before.at(-1)?.id ?? from)
+}
+return from
+}
+const FROM_LOOKS = 12
+const FROM_EVERY = 5000
+const lookRewound = async ($: EngineInterface, id: string, looks = 0): Promise<void> => {
+if (!dir || !SAFE_CHAT.test(id) || (await read($, me)).id !== id) return
+const done = (await readOr($, fromFile(id))).trim()
+if (SAFE_CHAT.test(done)) return void (chatFrom = done)
+const head = (await $.process.run(['head', '-n', '60', await transcriptOf($, id)]).catch(() => undefined))?.stdout ?? ''
+const from = derivedFrom(head, id)
+if (!from && !/"type":"(?:user|assistant)"/.test(head) && looks < FROM_LOOKS) return void $.clock.after(FROM_EVERY, () => void lookRewound($, id, looks + 1).catch(err => log($, `rewind not looked for: ${String(err)}`)))
+if (from) await takeOver($, id, from)
+}
+const takeOver = async ($: EngineInterface, id: string, from: string) => {
+const ledgerText = await readOr($, ledgerFile(from))
+const { pid, cards: kept, savedAt } = keptCards(ledgerText, await $.clock.now())
+const wasPid = pid || (await readOr($, beatFile(from))).split('\t')[0] || ''
+if (/^\d+$/.test(wasPid) && wasPid !== enginePid && (await $.process.run(['ps', '-o', 'pid=', '-p', wasPid]).catch(() => undefined))?.stdout.trim().split(/\s+/)[0] === wasPid) return
+const now = await $.clock.now()
+const endedThen = Number((await readOr($, keepFile(from, 'ended'))).split('\t')[1] ?? 0) * 1000
+const lastAt = Math.max(savedAt, endedThen)
+const isQuitStop = (one: Todo) => one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && !hasReport(one) && lastAt > 0 && one.endedAt >= lastAt - QUIT_WINDOW
+const isCut = wasPid !== enginePid
+const finished = parsedOr<unknown>(await readOr($, finishedPath(from)), [])
+const ended = (Array.isArray(finished) ? finished : []).filter(isKeptCard).filter(one => one.status !== 'working')
+const mine = (one: Todo): Todo => ({ ...one, chatWas: one.chatWas || from, bg: undefined, running: undefined, stuckAt: undefined })
+const live = await $.agent.list().catch(() => [])
+const isGoneThere = (one: Todo) => isCut && !one.chat && (one.status === 'working' || isQuitStop(one)) && !live.some(agent => agent.id === one.id && WORKING.includes(agent.status))
+const ledgerIds = new Set(kept.map(one => one.id))
+const theirs = new Set([...ledgerIds, ...ended.map(one => one.id)])
+let brought = 0
+await changeTodos($, list => {
+const known = new Set(list.map(one => one.id))
+const fromLedger = kept.filter(one => !known.has(one.id))
+const fromEnded = ended.filter(one => !known.has(one.id) && !ledgerIds.has(one.id))
+brought = fromLedger.length + fromEnded.length
+return capped(byEnd([...fromEnded, ...list, ...fromLedger])).map(one => (theirs.has(one.id) ? mine(ledgerIds.has(one.id) && isGoneThere(one) ? cutOff(one, now) : one) : one))
+})
+for (const path of [`${dir}/words/${from}.said.md`, `${dir}/words/${from}.md`, `${dir}/asks/${from}.md`, `${dir}/work/${from}.md`]) {
+const was = await readOr($, path)
+const to = path.replace(`/${from}.`, `/${id}.`)
+if (was) await $.fs.write(to, `${was.replace(/\n*$/, '\n\n')}${await readOr($, to)}`)
+}
+const parts = (await $.fs.list(`${dir}/${LEDGER_DIR}/${from}`).catch(() => [])).filter(entry => entry.kind === 'file' && /^[\w-]+\.(?:brief|carry)\.md$/.test(entry.name))
+if (parts.length) await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`])
+for (const entry of parts) if (!(await $.fs.exists(`${dir}/${LEDGER_DIR}/${id}/${entry.name}`))) await $.fs.write(`${dir}/${LEDGER_DIR}/${id}/${entry.name}`, await readOr($, `${dir}/${LEDGER_DIR}/${from}/${entry.name}`))
+await $.fs.write(fromFile(id), `${from}\n`)
+chatFrom = from
+saveLedgerSoon($)
+await log($, `this chat goes on from ${from} (a rewind): ${brought} cards brought over`)
+void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
+}
+
+
 const saveBrief = async ($: EngineInterface, task: string, prompt: string) => {
 const { id } = await read($, me)
 if (!dir || !SAFE_CHAT.test(id) || !isTaskId(task) || !prompt.trim()) return
@@ -12780,7 +12854,7 @@ return list.map(one => (one.id === top && !one.chat ? { ...one, worktree: found.
 const carryText = async ($: EngineInterface, one: Todo, answer: string) => {
 const { id: chat } = await read($, me)
 const brief = (await readOr($, ledgerPart(chat, one.id, 'brief'))).trim()
-const transcript = `${await agentsFolder($, chat)}/agent-${one.id}.jsonl`
+const transcript = `${await agentsFolder($, one.chatWas || chat)}/agent-${one.id}.jsonl`
 const worktree = one.worktree || asksOf(one).findLast(ask => ask.release)?.release || one.admins?.find(gate => gate.folder)?.folder || ''
 const when = (at: number) => new Date(at).toISOString().slice(0, 16).replace('T', ' ')
 const items = one.items.map(item => `- [${item.state}] ${item.text}`)
@@ -12836,12 +12910,14 @@ if (!dir) return []
 const files = (await $.fs.list(`${dir}/${LEDGER_DIR}`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${me}.json`)
 for (const name of [...ledgersRead.keys()]) if (!files.some(entry => entry.name === name)) ledgersRead.delete(name)
 const found: { ledger: Partial<Ledger>; cards: Todo[] }[] = []
+const goneOn = new Set([chatFrom])
 for (const entry of files) {
 if (entry.mtimeMs && now - entry.mtimeMs > LEDGER_SHOWN) continue
 const key = `${entry.mtimeMs}:${entry.size}`
 const was = ledgersRead.get(entry.name)
 const ledger = was?.key === key ? was.ledger : parsedOr<Partial<Ledger>>(await readOr($, `${dir}/${LEDGER_DIR}/${entry.name}`), {})
 ledgersRead.set(entry.name, { key, ledger })
+if (typeof ledger.from === 'string') goneOn.add(ledger.from)
 if (typeof ledger.chat !== 'string' || !SAFE_CHAT.test(ledger.chat) || open.has(`/${ledger.chat}`) || !Array.isArray(ledger.tasks)) continue
 const savedAt = Number(ledger.savedAt) || 0
 const cards = ledger.tasks
@@ -12850,6 +12926,7 @@ const cards = ledger.tasks
 .filter(one => !one.parentId && !one.closedAt && (one.status === 'working' || isInterrupted(one) || (one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && one.endedAt >= savedAt - QUIT_WINDOW)))
 if (cards.length) found.push({ ledger, cards })
 }
+for (let at = found.length - 1; at >= 0; at -= 1) if (goneOn.has(String(found[at]?.ledger.chat))) found.splice(at, 1)
 if (!found.length) return []
 const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort()
 if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
