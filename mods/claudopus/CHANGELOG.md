@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.297 · 27 November 2026
+- Text you pasted into a message shows in its quote as your words, without the marks around it.
+- A task's result quotes your newest message to it, even when that message came after the chat was last read.
+
 ## 0.2.296 · 27 November 2026
 - A task's card shows the pages, pictures and documents its result names, even in a folder with spaces in its name or made earlier in the task, ahead of web links; a page the result only cites is no longer shown as one it made.
 
