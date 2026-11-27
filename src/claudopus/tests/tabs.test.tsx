@@ -748,9 +748,10 @@ test('the list too big for the app at a wide pane is drawn with less in it, ever
     await list.unmount()
     return seen
   }
-  // Beside the chat, and as wide as the window: every card, within what the app draws, never the line that it couldn't
-  expect(await shown(79)).toEqual({ titles: 10, isTooBig: false, isDrawn: true })
+  // As wide as the window and beside the chat: every card, within what the app draws, never the line that it couldn't
+  // (the wide pane first, as this list needs less in it beside the chat too, and the log says only when that changes)
   expect(await shown(300)).toEqual({ titles: 10, isTooBig: false, isDrawn: true })
+  expect(await shown(79)).toEqual({ titles: 10, isTooBig: false, isDrawn: true })
   // The log says how much less, and how big it was whole beside each limit, and how wide the pane was
   expect((files.get(`${MEMORY}/log.md`) ?? '').match(/tab claudopus drawn with less in it \(\d of 3\) to fit what the app draws \(whole: \d+ of 1800 parts, \d+ of 230000 characters, \d+ of 30 deep, 300 columns wide\)/)?.[0]).toBeDefined()
 })

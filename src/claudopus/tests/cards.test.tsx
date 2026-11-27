@@ -147,7 +147,9 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /^I am reading/ }))?.text).toBe('I am reading how the other model draws outlines.')
   // It hangs inside that card as one slim row of its own: its name, which opens it, joined to the card by a line that ends in a purple dot while it works
   expect((await keyed(pane, 'open-list-a2'))?.props.label).toBe('Search the docs')
-  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('M9 0V5Q9 10 14 10H22') && String(svg.props.source).includes('fill="#8A63F0"') && svg.props.alt === 'Working' && svg.props.isInteractive === true)).toHaveLength(1)
+  // (on a desktop its dot, while it moves, is a picture of its own laid over the lines)
+  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('M9 0V5Q9 10 14 10H22') && svg.props.alt === 'Working' && svg.props.isInteractive === true)).toHaveLength(1)
+  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('<circle cx="27" cy="10" r="3.5" fill="#8A63F0"/>') && !String(svg.props.source).includes('<path') && svg.props.alt === 'Working' && svg.props.isInteractive === true)).toHaveLength(1)
   const plain = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect((await plain.find({ type: 'Text', text: /^└─/ }))?.text).toBe('└───')
   await plain.unmount()
@@ -1486,10 +1488,14 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   expect(svgs.map(svg => svg.alt)).toEqual(['Working', 'Working', 'Ended'])
   expect(svgs[0]?.source).toContain('d="M9 0V20M9 10H22M27 15V20"')
   expect(svgs[1]?.source).toContain('d="M9 0V20M27 0V5Q27 10 32 10H40"')
-  expect(svgs[1]?.source).toContain('<circle cx="45" cy="10" r="3.5" fill="#8A63F0"/>')
-  // A row at work has its slow ring round the dot; the closing row of those that ended is still
-  expect(svgs[1]?.source).toContain('<animate attributeName="r" values="3.5;8" dur="2.4s" repeatCount="indefinite"/>')
-  expect(svgs[2]?.source).not.toContain('<animate')
+  // A row at work has its dot and its slow ring round it as a picture of its own, over its lines and with nothing else in it, so
+  // the lines change as rows come and go and the ring goes on turning; the closing row of those that ended is still
+  const marks = (await drawn.findAll({ type: 'Svg' })).map(svg => String(svg.props.source)).filter(source => source.includes('<animate attributeName="r"'))
+  expect(marks).toHaveLength(2)
+  expect(marks[1]).toContain('<circle cx="45" cy="10" r="3.5" fill="#8A63F0"/>')
+  expect(marks[1]).toContain('<animate attributeName="r" values="3.5;8" dur="2.4s" repeatCount="indefinite"/>')
+  expect(marks[1]).not.toContain('<path')
+  expect(svgs.map(svg => svg.source).filter(source => source.includes('<animate'))).toEqual([])
   expect(svgs[2]?.source).toContain('d="M9 0V5Q9 10 14 10H22"')
   expect(svgs[2]?.source).toContain('fill="none" stroke="#808080" stroke-width="1.5"/></svg>')
   // No row names a model, and none has the three dots: only the card itself does
@@ -2206,4 +2212,44 @@ test("a run's second line starts under its name, with the tree's lines carried d
   // and one under a helper, with less room, keeps its count
   expect(tight.some(text => text.includes('10/40'))).toBe(true)
   await narrow.unmount()
+})
+
+test("a moving mark keeps turning for as long as what it stands for goes on: the app keeps it as the panel is drawn again only while it and the boxes it sits in stay the same, so nothing around it may change it (27 Nov: marks turned a quarter and jumped back; a quiet command's ring stopped while its row stayed)", SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const { clock } = world(on, { jobs: { output: () => '', wroteAt: () => now - 2_000 } })
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fit and upload', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fit and upload', prompt: 'go' } as never)
+  const helper = (description: string) => $.agent.spawn({ subagentType: 'general-purpose', background: true, description, prompt: 'go', parentAgentId: 'a1' } as never)
+  const sent = (agentId: string, id: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && python ${id}.py`, description, run_in_background: true } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const moving = (tree: unknown) => appKeeps(undefined, tree).length
+  let was = await pane.drawn()
+  // Each moving mark of the panel drawn again after a change, by its words, and whether the app keeps it turning or starts it anew
+  const after = async (change: () => Promise<unknown>, count: number) => {
+    await change()
+    await advance(1_000)
+    const drawn = await until(async () => {
+      const tree = await pane.drawn()
+      return moving(tree) === count ? tree : undefined
+    })
+    if (!drawn) throw new Error(`the panel never drew ${count} moving marks`)
+    const seen = appKeeps(was, drawn).map(one => `${one.alt}${one.isKept ? '' : ' (anew)'}`)
+    was = drawn
+    return seen
+  }
+  // The card's dots, and a helper that starts beside them
+  expect(await after(() => helper('Draw the pictures'), 2)).toEqual(['Working now', 'Working (anew)'])
+  // The helper says what it does: a line comes under its row
+  expect(await after(() => $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 't', agentId: 'a2', text: 'I am drawing the front views.' } as never), 2)).toEqual(['Working now', 'Working'])
+  // A second helper under it: the first is no longer the last row
+  expect(await after(() => helper('Check the drawing'), 3)).toEqual(['Working now', 'Working', 'Working (anew)'])
+  // The first helper starts a command of its own, which hangs from its dot
+  expect(await after(() => sent('a2', 'n1', 'Run the drawing of every picture'), 4)).toEqual(['Working now', 'Working', 'Command running (anew)', 'Working'])
+  // The card's own command, above its helpers
+  expect(await after(() => sent('a1', 'n2', 'Run the fit of every head'), 5)).toEqual(['Working now', 'Command running (anew)', 'Working', 'Command running', 'Working'])
+  // Minutes with nothing printed: the commands still run, so their rings still turn
+  expect(await after(() => advance(4 * 60_000), 5)).toEqual(['Working now', 'Command running', 'Working', 'Command running', 'Working'])
+  await pane.unmount()
 })

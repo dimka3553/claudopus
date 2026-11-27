@@ -142,12 +142,15 @@ const railText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).joi
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
 // The same lines drawn thin, for a surface that draws, as tall as one line of text: the last row under a parent turns to it in a
 // curve, the line ends in a dot in the colour of how the row stands (a ring for the row of those that ended), and a row's own
-// helpers hang from that dot. A row at work has a soft ring that grows out of its dot and fades, slowly, again and again
+// helpers hang from that dot. A row at work has a soft ring that grows out of its dot and fades, slowly, again and again.
+// `part`: the whole picture; its lines alone, with its mark only where the mark does not move; or the moving mark alone, in the
+// same box, which then depends on nothing but how deep the row is, its colour and its shape, so it is drawn the same as rows come
+// and go around it
 const TWIG_STEP = 18
 const TWIG_ENDED = '#4EBA65'
 const TWIG_FAILED = '#E5484D'
 const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 36
-const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'hollow' | 'diamond' | 'down' | 'up' | 'open' = 'circle') => {
+const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'hollow' | 'diamond' | 'down' | 'up' | 'open' = 'circle', part: 'whole' | 'lines' | 'mark' = 'whole') => {
   const mid = line / 2
   const x = (level: number) => level * TWIG_STEP + 9
   const own = x(t.rails.length)
@@ -171,7 +174,8 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
   const mark = dot
     ? `${isMoving ? ring : ''}${shaped}`
     : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
+  const lines = part === 'mark' ? '' : `<path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}">${lines}${part === 'lines' && isMoving ? '' : mark}</svg>`
 }
 
 // The same tree's lines carried down past a row, for each line of its own under it: the levels above that go on, its own line when
