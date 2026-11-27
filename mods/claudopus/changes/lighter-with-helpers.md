@@ -1,0 +1,2 @@
+- A pressed button in the panel or the bar keeps spinning until the panel shows what the press did, where it used to go back to its plain look for up to a second first.
+- Closing the update note, and the update's other buttons, show at once again while the panel is scrolled down: since 0.2.313 they could take seconds.

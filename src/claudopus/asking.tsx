@@ -219,10 +219,6 @@ const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 // Only while scrolled down: at the top what comes in comes below the header, as the person expects, and every behaviour that shows
 // what work did (a card that finishes comes up green, one stopped leaves after its pause) shows as before
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
-// (the update's steps are read from their file at most every two seconds: read at every drawing, the file was most of the 32 ms
-// this took)
-let stepsRead = ['', 0] as [string, number]
-const stepsNow = async ($: EngineInterface) => (isTimed && Date.now() - stepsRead[1] < 2000 ? stepsRead[0] : (stepsRead = [dir ? await readOr($, stepsPath()) : '', Date.now()])[0])
 const personSign = async ($: EngineInterface) => {
   const ranFrom = runFrom()
   try {
@@ -237,11 +233,11 @@ const personSign = async ($: EngineInterface) => {
   const momentAt = await $.clock.now()
   const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
   return JSON.stringify([
-    presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
+    presses, pressedAt, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
     [...pictureIn.keys()], isUpdating, loadMark,
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
-    [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, await stepsNow($),
+    [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
   } finally {
     runTo('personSign', ranFrom)
@@ -321,7 +317,19 @@ const freshBegins = (key: string, at: number) => (freshUnderWay.set(key, { fresh
 // other again and again: in the real panel three quarters of the full redraws began the moment a drawing ended, in chains of up to
 // 27, with the panel and the bar drawn about seven times a second and the hover under the pointer going out at each (17 Nov)
 const madeAgain = new Map<string, { fresh: number; at: number }>()
+// A press on the desktop ends only once a drawing begun after it is made, or PRESS_SHOWN at the latest: the app spins the
+// pressed button until its press ends, and a press that ended at once left the button as it was, unspun, for the 0.3 to 1 s the
+// drawing that shows what it did took under load (28 Nov, the person: "the spinner should go all the way to the end")
+const PRESS_SHOWN = 1500
+let pressWaits: { since: number; done: () => void }[] = []
+const pressShown = ($: EngineInterface, since: number) =>
+  new Promise<void>(done => {
+    pressWaits.push({ since, done })
+    $.clock.after(PRESS_SHOWN, done)
+    void drawFresh($, true)
+  })
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
+  if (made) pressWaits = pressWaits.filter(wait => made.at < wait.since || (wait.done(), false))
   const going = freshUnderWay.get(key)
   freshUnderWay.delete(key)
   // (a drawing is as new as what it began with: what came while it was made is not in it, so it is never given as made, and the

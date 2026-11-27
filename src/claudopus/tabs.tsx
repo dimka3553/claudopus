@@ -24,6 +24,8 @@ const tabHooks = (on: On) => {
     // An answer the press gave to a task that is not at a step is sent to it from here, inside the press's own hook (sendWakes)
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
     if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
+    // (the button spins until the panel or the bar shows what its press did: pressShown)
+    if (isTimed && e.plugin === 'claudopus' && e.surface === 'desktop' && (e.requestId === LIST || e.component === 'AbovePrompt')) await pressShown($, pressedAt)
     return r
   })
   // and so does a reply typed in a card's box
