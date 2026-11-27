@@ -142,6 +142,7 @@ rm -f "$tmp/chat.run"
 # A fresh load is given RELOAD_WAIT to beat before another try, so a Mac slow to start one is not reloaded again and again
 mem3=$tmp/memory3; mkdir -p "$mem3/keep"
 cp "$tmp/chat" "$tmp/chat3"; touch "$tmp/chat3.run"; "$tmp/chat3" & chat3=$!
+sleep 0.5; chat3=$(wpid "$chat3")
 set3=$tmp/set3.json
 printf '{ "enabledPlugins": { "claudopus@claudopus": true } }\n' > "$set3"
 printf '%s\t%s\t%s\n%s\n' "$chat3" claudopus@claudopus "$set3" load-r > "$mem3/keep/r1.beat"; touch -t 202001010000 "$mem3/keep/r1.beat"

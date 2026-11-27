@@ -49,7 +49,7 @@ me="$0"
 # Windows, in Git for Windows' bash: a chat's process is a Windows process, which kill and ps never see, so tasklist says which run;
 # the watchers are Git's own processes, whose command lines are in /proc
 win=; case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN*) win=1 ;; esac
-argsOf() { if [ -n "$win" ]; then tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null; else ps -o args= -p "$1" 2>/dev/null; fi; }
+argsOf() { if [ -n "$win" ]; then { tr '\0' ' ' < "/proc/$1/cmdline"; } 2>/dev/null; else ps -o args= -p "$1" 2>/dev/null; fi; }
 # (once a look: the numbers of every Windows process; none at all when tasklist does not answer, and then every chat is taken to run)
 running=
 windowsLook() { running=$(tasklist //FO CSV //NH 2>/dev/null | cut -d, -f2 | tr -d '"\r'); [ -n "$running" ] || running=all; }
@@ -75,7 +75,6 @@ if [ -z "$CHANGE_ONLY" ]; then
   fi
   printf '%s\n%s\n' "$$" "$file" > "$dir/revive.pid"
 fi
-printf '%s\n%s\n' "$$" "$file" > "$dir/revive.pid"
 mine() { local p=; { read -r p < "$dir/revive.pid"; } 2>/dev/null; [ "$p" = "$$" ]; }
 
 # One key's "revived" option set in one settings file with the system's own JSON (JavaScript on macOS, Python on Linux, Git's Perl

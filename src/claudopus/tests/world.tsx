@@ -168,13 +168,14 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
     return <Text>the engine's own</Text>
   })
   // Each path as the mod asked for it, on whichever system the kit runs. The kit on Windows gives it with backslashes and from a
-  // drive: /home/sam/x comes as D:\home\sam\x, and the plugin's own files as D:\a\...\mods\claudopus\x, which stay whole. On a
-  // Mac or Linux a Windows PC's path from a drive (C:/Users/sam/...) comes under the folder the kit runs in
+  // drive: /home/sam/x comes as D:\home\sam\x, and the plugin's own files as D:\a\...\mods\claudopus\x, which stay whole (by
+  // the checkout's folder, as the kit's own plugin.root there is a copy in the temp folder). On a Mac or Linux a Windows PC's path
+  // from a drive (C:/Users/sam/...) comes under the folder the kit runs in
   const inProfile = <T extends { path: string }>($: { plugin: { root: string } }, e: T): T => {
     const path = /^[A-Za-z]:\\/.test(e.path) ? e.path.replace(/\\/g, '/') : e.path
     if (options.windows) return { ...e, path: path.replace(/^.*?\/(?=[A-Za-z]:\/)/, '').replace(/^[a-z](?=:)/, d => d.toUpperCase()) }
-    const top = $.plugin.root.replace(/\\/g, '/').replace(/\/mods\/claudopus\/?$/, '').toLowerCase()
-    return { ...e, path: /^[A-Za-z]:\//.test(path) && !path.toLowerCase().startsWith(top) ? path.slice(2) : path }
+    const tops = [$.plugin.root, PLUGIN].map(one => one.replace(/\\/g, '/').replace(/\/mods\/claudopus\/?$/, '').toLowerCase())
+    return { ...e, path: /^[A-Za-z]:\//.test(path) && !tops.some(top => path.toLowerCase().startsWith(top)) ? path.slice(2) : path }
   }
   on('fs.read', (_, raw) => {
     const e = inProfile(_, raw)
