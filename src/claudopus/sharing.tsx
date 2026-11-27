@@ -39,6 +39,8 @@ const readLink = async ($: EngineInterface, id: string): Promise<Link | undefine
   return bridge || app ? { bridge, app } : undefined
 }
 const shareMine = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const { id, title } = await read($, me)
   if (!id || !dir || isOff || isEnded) return
   const now = await $.clock.now()
@@ -81,6 +83,9 @@ const shareMine = async ($: EngineInterface) => {
   sharedSign = sign
   sharedCore = core
   sharedAt = now
+  } finally {
+    runTo('shareMine', ranFrom)
+  }
 }
 // This chat's file goes as its session ends, and when it starts (a file a crash or a reload left behind): the others drop its cards
 // at once, not after STALE
@@ -124,6 +129,8 @@ const isWhole = (text: string) => {
 const LIVE_OLD = 2 * 86_400_000
 let isLiveTidied = false
 const readOthers = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const { id } = await read($, me)
   if (!id || !dir) return
   const now = await $.clock.now()
@@ -247,6 +254,9 @@ const readOthers = async ($: EngineInterface) => {
     othersKept = await update($, others, () => next)
     await update($, todosMark, n => n + 1)
   } else othersHeld = next
+  } finally {
+    runTo('readOthers', ranFrom)
+  }
 }
 // Other chats' work as the panel shows it, but for what moves by itself as it runs (their beats, times, tokens and output): a change
 // in only that is not written at once, as each write draws the panel afresh under the pointer. It is held here and written with the
@@ -399,6 +409,8 @@ const leaveHere = ($: EngineInterface, folder: string, name: string, body: unkno
 // ask (as a prompt of Claude Code's) is answered only in its own chat, by a press or a reply in that chat's own panel, which is in this
 // code's memory. A file left there (by a version before this one) is put away unread, and said in the log
 const readAnswers = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const { id } = await read($, me)
   if (!id || !dir) return
   const folder = `${liveDir()}/${ANSWERS}/${id}`
@@ -406,4 +418,7 @@ const readAnswers = async ($: EngineInterface) => {
   if (!all.length) return
   for (const entry of all) await runOn($, ['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
   await log($, `${all.length === 1 ? 'an answer' : `${all.length} answers`} left in a file put away unread: an ask is answered only in its own chat`)
+  } finally {
+    runTo('readAnswers', ranFrom)
+  }
 }

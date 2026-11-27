@@ -27,6 +27,8 @@ const usageEvery = () => Math.max(isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVER
 const USAGE_MORE = 15_000
 const USAGE_MORE_BATTERY = 60_000
 const lookUsage = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const now = await $.clock.now()
   const every = usageEvery()
   const isFresh = (at: number) => now >= at && now - at < every - 500
@@ -55,6 +57,9 @@ const lookUsage = async ($: EngineInterface) => {
     await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
   } finally {
     usageBusy = false
+  }
+  } finally {
+    runTo('lookUsage', ranFrom)
   }
 }
 // New figures are kept, and the band that shows them redraws only when its line would read or draw differently (the figures as

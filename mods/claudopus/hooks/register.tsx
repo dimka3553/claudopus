@@ -200,6 +200,13 @@ if (!isTimed) JSON.stringify(list, (_, v: unknown) => (v && typeof v === 'object
 cardsAt = Date.now()
 return (cardsKept = list)
 }
+const runTimes = new Map<string, [number, number]>()
+const runFrom = () => (recording ? performance.now() : 0)
+const runTo = (name: string, from: number) => {
+if (!from) return
+const one = runTimes.get(name) ?? [0, 0]
+runTimes.set(name, [one[0] + 1, one[1] + performance.now() - from])
+}
 const todosMark = atom({ plugin: 'claudopus', key: 'todosMark' } as const, 0, { shape: 'todos-mark-1' })
 const drawnCards = async ($: EngineInterface) => (await read($, todosMark), cardsKept ?? keepCards(await read($, todos)))
 const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? (await $.clock.now(), cardsKept ?? keepCards(await read($, todos))) : keepCards(await read($, todos)))
@@ -214,6 +221,8 @@ isRunSet = true
 $.clock.after(RUN_SOON, () => void ((isRunSet = false), changeTodos($, list => list).catch(err => log($, `running calls not kept: ${String(err)}`))))
 }
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
+const ranFrom = runFrom()
+try {
 const now = keepCards(await read($, todos))
 const before = JSON.stringify(now)
 const due = [...runDue]
@@ -227,6 +236,9 @@ await update($, todosMark, n => n + 1)
 settled()
 saveLedgerSoon($)
 return written
+} finally {
+runTo('changeTodos', ranFrom)
+}
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
@@ -260,7 +272,14 @@ for (const stop of [...whenLeft]) stop()
 return isLeft
 }
 const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
-const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
+const name = `every ${ms} ${String(fn).replace(/\s+/g, ' ').slice(0, 60)}`
+const timer = $.clock.every(ms, () => void isReplaced($).then(left => {
+if (left) return timer.cancel()
+const from = runFrom()
+const r = fn()
+if (r instanceof Promise) void r.finally(() => runTo(name, from)).catch(() => undefined)
+else runTo(name, from)
+}))
 return timer
 }
 const HOLD_LOOK = 250
@@ -640,6 +659,8 @@ const isRecording = async ($: EngineInterface) => {
 const at = await $.clock.now()
 if (recording) {
 if (at < recording.until) return true
+recording.lines.push(JSON.stringify({ t: at - recording.started, ev: 'runs', times: [...runTimes].map(([name, [n, ms]]) => [name, n, Math.round(ms)]).sort((a, b) => Number(b[2]) - Number(a[2])) }))
+runTimes.clear()
 await recordFlush($)
 recording = undefined
 return false
@@ -2377,6 +2398,8 @@ const chat = (await read($, me)).id
 await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at, ...(chat && { chat }) })).catch(err => log($, `panel choice not kept: ${String(err)}`))
 }
 const followPanel = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 if (!dir) return undefined
 const choice = await readPanel($)
 if (!choice || seenOf(choice) === panelSeen) return choice
@@ -2397,6 +2420,9 @@ drawAgain($)
 }
 panelSeen = seenOf(choice)
 return choice
+} finally {
+runTo('followPanel', ranFrom)
+}
 }
 
 const showPanel = async ($: EngineInterface) => {
@@ -2537,6 +2563,8 @@ return fresh.length ? capped(byEnd([...fresh, ...list])) : list
 }
 
 const follow = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 await sync($)
 await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
 await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
@@ -2544,6 +2572,9 @@ await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)
 const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
 if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
 await loadReports($).catch(() => undefined)
+} finally {
+runTo('follow', ranFrom)
+}
 }
 
 const quoted = (text: string, most: number) => {
@@ -7815,6 +7846,8 @@ drawnDrafts.set(key, value)
 return value
 }
 const paneShape = async ($: EngineInterface, paneId: string) => {
+const ranFrom = runFrom()
+try {
 const at = await $.clock.now()
 const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
 const own = await drawnCards($)
@@ -7823,12 +7856,23 @@ const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(
 const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
 const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
 return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...attachSaid], [...replies]])
+} finally {
+runTo('paneShape', ranFrom)
+}
 }
 const calmCard = (one: Todo) => {
 const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
 return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await drawnCards($)).map(calmCard), (await drawnOthers($)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+const calmTexts = new WeakMap<object, string>()
+const calmText = (list: object, make: () => unknown) => calmTexts.get(list) ?? (calmTexts.set(list, JSON.stringify(make())), calmTexts.get(list) ?? '')
+const paneContent = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+const [own, theirs] = [await drawnCards($), await drawnOthers($)]
+const content = JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), calmText(own, () => own.map(calmCard)), calmText(theirs, () => theirs.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) }))), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+runTo('paneContent', ranFrom)
+return content
+}
 const holdTimes = ($: EngineInterface) => {
 if (!isTyping) recordEvent($, 'hold')
 const made = (typing += 1)
@@ -7864,6 +7908,8 @@ let engagedAt = 0
 const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const chats = await drawnOthers($)
 const cards = await drawnCards($)
 const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
@@ -7875,6 +7921,9 @@ presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), wa
 [...pictureIn.keys()], isUpdating, loadMark,
 [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
 ])
+} finally {
+runTo('personSign', ranFrom)
+}
 }
 const PRESS_HOLD = 2000
 let pressFrom = 0
@@ -7924,6 +7973,8 @@ let calmAt = 0
 let liveDrawn = ''
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 const calmLook = async ($: EngineInterface, isMoving: boolean) => {
+const ranFrom = runFrom()
+try {
 const now = await $.clock.now()
 const urgent = urgentSign()
 if (urgentDrawn && urgent !== urgentDrawn) drawAgain($, true)
@@ -7950,6 +8001,9 @@ outputMoved = false
 await writeHeldOthers($)
 recordEvent($, 'redraw-calm')
 $.ui.invalidate('ui.render')
+} finally {
+runTo('calmLook', ranFrom)
+}
 }
 const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field|^config-.*-input$/.test(element ?? '')
 const keepDraft = ($: EngineInterface, key: string, value: string | undefined) =>
@@ -8783,6 +8837,8 @@ const app = APP_ID.test(host) ? host : typeof found.hostSessionId === 'string' &
 return bridge || app ? { bridge, app } : undefined
 }
 const shareMine = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const { id, title } = await read($, me)
 if (!id || !dir || isOff || isEnded) return
 const now = await $.clock.now()
@@ -8819,6 +8875,9 @@ await $.fs.write(ownLive(id), text)
 sharedSign = sign
 sharedCore = core
 sharedAt = now
+} finally {
+runTo('shareMine', ranFrom)
+}
 }
 const unshare = async ($: EngineInterface, isSure = false) => {
 const { id } = await read($, me)
@@ -8852,6 +8911,8 @@ return false
 const LIVE_OLD = 2 * 86_400_000
 let isLiveTidied = false
 const readOthers = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const { id } = await read($, me)
 if (!id || !dir) return
 const now = await $.clock.now()
@@ -8954,6 +9015,9 @@ othersHeld = undefined
 othersKept = await update($, others, () => next)
 await update($, todosMark, n => n + 1)
 } else othersHeld = next
+} finally {
+runTo('readOthers', ranFrom)
+}
 }
 let othersHeld: Shared[] | undefined
 let othersKept: Shared[] | undefined
@@ -9076,6 +9140,8 @@ $.fs
 .then(() => runOn($, ['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
 .catch(err => ({ exitCode: -1, stderr: String(err) }))
 const readAnswers = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const { id } = await read($, me)
 if (!id || !dir) return
 const folder = `${liveDir()}/${ANSWERS}/${id}`
@@ -9083,6 +9149,9 @@ const all = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name
 if (!all.length) return
 for (const entry of all) await runOn($, ['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
 await log($, `${all.length === 1 ? 'an answer' : `${all.length} answers`} left in a file put away unread: an ask is answered only in its own chat`)
+} finally {
+runTo('readAnswers', ranFrom)
+}
 }
 
 
@@ -9462,6 +9531,8 @@ const boxTold = new Set<string>()
 
 let boxesIdle: number | undefined
 const lookBoxes = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 if (!dir) return
 if (boxesIdle !== undefined) {
 const at = await $.fs.stat(boxesDir()).then(st => st.mtimeMs || undefined, () => -1)
@@ -9525,6 +9596,9 @@ if (!entries.length && !found.length) boxesIdle = idleAt
 if (JSON.stringify(found) === JSON.stringify(boxes)) return
 boxes = found
 drawAgain($)
+} finally {
+runTo('lookBoxes', ranFrom)
+}
 }
 
 const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
@@ -10674,6 +10748,8 @@ void shareMine($).catch(() => undefined)
 }
 let isLooking = false
 const lookForStarted = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const sought = waiting.filter(one => one.snippet && one.seen !== undefined)
 if (!sought.length || isLooking) return
 isLooking = true
@@ -10683,6 +10759,9 @@ if (!lines) return
 for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id)
 } finally {
 isLooking = false
+}
+} finally {
+runTo('lookForStarted', ranFrom)
 }
 }
 
@@ -12630,6 +12709,8 @@ return r?.exitCode === 0 ? r.stdout.trim().split('\n')[0] ?? '' : ''
 }
 
 const lookJobs = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const now = await $.clock.now()
 if (now - jobsLookedAt < JOB_LOOK) return
 jobsLookedAt = now
@@ -12727,6 +12808,9 @@ for (const owner of moved) jobNews.set(owner, now)
 if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
 if (ended.length) void drawFresh($)
 else if (isChanged) outputMoved = true
+} finally {
+runTo('lookJobs', ranFrom)
+}
 }
 let outputMoved = false
 const LIVE_LOOK = 20_000
@@ -13334,6 +13418,8 @@ let isLedgerRead = false
 let ledgerSign = ''
 let ledgerMade = ''
 const saveLedger = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const { id, title } = await read($, me)
 if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
 const list = await ownCards($)
@@ -13349,6 +13435,9 @@ await $.fs.write(`${path}.part`, JSON.stringify(ledger, null, 1))
 const r = await runOn($, ['mv', '-f', `${path}.part`, path])
 if (r.exitCode !== 0) throw new Error(`ledger not moved into place: ${r.stderr.slice(0, 200)}`)
 ledgerSign = sign
+} finally {
+runTo('saveLedger', ranFrom)
+}
 }
 const LEDGER_GAP = 2000
 let isLedgerBusy = false
@@ -15250,6 +15339,8 @@ const usageEvery = () => Math.max(isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVER
 const USAGE_MORE = 15_000
 const USAGE_MORE_BATTERY = 60_000
 const lookUsage = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const now = await $.clock.now()
 const every = usageEvery()
 const isFresh = (at: number) => now >= at && now - at < every - 500
@@ -15277,6 +15368,9 @@ await keepUsage($, kept)
 await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
 } finally {
 usageBusy = false
+}
+} finally {
+runTo('lookUsage', ranFrom)
 }
 }
 let usageShown = ''
@@ -15319,6 +15413,8 @@ return { at: 0, held: 0 }
 }
 
 const paceWork = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 if (isLinux || isWindows || isPacing) return
 const now = await $.clock.now()
 const every = PACE_EVERY * (isOnBattery ? 2 : 1)
@@ -15346,6 +15442,9 @@ if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands w
 if (!paced.held && last.held) await log($, "every one of Claude's commands runs at full speed again")
 } finally {
 isPacing = false
+}
+} finally {
+runTo('paceWork', ranFrom)
 }
 }
 
@@ -15491,12 +15590,17 @@ const one = changeTarget(cards) ?? barTarget(cards)
 return one ? `${one.id}|${titleOf(one)}` : barOpen?.kind === 'continue' ? `result|${barOpen.id}` : ''
 }
 const lookBar = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
 if (!barHeld.size || !barOpen || isBoxKind(barOpen.kind)) return
 const sign = barCardsSign(await read($, todos))
 if (sign === barCardsDrawn) return
 barCardsDrawn = sign
 drawAgain($, true)
+} finally {
+runTo('lookBar', ranFrom)
+}
 }
 let isBarSettling = false
 const settleBar = ($: EngineInterface) => {
@@ -17746,10 +17850,15 @@ tabInFront = shown[0]?.id ?? ''
 await watchTabs($, (shown.length ? shown : panes).map(pane => pane.id), 'this code loaded')
 }
 const watchFront = async ($: EngineInterface) => {
+const ranFrom = runFrom()
+try {
 const front = (await $.ui.panes().catch(() => [])).find(pane => pane.isShown)?.id ?? ''
 if (front === tabInFront) return
 tabInFront = front
 if (front) await watchTabs($, [front], 'it came in front', 2_000)
+} finally {
+runTo('watchFront', ranFrom)
+}
 }
 const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { requestId?: string }, error: { kind: string; message?: string } | undefined) => {
 const id = e.requestId ?? ''

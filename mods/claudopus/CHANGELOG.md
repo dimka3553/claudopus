@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.312 · 28 November 2026
+- A panel drawn again with nothing new in it costs less in a chat with many tasks: what its cards say is put together once for each change, not at every drawing.
+- The panel's recorder, switched on to find faults, also notes how often each part of Claudopus ran and for how long, so what slows a busy chat can be found in the real app.
+
 ## 0.2.311 · 28 November 2026
 - A pointer resting on the disk's speed in the line above the prompt shows how much disk space is used, how much is left and the disk's size
 

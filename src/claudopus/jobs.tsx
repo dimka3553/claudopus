@@ -71,6 +71,8 @@ const findTasks = async ($: EngineInterface) => {
 // Looked at as the list is followed: the end of each background job's output, read in one go. A card whose job wrote something
 // new has news
 const lookJobs = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const now = await $.clock.now()
   if (now - jobsLookedAt < JOB_LOOK) return
   jobsLookedAt = now
@@ -192,6 +194,9 @@ const lookJobs = async ($: EngineInterface) => {
   // work runs): drawn afresh at each output, seven tasks' commands drew the panel without a pause and no click held (16 Nov)
   if (ended.length) void drawFresh($)
   else if (isChanged) outputMoved = true
+  } finally {
+    runTo('lookJobs', ranFrom)
+  }
 }
 let outputMoved = false
 // How often a silent command's programs are looked at, how much of a processor counts as busy (percent, all of them together),

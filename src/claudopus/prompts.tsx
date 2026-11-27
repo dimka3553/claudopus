@@ -186,6 +186,8 @@ const ownSent = ($: EngineInterface, since: number) => {
 // A command allowed starts at once: a process on this Mac running it ends its prompt before the command itself ends
 let isLooking = false
 const lookForStarted = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const sought = waiting.filter(one => one.snippet && one.seen !== undefined)
   if (!sought.length || isLooking) return
   isLooking = true
@@ -195,6 +197,9 @@ const lookForStarted = async ($: EngineInterface) => {
     for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id)
   } finally {
     isLooking = false
+  }
+  } finally {
+    runTo('lookForStarted', ranFrom)
   }
 }
 

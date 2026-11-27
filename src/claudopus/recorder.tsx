@@ -17,6 +17,8 @@ const isRecording = async ($: EngineInterface) => {
   const at = await $.clock.now()
   if (recording) {
     if (at < recording.until) return true
+    recording.lines.push(JSON.stringify({ t: at - recording.started, ev: 'runs', times: [...runTimes].map(([name, [n, ms]]) => [name, n, Math.round(ms)]).sort((a, b) => Number(b[2]) - Number(a[2])) }))
+    runTimes.clear()
     await recordFlush($)
     recording = undefined
     return false

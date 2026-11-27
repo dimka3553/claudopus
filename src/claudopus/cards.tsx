@@ -562,6 +562,8 @@ const choosePanel = async ($: EngineInterface, isOpen: boolean) => {
 // Brings this chat's panel in line with the last choice, once per choice. A pane opened where nothing draws it yet stays open and
 // is drawn once a screen that can attaches; an open the engine refused is tried again at the next look
 const followPanel = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   if (!dir) return undefined
   const choice = await readPanel($)
   if (!choice || seenOf(choice) === panelSeen) return choice
@@ -584,6 +586,9 @@ const followPanel = async ($: EngineInterface) => {
   }
   panelSeen = seenOf(choice)
   return choice
+  } finally {
+    runTo('followPanel', ranFrom)
+  }
 }
 
 // The panel asked for by the person, with /claudopus or Open panel above the prompt: where it can be drawn, it is open in every chat from now on
@@ -745,6 +750,8 @@ const loadFinished = async ($: EngineInterface) => {
 }
 
 const follow = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   await sync($)
   await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
@@ -753,6 +760,9 @@ const follow = async ($: EngineInterface) => {
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
   // Reports another chat kept since are listed here too
   await loadReports($).catch(() => undefined)
+  } finally {
+    runTo('follow', ranFrom)
+  }
 }
 
 // A message as the panel quotes it: whole when short, else its first sentences

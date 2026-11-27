@@ -126,6 +126,8 @@ const draftDrawn = (key: string) => {
 // (whether a card has a call running, not which: named by when it began, every call of every task was a new shape, and the
 // whole pane was drawn afresh for it)
 const paneShape = async ($: EngineInterface, paneId: string) => {
+  const ranFrom = runFrom()
+  try {
   const at = await $.clock.now()
   const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
   const own = await drawnCards($)
@@ -134,6 +136,9 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
   return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...attachSaid], [...replies]])
+  } finally {
+    runTo('paneShape', ranFrom)
+  }
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -143,7 +148,17 @@ const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
   return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await drawnCards($)).map(calmCard), (await drawnOthers($)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+// (the cards' part is put together once for each list, which is never changed in place: with hundreds of cards it was most of
+// what a drawing given again as it was cost, five times a second)
+const calmTexts = new WeakMap<object, string>()
+const calmText = (list: object, make: () => unknown) => calmTexts.get(list) ?? (calmTexts.set(list, JSON.stringify(make())), calmTexts.get(list) ?? '')
+const paneContent = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  const [own, theirs] = [await drawnCards($), await drawnOthers($)]
+  const content = JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), calmText(own, () => own.map(calmCard)), calmText(theirs, () => theirs.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) }))), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+  runTo('paneContent', ranFrom)
+  return content
+}
 const holdTimes = ($: EngineInterface) => {
   if (!isTyping) recordEvent($, 'hold')
   const made = (typing += 1)
@@ -201,6 +216,8 @@ const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 // what work did (a card that finishes comes up green, one stopped leaves after its pause) shows as before
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   const chats = await drawnOthers($)
   // (only the cards that ask or wait on a gate: a card that merely starts or ends waits)
   const cards = await drawnCards($)
@@ -218,6 +235,9 @@ const personSign = async ($: EngineInterface) => {
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
     [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
+  } finally {
+    runTo('personSign', ranFrom)
+  }
 }
 // A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
 // click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
@@ -311,6 +331,8 @@ const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
 // draw it again only every CALM while work moves, and not while the person uses it
 const calmLook = async ($: EngineInterface, isMoving: boolean) => {
+  const ranFrom = runFrom()
+  try {
   const now = await $.clock.now()
   const urgent = urgentSign()
   if (urgentDrawn && urgent !== urgentDrawn) drawAgain($, true)
@@ -343,6 +365,9 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   await writeHeldOthers($)
   recordEvent($, 'redraw-calm')
   $.ui.invalidate('ui.render')
+  } finally {
+    runTo('calmLook', ranFrom)
+  }
 }
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
 const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field|^config-.*-input$/.test(element ?? '')

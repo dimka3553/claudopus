@@ -128,6 +128,8 @@ const boxTold = new Set<string>()
 // goes, not as one is written again, so a folder with anything in it is read each second as before)
 let boxesIdle: number | undefined
 const lookBoxes = async ($: EngineInterface) => {
+  const ranFrom = runFrom()
+  try {
   if (!dir) return
   if (boxesIdle !== undefined) {
     const at = await $.fs.stat(boxesDir()).then(st => st.mtimeMs || undefined, () => -1)
@@ -204,6 +206,9 @@ const lookBoxes = async ($: EngineInterface) => {
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   drawAgain($)
+  } finally {
+    runTo('lookBoxes', ranFrom)
+  }
 }
 
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,

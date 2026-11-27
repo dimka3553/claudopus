@@ -256,6 +256,16 @@ const keepCards = (list: Todo[]) => {
 // (each read still goes to the engine and back once, with a call that carries nothing: code that follows a read kept its place
 // after what the engine was doing only by that, as a write that follows a message sent from a drawing's hook, refused while the
 // hook still draws)
+// While the panel's recorder is on, the runs of the mod's timers and of what each drawing and each change is made of are counted
+// and timed by the wall clock, their waits for the engine in it, and written as the recording's last line (28 Nov: with six
+// helpers at work the mod's thread used 30% of a core, and no sampling of the app told on what)
+const runTimes = new Map<string, [number, number]>()
+const runFrom = () => (recording ? performance.now() : 0)
+const runTo = (name: string, from: number) => {
+  if (!from) return
+  const one = runTimes.get(name) ?? [0, 0]
+  runTimes.set(name, [one[0] + 1, one[1] + performance.now() - from])
+}
 // A drawing reads only the list's mark from the engine, a number changeTodos moves with each write, and takes the list itself from
 // here: the mark's write is what draws it again. Read whole for each drawing, the list crossed between Claude's two threads about
 // thirty times a second with seven tasks at work (28 Nov: the panel asked for five times a second and the bar four, each with one
@@ -279,6 +289,8 @@ const runSoon = ($: EngineInterface, agent: string, newAt?: number) => {
   $.clock.after(RUN_SOON, () => void ((isRunSet = false), changeTodos($, list => list).catch(err => log($, `running calls not kept: ${String(err)}`))))
 }
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
+  const ranFrom = runFrom()
+  try {
   // (a change reads the list from the engine itself, as it writes there)
   const now = keepCards(await read($, todos))
   const before = JSON.stringify(now)
@@ -297,6 +309,9 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   // (and the ledger on disk with it, so a quit or a crash loses nothing: keep.tsx)
   saveLedgerSoon($)
   return written
+  } finally {
+    runTo('changeTodos', ranFrom)
+  }
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
@@ -343,7 +358,14 @@ const isReplaced = async ($: EngineInterface) => {
 }
 // A timer of this load: it stops for good the first time it fires after a newer load took charge
 const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
-  const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
+  const name = `every ${ms} ${String(fn).replace(/\s+/g, ' ').slice(0, 60)}`
+  const timer = $.clock.every(ms, () => void isReplaced($).then(left => {
+    if (left) return timer.cancel()
+    const from = runFrom()
+    const r = fn()
+    if (r instanceof Promise) void r.finally(() => runTo(name, from)).catch(() => undefined)
+    else runTo(name, from)
+  }))
   return timer
 }
 // ---- Never holding Claude's helper ----
