@@ -273,7 +273,8 @@ const runSoon = ($: EngineInterface, agent: string, newAt?: number) => {
   $.clock.after(RUN_SOON, () => void ((isRunSet = false), changeTodos($, list => list).catch(err => log($, `running calls not kept: ${String(err)}`))))
 }
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
-  const now = await ownCards($)
+  // (a change reads the list from the engine itself, as it writes there)
+  const now = keepCards(await read($, todos))
   const before = JSON.stringify(now)
   const due = [...runDue]
   const ran = (list: Todo[]) => due.reduce((all, [agent, newAt]) => withRunning(all, agent, newAt), list)
@@ -345,7 +346,7 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
 // when it falls behind, does less until it has caught up
 // How often the mod looks at how late its own timer comes, and how late counts as behind: then fresh drawings and the looks that can
 // wait are left out for BEHIND_FOR
-const HOLD_LOOK = 500
+const HOLD_LOOK = 250
 const LATE = 400
 const BEHIND_FOR = 10_000
 // and a drawing is given as it was for this long at most, however long the mod stays behind

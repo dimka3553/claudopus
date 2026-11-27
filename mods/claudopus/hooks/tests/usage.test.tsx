@@ -1382,7 +1382,7 @@ test("a disk nearly full says so at the top of the panel with Free up space and 
   expect(await bash('b1', 'cd /w && npm run build', 'Build the site')).toBeUndefined()
   // Under 20 GB the panel says so, with its one press, and the person is told once
   df(12)
-  await clock.advance(31_000)
+  await clock.advance(61_000)
   expect((await until(warning))?.text).toBe('Your Mac has 12 GB of disk space left. Free up space?')
   expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toContain('Free up space')
   expect(await bash('b2', 'curl -L -o /w/scans.zip https://example.com/scans.zip', 'Download the scans')).toBeUndefined()

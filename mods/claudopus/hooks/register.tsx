@@ -210,7 +210,7 @@ isRunSet = true
 $.clock.after(RUN_SOON, () => void ((isRunSet = false), changeTodos($, list => list).catch(err => log($, `running calls not kept: ${String(err)}`))))
 }
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
-const now = await ownCards($)
+const now = keepCards(await read($, todos))
 const before = JSON.stringify(now)
 const due = [...runDue]
 const ran = (list: Todo[]) => due.reduce((all, [agent, newAt]) => withRunning(all, agent, newAt), list)
@@ -258,7 +258,7 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
 const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
 return timer
 }
-const HOLD_LOOK = 500
+const HOLD_LOOK = 250
 const LATE = 400
 const BEHIND_FOR = 10_000
 const BEHIND_HELD = 30_000
