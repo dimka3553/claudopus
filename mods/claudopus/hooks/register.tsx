@@ -25,7 +25,7 @@ import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, 
 import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, chartSvg, FOOTPRINT_BATTERY_EVERY, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isOnBatteryLook, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_BATTERY_EVERY, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
-import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
+import { PACE_EVERY, PACE_LOOK, PACE_SET, PACE_THREADS, paceLookOf, paceNeedsThreads, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
@@ -190,13 +190,36 @@ let drawnNow = 0
 let listHeldAt = 0
 let listFreshAt = 0
 let finishedAtTop: string[] = []
+let cardsKept: Todo[] | undefined
+let cardsAt = 0
+const CARDS_HELD = 5000
+const keepCards = (list: Todo[]) => {
+if (!isTimed) JSON.stringify(list, (_, v: unknown) => (v && typeof v === 'object' ? Object.freeze(v) : v))
+cardsAt = Date.now()
+return (cardsKept = list)
+}
+const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? cardsKept : keepCards(await read($, todos)))
+const runDue = new Map<string, number | undefined>()
+const RUN_SOON = 400
+let isRunSet = false
+const runSoon = ($: EngineInterface, agent: string, newAt?: number) => {
+runDue.set(agent, newAt ?? runDue.get(agent))
+if (!isTimed) return changeTodos($, list => list)
+if (isRunSet) return
+isRunSet = true
+$.clock.after(RUN_SOON, () => void ((isRunSet = false), changeTodos($, list => list).catch(err => log($, `running calls not kept: ${String(err)}`))))
+}
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
-const now = await read($, todos)
+const now = await ownCards($)
 const before = JSON.stringify(now)
-const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, fn(list)))))
+const due = [...runDue]
+const ran = (list: Todo[]) => due.reduce((all, [agent, newAt]) => withRunning(all, agent, newAt), list)
+const settled = () => due.forEach(([agent, newAt]) => runDue.get(agent) === newAt && runDue.delete(agent))
+const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, ran(fn(list))))))
 const next = hold(now)
-if (JSON.stringify(next) === before) return now
-const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+if (JSON.stringify(next) === before) return (settled(), now)
+const written = keepCards(await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list))))
+settled()
 saveLedgerSoon($)
 return written
 }
@@ -217,9 +240,13 @@ isMarked = false
 }
 let isLeft = false
 const whenLeft = new Set<() => void>()
+const LEFT_LOOK = 2000
+let leftAt = 0
 const isReplaced = async ($: EngineInterface) => {
 if (isLeft) return true
 if (!isMarked) return false
+if (isTimed && Date.now() - leftAt < LEFT_LOOK) return false
+leftAt = Date.now()
 const now = (await $.state.get(loadNow).catch(() => undefined))?.value
 if (typeof now === 'string' && now > thisLoad && !isLeft) {
 isLeft = true
@@ -231,7 +258,7 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
 const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
 return timer
 }
-const HOLD_LOOK = 250
+const HOLD_LOOK = 500
 const LATE = 400
 const BEHIND_FOR = 10_000
 const BEHIND_HELD = 30_000
@@ -1135,26 +1162,110 @@ await writeOwnText($, memory, path, text.endsWith('\n') ? text : `${text}\n`)
 return ''
 }
 
-let secrets = { at: -SECRETS_MS, names: [] as string[], isAdminKept: false }
+let secrets = { at: -SECRETS_MS, names: [] as string[], admins: undefined as string[] | undefined, marks: undefined as Map<number, number[]> | undefined, same: [] as string[] }
+const MARK_BASE = 256 + Math.floor(Math.random() * 2_096_896)
+const MARK_MOD = 2_147_483_647
+const SAME_MAX = 200_000
 const knowKept = async ($: EngineInterface, isNow = false) => {
 const now = await $.clock.now()
 if (now - secrets.at < SECRETS_MS && !isNow) return secrets
-const listed = await $.process.run([`${$.plugin.root}/bin/secret`, '--list']).catch(() => undefined)
-const admins = await $.process.run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin']).catch(() => undefined)
-if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), isAdminKept: admins?.exitCode === 0 ? Boolean(admins.stdout.trim()) : secrets.isAdminKept }
+const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
+const marked = await run([`${$.plugin.root}/bin/secret`, '--marks', String(MARK_BASE)])
+const lines = marked?.exitCode === 0 && !marked.isStdoutTruncated ? marked.stdout.split('\n').filter(Boolean) : []
+if (lines.at(-1) === 'end') {
+const names: string[] = []
+const admins: string[] = []
+const marks = new Map<number, number[]>()
+let isRead = true
+for (const line of lines.slice(0, -1)) {
+const [kind, one = '', hash = ''] = line.split('\t')
+if (kind === 'name') names.push(one)
+else if (kind === 'admin') admins.push(one)
+else if (kind === 'mark' && /^[1-9]\d*$/.test(one) && /^\d+$/.test(hash)) marks.set(Number(one), [...(marks.get(Number(one)) ?? []), Number(hash)])
+else isRead = false
+}
+if (isRead) return (secrets = { at: now, names, admins, marks, same: [] })
+}
+const listed = await run([`${$.plugin.root}/bin/secret`, '--list'])
+const admins = await run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin'])
+if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), admins: admins?.exitCode === 0 ? admins.stdout.split('\n').filter(Boolean) : secrets.admins, marks: undefined, same: [] }
 return secrets
 }
+const mayHoldKept = (text: string, marks: Map<number, number[]>) => {
+const parts: string[] = []
+let size = 0
+const walk = (x: unknown) => {
+if (typeof x === 'string' || typeof x === 'number') size += parts[parts.push(String(x)) - 1]!.length * 3 + 1
+else if (Array.isArray(x)) for (const one of x) walk(one)
+else if (x && typeof x === 'object') for (const key of Object.keys(x)) (walk(key), walk((x as Record<string, unknown>)[key]))
+}
+try {
+walk(JSON.parse(text))
+} catch {
+return true
+}
+const bytes = new Uint8Array(size)
+let n = 0
+for (const s of parts) {
+for (let i = 0; i < s.length; i++) {
+let c = s.charCodeAt(i)
+if (c < 0x80) {
+bytes[n++] = c
+continue
+}
+const next = c >= 0xd800 && c < 0xdc00 ? s.charCodeAt(i + 1) : 0
+if (c < 0x800) bytes[n++] = 0xc0 | (c >> 6)
+else if (next >= 0xdc00 && next < 0xe000) {
+c = 0x10000 + ((c - 0xd800) << 10) + (next - 0xdc00)
+i++
+bytes[n++] = 0xf0 | (c >> 18)
+bytes[n++] = 0x80 | ((c >> 12) & 63)
+bytes[n++] = 0x80 | ((c >> 6) & 63)
+} else {
+bytes[n++] = 0xe0 | (c >> 12)
+bytes[n++] = 0x80 | ((c >> 6) & 63)
+}
+bytes[n++] = 0x80 | (c & 63)
+}
+bytes[n++] = 0xff
+}
+const gone = new Float64Array(256)
+for (const [length, hashes] of marks) {
+if (length > n) continue
+let top = 1
+let h = 0
+for (let i = 0; i < length; i++) {
+top = (top * MARK_BASE) % MARK_MOD
+h = (h * MARK_BASE + bytes[i]!) % MARK_MOD
+}
+for (let b = 0; b < 256; b++) gone[b] = MARK_MOD - ((b * top) % MARK_MOD)
+const first = hashes[0]
+const isOne = hashes.length === 1
+for (let i = length; ; i++) {
+if (h === first || (!isOne && hashes.includes(h))) return true
+if (i >= n) break
+const x = h * MARK_BASE + bytes[i]! + gone[bytes[i - length]!]!
+const high = Math.floor(x / 2_147_483_648)
+h = x - high * 2_147_483_648 + high
+if (h >= MARK_MOD) h -= MARK_MOD
+}
+}
+return false
+}
 const hiddenJson = async ($: EngineInterface, text: string) => {
-const { names, isAdminKept } = await knowKept($)
-if (!names.length && !isAdminKept) return text
-const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...names], { stdin: text }).catch(() => undefined)
-return hidden && hidden.exitCode === 0 && !hidden.isStdoutTruncated && hidden.stdout.trim() ? hidden.stdout : undefined
+const { names, admins, marks, same } = await knowKept($)
+if (!names.length && !admins?.length) return text
+if (same.includes(text) || (marks && !mayHoldKept(text, marks))) return text
+const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...(admins ? ['--admins', admins.join(',')] : []), ...names], { stdin: text }).catch(() => undefined)
+if (!hidden || hidden.exitCode !== 0 || hidden.isStdoutTruncated || !hidden.stdout.trim()) return undefined
+if (hidden.stdout === text && text.length <= SAME_MAX && same.push(text) > 8) same.shift()
+return hidden.stdout
 }
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
 const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
 if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
-const { names, isAdminKept } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
-if (!names.length && !isAdminKept) return r
+const { names, admins } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
+if (!names.length && !admins?.length) return r
 try {
 const text = JSON.stringify({ result: r.result, context: r.context })
 const hidden = await hiddenJson($, text)
@@ -1463,7 +1574,7 @@ const readPicture = async ($: EngineInterface): Promise<ProgressPicture> => pict
 const readAreas = async ($: EngineInterface): Promise<ProgressArea[]> => areasFrom(await readOr($, `${progressDir()}/areas.json`))
 const readEntries = async ($: EngineInterface, areaId: string): Promise<ProgressEntry[]> => (isAreaId(areaId) ? entriesFrom(await readOr($, `${progressDir()}/areas/${areaId}.json`)) : [])
 const areasBeingBuilt = async ($: EngineInterface) => {
-const working = new Set((await read($, todos)).filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id))
+const working = new Set((await ownCards($)).filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id))
 const found = new Set<string>()
 if (!working.size) return found
 for (const area of await readAreas($)) if ((await readEntries($, area.id)).some(entry => entry.task && working.has(entry.task))) found.add(area.id)
@@ -1889,7 +2000,7 @@ const sync = async ($: EngineInterface) => {
 const listed = await $.agent.list().catch(() => undefined)
 const live = listed ?? []
 const now = await $.clock.now()
-const known = new Map((await read($, todos)).map(one => [one.id, one.parentId] as const))
+const known = new Map((await ownCards($)).map(one => [one.id, one.parentId] as const))
 const isUnseen = live.some(
 one => (!known.has(one.id) || known.get(one.id) === HELPER) && !helpersChecked.has(one.id) && (one.status === 'running' || one.status === 'pending') && !one.parentId && one.type !== 'fork',
 )
@@ -1957,7 +2068,7 @@ const overSince = new Map<string, number>()
 const lookOver = async ($: EngineInterface, live: { id: string; status: string }[], now: number, heard = '') => {
 const { id: chat } = await read($, me)
 if (!dir || isOff) return
-const list = await read($, todos)
+const list = await ownCards($)
 const statusOf = (one: Todo) => live.find(agent => agent.id === one.id)?.status
 const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at
 for (const id of [...overSince.keys()]) if (!list.some(one => one.id === id && isOver(one))) overSince.delete(id)
@@ -1986,7 +2097,7 @@ return isReceived ? { ...ended(card, 'done', now), answer, reportAt: now } : { .
 }),
 )
 overSince.delete(one.id)
-const card = (await read($, todos)).find(c => c.id === one.id)
+const card = (await ownCards($)).find(c => c.id === one.id)
 if (card && !card.parentId && card.status === 'done' && card.answer.trim()) $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${card.id} not kept: ${String(err)}`)))
 }
 if (!endedNow.length) return
@@ -2033,18 +2144,18 @@ return true
 }
 const retrySet = new Set<string>()
 const followRetry = async ($: EngineInterface, id: string) => {
-const due = (await read($, todos)).find(one => one.id === id)?.retry?.at
+const due = (await ownCards($)).find(one => one.id === id)?.retry?.at
 if (due === undefined || retrySet.has(`${id}:${due}`)) return
 retrySet.add(`${id}:${due}`)
 $.clock.after(Math.max(0, due - (await $.clock.now())), () => void sendRetry($, id, due).catch(err => log($, `work ${id} not tried again: ${String(err)}`)))
 }
 const followRetries = async ($: EngineInterface) => {
-for (const one of await read($, todos)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
+for (const one of await ownCards($)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
 }
 const RETRY_TEXT = (why: string) => `Your last step stopped on a network error (${why}). This message starts you again: carry on from where you were, then end with your report as before.`
 const sendRetry = async ($: EngineInterface, id: string, due: number) => {
-const isStill = async () => (await read($, todos)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
-const why = (await read($, todos)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
+const isStill = async () => (await ownCards($)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
+const why = (await ownCards($)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
 if (!(await isStill())) return
 const r = await sendOwn($, { to: { agentId: id }, text: RETRY_TEXT(why) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
 const now = await $.clock.now()
@@ -2062,7 +2173,7 @@ redraw($)
 
 const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo, isOwn = false) => {
 const now = await $.clock.now()
-if (!(await read($, todos)).some(one => one.id === agentId)) await sync($)
+if (!(await ownCards($)).some(one => one.id === agentId)) await sync($)
 await changeTodos($, list => {
 const id = isOwn && list.some(one => one.id === agentId) ? agentId : topOf(list, agentId)
 return list.map(one => (one.id === id ? fn(one, now) : one))
@@ -2074,7 +2185,7 @@ const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.close
 const dismissedNow = new Map<string, number>()
 const dismiss = async ($: EngineInterface, id: string) => {
 const at = await $.clock.now()
-const card = (await read($, todos)).find(one => one.id === id)
+const card = (await ownCards($)).find(one => one.id === id)
 if (!card || card.status === 'working' || card.closedAt || dismissedNow.has(id)) return
 dismissedNow.set(id, at)
 doneMoments.set(id, { pressedAt: at, shownAt: 0 })
@@ -2096,11 +2207,11 @@ const tell = ($: EngineInterface, id: string, text: string) =>
 $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
 
 const stop = async ($: EngineInterface, id: string) => {
-if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
+if ((await ownCards($)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
 const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
 if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
 stoppedHere.add(id)
-const before = await read($, todos)
+const before = await ownCards($)
 const card = before.find(one => one.id === id)
 const isYours = Boolean(card && card.status === 'working')
 const under = [card, ...underOf(before, id)].filter((one): one is Todo => Boolean(one))
@@ -2124,16 +2235,16 @@ await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 }
 
 const startAgain = async ($: EngineInterface, id: string) => {
-const one = (await read($, todos)).find(todo => todo.id === id)
+const one = (await ownCards($)).find(todo => todo.id === id)
 if (!one || !((one.status === 'stopped' && one.byYou) || one.status === 'failed')) return
-const target = one.parentId && one.parentId !== HELPER ? `the task "${titleOf((await read($, todos)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the task'
+const target = one.parentId && one.parentId !== HELPER ? `the task "${titleOf((await ownCards($)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the task'
 const why = one.status === 'failed' ? `which had failed${one.why ? ` (${one.why.charAt(0).toLowerCase()}${one.why.slice(1)})` : ''}` : 'which they had stopped'
 await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Start again" on "${titleOf(one)}" (${id}), ${why}. Start it again: send ${target} "${titleOf(one)}" (${id}) a message with SendMessage so it continues from where it stopped.`)
 }
 
 const choose = async ($: EngineInterface, id: string, model: string) => {
 await update($, view, v => ({ ...v, picking: '' }))
-const one = (await read($, todos)).find(todo => todo.id === id)
+const one = (await ownCards($)).find(todo => todo.id === id)
 if (!one || one.status !== 'working' || modelName(one.chosen ?? one.model ?? '') === modelName(model)) return
 await changeTodos($, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
 await tell($, id, movedTo(modelName(model), await $.clock.now()))
@@ -2206,7 +2317,7 @@ const finishedPath = (chatId: string) => `${dir}/finished/${chatId}.json`
 let finishedSaved = ''
 const saveFinished = async ($: EngineInterface) => {
 const { id } = await read($, me)
-const all = await read($, todos)
+const all = await ownCards($)
 const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
 const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : '', one.closedAt ?? ''].join(':')).join(',')
 if (!id || !dir || !ended.length || sign === finishedSaved) return
@@ -2218,7 +2329,7 @@ finishedSaved = sign
 const isBare = (card: Todo) => card.status !== 'working' && card.endedAt === card.startedAt && !card.model
 const recoverEnded = async ($: EngineInterface) => {
 const { id } = await read($, me)
-const list = await read($, todos)
+const list = await ownCards($)
 if (!id) return
 const live = await $.agent.list().catch(() => [])
 type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
@@ -2574,16 +2685,18 @@ liveSteps.set(id, { from, blocks: [] })
 while (liveSteps.size > LIVE_KEPT) liveSteps.delete(liveSteps.keys().next().value ?? '')
 talkMoved(id)
 }
-const liveChunk = (id: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }, at: number) => {
+const liveChunk = (id: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }, at?: number) => {
 const step = liveSteps.get(id)
-if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number') return
+if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number') return true
 const kind = chunk.kind === 'input' ? 'tool' : chunk.kind
-if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool') return
+if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool') return true
 let block = step.blocks.find(one => one.index === chunk.index && one.kind === kind)
-if (!block) step.blocks.push((block = { kind, index: chunk.index, text: '', at }))
+if (!block && at === undefined) return false
+if (!block) step.blocks.push((block = { kind, index: chunk.index, text: '', at: at ?? 0 }))
 if (chunk.kind === 'tool') Object.assign(block, { id: chunk.id, name: chunk.name })
 const more = chunk.kind === 'input' ? (chunk.json ?? '') : (chunk.text ?? '')
 block.text = kind === 'thinking' ? (block.text + more).slice(-LIVE_THINKING) : (block.text + more).slice(0, SAID_CHARS * 2)
+return true
 }
 const liveEnded = (id: string, at: number) => {
 const step = liveSteps.get(id)
@@ -2612,7 +2725,7 @@ try {
 for (;;) {
 const got = await stream.next()
 if (got.done) return ((isDone = true), got.value)
-liveChunk(id, got.value as never, await $.clock.now())
+if (!liveChunk(id, got.value as never)) liveChunk(id, got.value as never, await $.clock.now())
 yield got.value
 }
 } finally {
@@ -2700,7 +2813,7 @@ redraw($)
 
 
 const rows = (text: string) => text.split('\n').filter(Boolean)
-const isEngine = (path: string) => path.endsWith('/MacOS/claude')
+const isEngine = (args: string) => /^(?:(?! -).)*\/MacOS\/claude(?: |$)/.test(args)
 const short = (args: string) =>
 args
 .split(' ')
@@ -2728,13 +2841,8 @@ for (const row of rows(await run(['lsof', '-a', '-d', 'cwd', '-Fpn', '-p', pids]
 if (row.startsWith('p')) pid = Number(row.slice(1))
 else if (row.startsWith('n')) folders.set(pid, row.slice(1))
 }
-const commands = new Map<number, string>()
-for (const row of rows(await run(['ps', '-o', 'pid=,args=', '-p', pids]))) {
-const m = /^\s*(\d+)\s+(.*)$/.exec(row)
-if (m) commands.set(Number(m[1]), m[2] ?? '')
-}
 const table = new Map<number, { parent: number; path: string }>()
-for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,comm=']))) {
+for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,args=']))) {
 const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row)
 if (m) table.set(Number(m[1]), { parent: Number(m[2]), path: m[3] ?? '' })
 }
@@ -2768,7 +2876,7 @@ if (!(folder.startsWith(`${home}/`) || isScratch) || folder.startsWith(`${home}/
 const port = list[0] ?? ''
 const chat = chats.get(String(above(id, isEngine))) ?? chats.get(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/.exec(folder)?.[0] ?? '') ?? seen[`${id}:${port}`]
 if (chat) kept[`${id}:${port}`] = chat
-const command = short(commands.get(id) ?? table.get(id)?.path ?? '')
+const command = short(table.get(id)?.path ?? '')
 const hasPages = !NO_PAGES.test(command)
 const place = isScratch ? (folder.split('/').pop() ?? '') : folder.replace(`${home}/Documents/GitHub/`, '').replace(`${home}/`, '~/')
 found.push({
@@ -2783,9 +2891,14 @@ if (JSON.stringify(kept) !== JSON.stringify(seen)) await $.fs.write(`${dir}/serv
 await update($, servers, () => found)
 }
 
+const SERVERS_EVERY = 10_000
+let serversAt = -Infinity
 const refresh = async ($: EngineInterface) => {
 const open = await $.ui.panes().catch(() => [])
-if (!open.some(one => one.id === PANE && one.isShown)) return
+if (!open.some(one => one.id === PANE && one.isShown)) return void (serversAt = -Infinity)
+const now = await $.clock.now()
+if (now - serversAt < SERVERS_EVERY - TICK / 2) return
+serversAt = now
 await scanServers($)
 await update($, servers, list => [...list])
 }
@@ -2858,30 +2971,65 @@ return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes}m ago` : hours < 24 
 const waitsOf = (r: Report): { text: string }[] => r.waiting ?? (r.question ? [{ text: r.question }] : [])
 
 const gists = new Map<string, string>()
+const heldIn = <K, V>(map: Map<K, V>, key: K, value: V, most: number) => {
+map.delete(key)
+map.set(key, value)
+for (const old of map.keys()) {
+if (map.size <= most) break
+map.delete(old)
+}
+return value
+}
+const TEXTS_HELD = 5
 const isInside = (file: unknown): file is string =>
 typeof file === 'string' && Boolean(file) && !file.startsWith('/') && !file.startsWith('~') && !file.includes('\0') && file.split('/').every(part => part !== '..' && part !== '')
 const reportsRead = new Map<string, { mtime: number; one: Report }>()
 const REPORTS_WHOLE = 60_000
 const REPORTS_WHOLE_BATTERY = 180_000
+const REPORTS_STALE = 60_000
 const CHANGED_KEPT = 100
 let reportsWholeAt = -Infinity
+let reportsPassAt = -Infinity
+let reportsSeen = ''
 let changedSeen = ''
+let reportsKept: Report[] | undefined
+const ownReports = async ($: EngineInterface) => reportsKept ?? (reportsKept = await read($, reports))
+let reportsMarked = 0
+const reportsMark = atom({ plugin: 'claudopus', key: 'reportsMark' } as const, 0, { shape: 'reports-mark-1' })
 const changedPath = () => `${reportsDir()}/_changed.json`
+const reportStale = (id: string) => {
+const was = reportsRead.get(id)
+if (was) was.mtime = NaN
+}
 const reportChanged = async ($: EngineInterface, id: string) => {
-reportsRead.delete(id)
+reportStale(id)
+reportsSeen = ''
 const was = parsedOr<{ at: number; id: string }[]>(await readOr($, changedPath()), [])
 await $.fs.write(changedPath(), JSON.stringify([...(Array.isArray(was) ? was : []).slice(-(CHANGED_KEPT - 1)), { at: await $.clock.now(), id }])).catch(() => undefined)
 }
 const loadReports = async ($: EngineInterface, isWhole = false) => {
-const found: Report[] = []
 const now = await $.clock.now()
-if (isWhole || now < reportsWholeAt || now - reportsWholeAt >= (isOnBattery ? REPORTS_WHOLE_BATTERY : REPORTS_WHOLE)) (reportsRead.clear(), (reportsWholeAt = now))
+const isFirst = !reportsRead.size
+const [folder, log] = await Promise.all([reportsDir(), changedPath()].map(path => $.fs.stat(path).catch(() => undefined)))
+const at = (folder as { mtimeMs?: number } | undefined)?.mtimeMs ?? 0
+const seen = `${at}:${(log as { mtimeMs?: number } | undefined)?.mtimeMs ?? 0}:${log?.size ?? 0}`
+let kept = reportsKept && (await read($, reportsMark)) === reportsMarked ? reportsKept : undefined
+const whole = isWhole || !kept || now < reportsWholeAt || now - reportsWholeAt >= (at ? 10 : 1) * (isOnBattery ? REPORTS_WHOLE_BATTERY : REPORTS_WHOLE)
+reportsPassAt = now
+if (kept && !whole && at && seen === reportsSeen) return kept
+reportsSeen = seen
+if (whole) {
+for (const one of reportsRead.values()) one.mtime = NaN
+reportsWholeAt = now
+}
 const changed = await readOr($, changedPath())
 if (changed !== changedSeen) {
 const list = parsedOr<{ id?: unknown }[]>(changed, [])
-for (const one of Array.isArray(list) ? list : []) if (typeof one?.id === 'string') reportsRead.delete(one.id)
+for (const one of Array.isArray(list) ? list : []) if (typeof one?.id === 'string') reportStale(one.id)
 changedSeen = changed
 }
+const found: Report[] = []
+let isMoved = false
 for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
 if (entry.kind !== 'dir' || entry.name.startsWith('_')) continue
 const mtime = (entry as { mtimeMs?: number }).mtimeMs ?? 0
@@ -2893,16 +3041,29 @@ continue
 try {
 const one = JSON.parse(await readOr($, `${reportsDir()}/${entry.name}/meta.json`)) as Report
 if (one.id !== entry.name || !one.title) continue
-if (one.agent && !gists.has(one.id)) gists.set(one.id, gistOf(await readOr($, `${reportsDir()}/${entry.name}/report.md`), one.title) || one.gist)
-const shown = { ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] }
+const fresh = { ...one, subject: one.subject || one.title, gist: one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] }
+const shown = was && JSON.stringify(was.one) === JSON.stringify(fresh) ? was.one : fresh
+if (shown === fresh) isMoved = true
 reportsRead.set(entry.name, { mtime, one: shown })
 found.push(shown)
 } catch {
 }
 }
+kept = reportsKept === kept ? kept : undefined
+if (kept && !isMoved && found.length === kept.length) return kept
 found.sort((a, b) => b.at - a.at)
-if (JSON.stringify(found) !== JSON.stringify(await read($, reports))) await update($, reports, () => found)
+const isWritten = (kept && !isFirst) || JSON.stringify(found) !== JSON.stringify(kept ?? (await read($, reports)))
+reportsKept = found
+if (isWritten) await update($, reports, () => found)
+if (isWritten || !kept) await update($, reportsMark, () => (reportsMarked = Math.max(now, reportsMarked + 1)))
 return found
+}
+const reportsNow = async ($: EngineInterface) => (reportsKept && (await $.clock.now()) - reportsPassAt < REPORTS_STALE ? reportsKept : loadReports($))
+let isReportsLook = false
+const reportsLooked = async ($: EngineInterface) => {
+if (isReportsLook || (await $.clock.now()) - reportsWholeAt < REPORTS_STALE) return
+isReportsLook = true
+await loadReports($, true).finally(() => (isReportsLook = false))
 }
 
 const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
@@ -2957,7 +3118,7 @@ return copies
 const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
 
 const saveReport = async ($: EngineInterface, card: Todo, text: string, isPart = false) => {
-const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
+const one = (await ownCards($)).find(todo => todo.id === card.id) ?? card
 const isKept = isPart || text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path))
 const kept = await loadReports($)
 const marked = mark(text)
@@ -3010,9 +3171,11 @@ if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BY
 }
 }
 }
+const DRAWN_HELD = 60
 const drawn = new Map<string, { source: string; width: number; height: number } | null>()
 const thumbOf = async ($: EngineInterface, path: string) => {
-if (drawn.has(path)) return drawn.get(path) ?? null
+const had = drawn.get(path)
+if (had) return heldIn(drawn, path, had, DRAWN_HELD)
 let one: { source: string; width: number; height: number } | null = null
 try {
 const read = (await $.fs.read(path, { as: 'bytes' })) as { base64: string }
@@ -3029,7 +3192,7 @@ height,
 } catch {
 one = null
 }
-if (one) drawn.set(path, one)
+if (one) heldIn(drawn, path, one, DRAWN_HELD)
 return one
 }
 
@@ -3185,7 +3348,7 @@ void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
 return run
 }
 const continueNow = async ($: EngineInterface, id: string, words: string, files: string[] = []): Promise<void> => {
-const r = (await read($, reports)).find(one => one.id === id)
+const r = (await ownReports($)).find(one => one.id === id)
 if (!r || (!words.trim() && !files.length)) return
 const card = r.agent ? (await read($, todos)).find(one => one.id === r.agent && canChange(one)) : undefined
 if (card) return changeTask($, card.id, words.trim(), files)
@@ -3288,12 +3451,12 @@ return text.includes('<svg') && text.length <= SVG_CHARS ? { source: text, width
 const openReport = ($: EngineInterface, id: string) => {
 presses += 1
 void comingTab((async () => {
-const r = (await read($, reports)).find(one => one.id === id)
+const r = (await ownReports($)).find(one => one.id === id)
 if (!r) return
 await makeThumbs($, r).catch(err => log($, `small copies of report ${id} not made: ${String(err)}`))
 const open = (await $.ui.panes()).filter(pane => pane.id.startsWith('report-') && pane.id !== paneOf(r))
 for (const pane of open.slice(0, Math.max(0, open.length - (REPORT_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
-const kept = await read($, reports)
+const kept = await ownReports($)
 const now = await $.clock.now()
 await front($, paneOf(r), kept.some(one => one.id !== r.id && one.title === r.title) ? `${cut(r.title, 22)} · ${time(r.at, now)}` : cut(r.title, 30))
 redraw($)
@@ -3307,11 +3470,11 @@ if (archiving.has(entry)) return
 archiving.add(entry)
 presses += 1
 void (async () => {
-const kept = (await read($, reports)).filter(one => Boolean(one.archived) !== isArchived)
+const kept = (await ownReports($)).filter(one => Boolean(one.archived) !== isArchived)
 const rounds = entriesOf(kept).find(entry => entry.some(one => one.id === r.id)) ?? []
 const now = await $.clock.now()
 for (const one of rounds) await markReport($, one, isArchived ? { archived: now } : { archived: undefined, broughtBack: now }).catch(err => log($, `result ${one.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
-if (!isArchived && reportsListed.length) reportsListed =[...new Set([...reportsListed, ...rounds.map(one => one.id)])]
+if (!isArchived && reportsListed.size) reportsListed = new Set([...reportsListed, ...rounds.map(one => one.id)])
 if (isArchived) {
 const tabs = new Set(rounds.map(paneOf))
 for (const pane of (await $.ui.panes()).filter(one => tabs.has(one.id))) await $.ui.close({ id: pane.id }).catch(() => undefined)
@@ -3321,9 +3484,15 @@ for (const pane of (await $.ui.panes()).filter(one => tabs.has(one.id))) await $
 .finally(() => (archiving.delete(entry), redraw($)))
 }
 
-let reportsListed: string[] = []
+let reportsListed = new Set<string>()
 const subjectOf = (r: Report) => slug(r.subject || r.title) || r.id
+const ENTRIES_HELD = 6
+const entriesHeld = new Map<string, number[][]>()
 const entriesOf = (list: Report[]) => {
+let key = ''
+for (const r of list) key += `${r.id}\n${r.agent ?? ''}\n${r.from ?? ''}\n${r.subject}\n${r.title}\n`
+const held = entriesHeld.get(key)
+if (held) return heldIn(entriesHeld, key, held, ENTRIES_HELD).map(entry => entry.map(n => list[n] as Report))
 const head = new Map(list.map(r => [r.id, r.id]))
 const find = (id: string): string => {
 const up = head.get(id) ?? id
@@ -3341,7 +3510,8 @@ if (r.from && head.has(r.from)) join(r.id, r.from)
 const subject = slug(r.subject)
 if (subject && (slug(r.title) === subject || slug(r.title).startsWith(`${subject}-`))) by(`subject:${subject}`, r)
 }
-return [...list.reduce((all, r) => all.set(find(r.id), [...(all.get(find(r.id)) ?? []), r]), new Map<string, Report[]>()).values()]
+const places = [...list.reduce((all, r, n) => all.set(find(r.id), [...(all.get(find(r.id)) ?? []), n]), new Map<string, number[]>()).values()]
+return heldIn(entriesHeld, key, places, ENTRIES_HELD).map(entry => entry.map(n => list[n] as Report))
 }
 const newestOf = (list: Report[]) => new Set(entriesOf(list).map(entry => entry[0]?.id))
 const aboutWords = (text: string) => new Set(slug(text).split('-').filter(word => word.length >= 4 && !['with', 'from', 'that', 'this', 'into', 'your', 'what', 'when', 'work'].includes(word)))
@@ -3349,7 +3519,7 @@ const openReports = ($: EngineInterface) => {
 presses += 1
 return comingTab(
 (async () => {
-reportsListed = (await read($, reports)).map(r => r.id)
+reportsListed = new Set((await ownReports($)).map(r => r.id))
 redraw($)
 await front($, REPORTS_PANE, REPORTS_TITLE)
 })(),
@@ -3386,11 +3556,11 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 const { Box, Button, Text } = ui
 const list = all.filter(r => !r.archived)
 const gone = entriesOf(all.filter(r => r.archived))
-const shown = reportsListed.length ? entriesOf(list).filter(entry => entry.some(r => reportsListed.includes(r.id))).flat() : list
+const shown = reportsListed.size ? entriesOf(list).filter(entry => entry.some(r => reportsListed.has(r.id))).flat() : list
 const entries = entriesOf(shown)
 const fresh = entriesOf(list).length - entries.length
 const [recent, earlier] = [entries.slice(0, RECENT), entries.slice(RECENT)]
-const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, earlierMost, archivedMost, 'isTerminal' in ui, ...[recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
+const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, earlierMost, archivedMost, 'isTerminal' in ui, earlier.length, gone.length, ...[recent, isEarlierOpen ? earlier.slice(0, earlierMost) : [], isArchivedOpen ? gone.slice(0, archivedMost) : []].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
 const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
 <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
 {/* In the rows' title column */}
@@ -3625,7 +3795,7 @@ return slot === undefined ? undefined : colourHex(slot)
 }
 const taskLinks = ($: EngineInterface, id: string) => {
 if (!isLinked) return []
-colourSoon($, 10_000)
+colourSoon($, 10_000, !isColoured)
 return colourIndex.tasks[id]?.links ?? []
 }
 const isColourRead = () => isColoured || isLinked
@@ -3636,7 +3806,7 @@ givenResults.push({ id, text: text.slice(0, 20_000) })
 givenResults.splice(0, Math.max(0, givenResults.length - 30))
 }
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
-const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
+const cards = (await ownCards($)).filter(one => !one.parentId && !one.chat)
 const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
 if (passed && cards.some(one => one.id === passed)) {
 colourBuilder ??= new ColourBuilder()
@@ -3681,7 +3851,7 @@ const fresh = rows.slice(builder.read)
 colourBuilder = builder
 builder.ingest(fresh)
 await readHeard($).catch(err => log($, `messages said not read back: ${String(err)}`))
-const value = builder.index({ cards: cardWords(await read($, todos)), heard: personHeard })
+const value = builder.index({ cards: cardWords(await ownCards($)), heard: personHeard })
 const json = JSON.stringify(value)
 if (json === colourWritten) return
 colourWritten = json
@@ -3708,26 +3878,41 @@ colourRunning = undefined
 })
 return colourRunning
 }
+const COLOUR_LONG = 400
+const COLOUR_GAP = 3_000
+const COLOUR_IDLE = 60_000
 let colourPassAt = 0
+let colourNews = 0
+let colourRead = 0
+let colourGap = Infinity
 const colourAsked = new Set<string>()
-const colourSoon = ($: EngineInterface, gap = 400) => {
-if (colourTimer || !isColourRead()) return
-colourTimer = $.clock.after(400, () => {
+const colourSoon = ($: EngineInterface, gap = 400, isNew = true) => {
+if (!isColourRead()) return
+if (isNew) colourNews += 1
+colourGap = Math.min(colourGap, gap)
+if (colourTimer) return
+const look = (wait: number) => {
+colourTimer = $.clock.after(wait, () => {
 colourTimer = undefined
 void $.clock.now().then(now => {
-if (now - colourPassAt < gap) return
-colourPassAt = now
+const isFresh = colourNews !== colourRead
+const least = Math.max(colourGap, isFresh ? ((colourBuilder?.read ?? 0) > COLOUR_LONG ? COLOUR_GAP : 0) : COLOUR_IDLE)
+const since = now - colourPassAt
+if (since >= 0 && since < least) return isFresh && least <= COLOUR_GAP && !colourTimer ? look(least - since) : void (colourGap = Infinity)
+;[colourPassAt, colourRead, colourGap] = [now, colourNews, Infinity]
 return colourBuild($, false)
 })
 })
 }
+look(400)
+}
 
 const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
 if (surface === 'terminal') return openWork($, id)
-const one = (await read($, todos)).find(card => card.id === id)
+const one = (await ownCards($)).find(card => card.id === id)
 if (one?.ask && needsPerson(one)) return openBar($, { kind: 'answer', id, one }, surface)
 if (one && canChange(one)) return openBar($, { kind: 'change', id }, surface)
-const kept = (await read($, reports)).find(r => r.agent === id)
+const kept = (await ownReports($)).find(r => r.agent === id)
 if (kept) return openBar($, { kind: 'continue', id: kept.id }, surface)
 openWork($, id)
 }
@@ -3874,13 +4059,16 @@ const openMemory = ($: EngineInterface, path: string) => {
 presses += 1
 void comingTab((async () => {
 const report = path.slice(dir.length + 1).match(/^reports\/([^/]+)/)?.[1]
-if (report && (await read($, reports)).some(one => one.id === report)) return openReport($, report)
+if (report && (await ownReports($)).some(one => one.id === report)) return openReport($, report)
 const id = memoryPaneOf(path)
 const text = await memoryRead($, path)
 memoryPanes.set(id, path)
 memoryText.set(id, text)
 const open = (await $.ui.panes()).filter(pane => pane.id.startsWith(MEMORY_PANE) && pane.id !== id)
-for (const pane of open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
+const closed = open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))
+for (const pane of closed) await $.ui.close({ id: pane.id }).catch(() => undefined)
+const left = new Set([id, ...open.filter(pane => !closed.includes(pane)).map(pane => pane.id)])
+for (const one of [...memoryPanes.keys()]) if (!left.has(one)) (memoryPanes.delete(one), memoryText.delete(one))
 const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim()
 await front($, id, path === dir ? 'Memory' : cut(heading || fileName(path), 30))
 redraw($)
@@ -3896,9 +4084,18 @@ if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stde
 const CATCH_UP_AFTER = 60_000
 const CATCH_UP_EVERY = 10 * 60_000
 const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+let catchUpStamp = ''
 const startCatchUp = async ($: EngineInterface) => {
 if (!dir) return
-const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, `${await configDir($)}/projects`])
+const projects = `${await configDir($)}/projects`
+if (!catchUpStamp) {
+const r = await $.process.run(['/usr/bin/perl', '-MDigest::MD5=md5_hex', '-e', 'print substr(md5_hex($ARGV[0]), 0, 12)', projects]).catch(() => undefined)
+if (r?.exitCode === 0 && /^[0-9a-f]{12}$/.test(r.stdout)) catchUpStamp = `${dir}/caught/last-${r.stdout}`
+}
+const stamp = catchUpStamp ? ((await $.fs.stat(catchUpStamp).catch(() => undefined))?.mtimeMs ?? 0) : 0
+const now = stamp ? await $.clock.now() : 0
+if (stamp && now >= stamp && now - stamp < 540_000) return
+const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, projects])
 if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
 }
 
@@ -4307,7 +4504,7 @@ for (const range of ranges) shown[range] = statsFrom(got.kept, rangeFrom(range, 
 held.set(scope, { shown, svgs: new Map(), chats: got.chats, at: held.get(scope)?.at ?? 0 })
 return true
 }
-const MEMORY_EVERY = 5 * 60_000
+const MEMORY_EVERY = 30 * 60_000
 let memoryReadAt = 0
 async function loadStats($: EngineInterface, scope: Scope, memory: string, chatId: string, hint: string, now: number) {
 if (reading.has(scope) || !chatId) return
@@ -4315,9 +4512,11 @@ const was = held.get(scope)
 const isDue = !was || now - was.at >= READ_EVERY
 if (!isDue && was.shown[statsShown.range]) return
 reading.add(scope)
+const look = () => JSON.stringify([held.get(scope)?.shown, held.get(scope)?.chats, held.get(scope)?.error])
+let drew = look()
 try {
-if (now - memoryReadAt >= MEMORY_EVERY) ((memoryReadAt = now), void loadMemorySizes($, memory).then(() => drawAgain($), () => undefined))
-if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now))) drawAgain($)
+if (now - memoryReadAt >= MEMORY_EVERY) ((memoryReadAt = now), void loadMemorySizes($, memory).then(isMoved => isMoved && drawAgain($), () => undefined))
+if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now))) ((drew = look()), drawAgain($))
 if (!isDue) return
 const looked = await statsRefresh($, memory, chatId, hint, scope, now, true)
 await statsShow($, scope, memory, chatId, now)
@@ -4327,7 +4526,7 @@ if (looked === 'busy') $.clock.after(5000, () => drawAgain($))
 held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` })
 } finally {
 reading.delete(scope)
-drawAgain($)
+if (look() !== drew) drawAgain($)
 }
 }
 async function loadMemorySizes($: EngineInterface, memory: string) {
@@ -4348,7 +4547,9 @@ const parts: MemoryPart[] = [
 { name: 'Picture previews and Stats', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
 ]
 const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
+const was = JSON.stringify(memoryHeld.now)
 memoryHeld.now = { parts, bytes }
+return JSON.stringify(memoryHeld.now) !== was
 }
 
 const STATS_PANE = 'stats'
@@ -5095,6 +5296,7 @@ const pics = new Map<string, Pic | null>()
 const PICS_HELD = 60
 let isThumbsCleared = false
 const shots = new Map<string, { key: string; shots: Map<number, Pic[]> }>()
+const TALKS_HELD = 20
 const picOf = async ($: EngineInterface, given: string, one: Todo, isSeen: boolean, kept: Report[], isDrawn: boolean): Promise<Pic | null> => {
 const asked = given.startsWith('/') ? given : `${cwd}/${given}`
 const stat = await $.fs.stat(asked).catch(() => undefined)
@@ -5156,6 +5358,9 @@ return byStep
 }
 const loading = new Set<string>()
 const RETRY_READ = 15_000
+const TALK_GAP = 2_000
+const TALK_LONG = 200
+const talkWaits = new Set<string>()
 const loadWork = async ($: EngineInterface, id: string) => {
 if (loading.has(id)) return
 loading.add(id)
@@ -5164,25 +5369,28 @@ try {
 const one = (await read($, todos)).find(card => card.id === id)
 if (!one) return
 const mark = talkMarks.get(id) ?? 0
-const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':')
-const kept = await read($, reports)
+const key = [one.id, one.steps, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':')
+const kept = await ownReports($)
 const shotsKey = `${key}:${kept.length}`
 const now = await $.clock.now()
 const was = talks.get(id)
-if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
+const wait = was?.key !== key && one.status === 'working' && (was?.lines?.length ?? 0) > TALK_LONG ? (was?.at ?? 0) + TALK_GAP - now : 0
+if (wait > 0 && wait <= TALK_GAP) {
+if (!talkWaits.has(id)) (talkWaits.add(id), $.clock.after(wait, () => (talkWaits.delete(id), void loadWork($, id).catch(() => undefined))))
+} else if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
 during('read a task for its Details')
 const rows = await $.session.messages({ agentId: id }).catch(() => undefined)
-talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+heldIn(talks, id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now }, TALKS_HELD)
 if (Array.isArray(rows)) liveCaughtUp(id, mark, now)
 isChanged = true
 }
 const lines = talks.get(id)?.lines
-if (lines && shots.get(id)?.key !== shotsKey) {
-shots.set(id, { key: shotsKey, shots: await picturesIn($, lines, one, kept, true).catch(() => new Map<number, Pic[]>()) })
+if (lines && !(wait > 0 && wait <= TALK_GAP) && shots.get(id)?.key !== shotsKey) {
+heldIn(shots, id, { key: shotsKey, shots: await picturesIn($, lines, one, kept, true).catch(() => new Map<number, Pic[]>()) }, TALKS_HELD)
 isChanged = true
 }
 } catch (err) {
-if (!talks.has(id)) talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) })
+if (!talks.has(id)) heldIn(talks, id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) }, TALKS_HELD)
 isChanged = true
 await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined)
 } finally {
@@ -5247,10 +5455,10 @@ const r = await $.process
 .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
 .catch(() => undefined)
 const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
-talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+heldIn(talks, id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now }, TALKS_HELD)
 isChanged = true
 } catch (err) {
-if (!talks.has(id)) talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) })
+if (!talks.has(id)) heldIn(talks, id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) }, TALKS_HELD)
 isChanged = true
 await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined)
 } finally {
@@ -5571,7 +5779,7 @@ return { made, ...(code ? { code } : {}) }
 }
 const listMade = async ($: EngineInterface, one: Todo, answer: string): Promise<FilesMade> => {
 const now = await madeBy($, one.wrote ?? [], answer, one.begunAt ?? one.startedAt, true, one.said ?? [], one.titles ?? {})
-const earlier = [one.made, ...(await read($, reports)).filter(r => r.agent === one.id && r.made).map(r => r.made)].filter((files): files is FilesMade => Boolean(files))
+const earlier = [one.made, ...(await ownReports($)).filter(r => r.agent === one.id && r.made).map(r => r.made)].filter((files): files is FilesMade => Boolean(files))
 if (!earlier.length) return now
 const paths = new Set(now.made.map(made => made.path))
 const kept = earlier
@@ -5625,7 +5833,7 @@ const files = r.made ?? madeOfOld.get(r.id)
 if (!files && !madeLoading.has(r.id)) {
 madeLoading.add(r.id)
 void (async () => {
-const one = (await read($, todos)).find(card => card.id === r.agent)
+const one = (await ownCards($)).find(card => card.id === r.agent)
 const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one), one?.said ?? [], one?.titles ?? {}).catch(() => ({ made: [] }))
 if (madeOfOld.size > 200) madeOfOld.delete(madeOfOld.keys().next().value ?? '')
 madeOfOld.set(r.id, listed)
@@ -6037,11 +6245,11 @@ for (const [owner, kept] of [...madeOf.entries()].map(([one, made]) => [one, mad
 const file = kept.code?.files?.find(one => diffPaneOf(one.path) === id)
 if (file) return { file, since: kept.code?.since ?? 0, owner }
 }
-for (const r of await read($, reports)) {
+for (const r of await ownReports($)) {
 const file = r.made?.code?.files?.find(one => diffPaneOf(one.path) === id)
 if (file) return { file, since: r.made?.code?.since ?? 0, owner: r.id }
 }
-for (const one of await read($, todos)) {
+for (const one of await ownCards($)) {
 const path = (one.wrote ?? []).find(path => diffPaneOf(path) === id)
 if (path) return { file: { path, inRepo: '', plus: 0, minus: 0 }, since: Math.floor((one.begunAt ?? one.startedAt) / 1000), owner: one.id }
 }
@@ -6097,8 +6305,8 @@ const diff = diffCut(got?.text ?? '', DIFF_CHARS)
 const showsWhole = isWhole || isNew
 const wholeText = got?.whole ?? ''
 const wholeCut = wholeText.length > DIFF_CHARS ? wholeText.slice(0, wholeText.lastIndexOf('\n', DIFF_CHARS)) : wholeText
-const card = (await read($, todos)).find(one => one.id === owner)
-const result = card ? undefined : (await read($, reports)).find(r => r.id === owner)
+const card = (await ownCards($)).find(one => one.id === owner)
+const result = card ? undefined : (await ownReports($)).find(r => r.id === owner)
 const folder = file.inRepo.includes('/') ? file.inRepo.slice(0, file.inRepo.lastIndexOf('/')) : file.path.slice(0, file.path.lastIndexOf('/'))
 const table = ui as Ui & { Code?: (props: { key?: string; source: string; path?: string; format?: 'source' | 'diff'; startLine?: number; wrap?: 'wrap' | 'truncate-end' }) => JSX.Element }
 const lines = (showsWhole ? wholeCut : diff.source).split('\n')
@@ -6256,6 +6464,8 @@ if (r.deny) return (pressed.delete(`flow:${id}`), log($, `workflow ${id} not sto
 await changeFlow($, id, (one, at) => ({ ...one, status: 'stopped', endedAt: at }))
 }
 const journalSigns = new Map<string, string>()
+const journalMoved = new Map<string, number>()
+const flowsPassed = new Map<string, number>()
 const readJournal = async ($: EngineInterface, id: string) => {
 const f = (await read($, flows)).find(one => one.id === id)
 if (!f?.transcriptDir) return
@@ -6263,7 +6473,7 @@ const path = `${f.transcriptDir}/journal.jsonl`
 const stat = await $.fs.stat(path).catch(() => undefined)
 const sign = `${stat?.size ?? 0}:${stat?.mtimeMs ?? 0}`
 if (stat && journalSigns.get(id) === sign) return
-if (stat) journalSigns.set(id, sign)
+if (stat) (journalSigns.set(id, sign), journalMoved.set(id, await $.clock.now()))
 during('read a workflow')
 const text = await readOr($, path)
 if (!text) return
@@ -6277,7 +6487,8 @@ flowLooks += 1
 const mine = await sessionName($)
 const running = (await read($, flows)).filter(f => f.status === 'working' && f.session === mine)
 for (const f of running) await readJournal($, f.id).catch(err => log($, `journal of ${f.id} not read: ${String(err)}`))
-if (running.length && flowLooks % END_LOOK === 0) {
+const quietFrom = running.length && flowLooks % END_LOOK === 0 ? (await $.clock.now()) - (END_LOOK - 1) * FLOW_EVERY : -Infinity
+if (running.some(f => (journalMoved.get(f.id) ?? 0) <= quietFrom)) {
 during('read the chat for ended workflows')
 const rows = await $.session.messages().catch(() => [])
 for (const row of Array.isArray(rows) ? rows : []) if (row.role === 'user' && row.text.includes('<task-notification')) await flowEnded($, row.text)
@@ -6291,10 +6502,12 @@ const known = (await read($, flows)).find(f => flowPath(f.id).endsWith(`/${entry
 if (known && (known.status !== 'working' || known.session === mine)) continue
 const stat = await $.fs.stat(`${flowsDir()}/${entry.name}`).catch(() => undefined)
 if (!known && stat && now - stat.mtimeMs > FLOW_OLD) continue
+if (!known && stat?.mtimeMs && flowsPassed.get(entry.name) === stat.mtimeMs) continue
 try {
 const read1 = JSON.parse(await readOr($, `${flowsDir()}/${entry.name}`)) as Flow
 const one = read1.status === 'working' && stat && now - stat.mtimeMs > FLOW_STALE ? { ...read1, status: 'stopped' as const, endedAt: stat.mtimeMs } : read1
 if (one.id && one.parent === ccd.id && one.session !== mine) found.push(one)
+else if (stat) flowsPassed.set(entry.name, stat.mtimeMs)
 } catch {
 }
 }
@@ -6365,7 +6578,7 @@ const standing = (stage: string, endedAt: number) => (stage === 'working' || sta
 
 const lookEnds = async ($: EngineInterface) => {
 const mine = await sessionName($)
-const list = await read($, todos)
+const list = await ownCards($)
 const cards = list.filter(one => !one.parentId)
 const runs = (await read($, flows)).filter(f => f.session === mine)
 const now = await $.clock.now()
@@ -6432,7 +6645,7 @@ try {
 config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
 } catch {
 }
-const cards = await read($, todos)
+const cards = await ownCards($)
 const runs = await read($, flows)
 const items = ids.map(one => readyOf(one, cards, runs)).filter(one => one !== undefined)
 if (!items.length) return
@@ -6555,7 +6768,7 @@ const ASK_NAMED_MOST = REMIND_AT.at(-1)!
 let cardsSent = ''
 const cardsNow = async ($: EngineInterface) => {
 const now = await $.clock.now()
-const list = (await read($, todos)).filter(one => {
+const list = (await ownCards($)).filter(one => {
 const waits = one.parentId ? undefined : waitingOnPerson(one)
 return !one.parentId && (one.status === 'working' ? true : waits ? now - waits.at < ASK_NAMED_MOST : now - one.endedAt < 30 * 60_000)
 }).slice(-12)
@@ -7068,8 +7281,17 @@ return copyOf(installed, id, $.plugin.root, cwd)
 }
 
 const HOLD_EVERY = 1000
+const HOLD_WHOLE = 5000
+let heldAt = -Infinity
+let heldRecord = 0
 const holdOldCopies = async ($: EngineInterface) => {
 if (!dir) return
+const from = installedFrom($.plugin.root)
+const record = from ? ((await $.fs.stat(`${from.plugins}/installed_plugins.json`).catch(() => undefined))?.mtimeMs ?? 0) : 0
+const due = await $.clock.now()
+if (record === heldRecord && due >= heldAt && due - heldAt < HOLD_WHOLE - 500) return
+heldAt = due
+heldRecord = record
 const loaded = (await versionsOf($)).version
 if (!loaded || (await read($, ranVersion)) !== loaded) return
 const copy = await installedCopy($)
@@ -7371,10 +7593,10 @@ const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id
 return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...attachSaid], [...replies]])
 }
 const calmCard = (one: Todo) => {
-const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
+const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
 return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, (await read($, reports)).length, (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await ownCards($)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
 const holdTimes = ($: EngineInterface) => {
 if (!isTyping) recordEvent($, 'hold')
 const made = (typing += 1)
@@ -7411,7 +7633,7 @@ const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
 const chats = await read($, others)
-const cards = await read($, todos)
+const cards = await ownCards($)
 const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
 const momentAt = await $.clock.now()
 const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
@@ -7419,7 +7641,7 @@ return JSON.stringify([
 presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
 [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
 [...pictureIn.keys()], isUpdating, loadMark,
-[...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+[...(await ownCards($)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
 ])
 }
 const PRESS_HOLD = 2000
@@ -7485,7 +7707,7 @@ if (now !== text) (drawnFiles.set(path, now), (isNew = true))
 if (!isHeld && paneWork.size) {
 const shownPanes = new Set((await $.ui.panes().catch(() => [])).filter(pane => pane.isShown !== false).map(pane => pane.id))
 for (const pane of [...paneWork.keys()]) if (!shownPanes.has(pane)) paneWork.delete(pane)
-const cards = paneWork.size ? await read($, todos) : []
+const cards = paneWork.size ? await ownCards($) : []
 const live = liveSign([...paneWork.values()].flatMap(id => [id, ...cards.filter(kid => kid.parentId === id).map(kid => kid.id)]), now)
 if (live !== liveDrawn) ((liveDrawn = live), recordEvent($, 'redraw-live'), $.ui.invalidate('ui.render'))
 }
@@ -7512,7 +7734,7 @@ void update($, draftsKept, kept => Object.fromEntries(Object.entries(kept as Rec
 }
 const readDrafts = async ($: EngineInterface) => {
 const kept = ((await read($, draftsKept).catch(() => ({}))) ?? {}) as Record<string, string>
-const ids = new Set((await read($, todos)).map(one => one.id))
+const ids = new Set((await ownCards($)).map(one => one.id))
 const live = Object.entries(kept).filter(([key, value]) => typeof value === 'string' && ids.has(key.split('|')[0] ?? ''))
 for (const [key, value] of live) if (!drafts.has(key)) drafts.set(key, value)
 if (live.length !== Object.keys(kept).length) await update($, draftsKept, () => Object.fromEntries(live))
@@ -7618,7 +7840,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 const picked = takeAttached(id)
 const mark = barOpen?.kind === 'answer' && barOpen.id === id ? barOpen.mark : ''
 const run = (async () => {
-const one = (await read($, todos)).find(card => card.id === id)
+const one = (await ownCards($)).find(card => card.id === id)
 const files = [...new Set([...picked, ...(await pathsIn($, value))])]
 const ask = one ? (asksOf(one).find(other => askMark(other) === mark) ?? one.ask) : undefined
 if (one && ask && (value.trim() || files.length)) await answerAsk($, askView(one, ask), value, true, picked, files)
@@ -7911,7 +8133,7 @@ files.length
         .join('\n')}`
 : ''
 const changeTask = async ($: EngineInterface, id: string, said: string, picked: string[] = [], isNow = false) => {
-const card = (await read($, todos)).find(one => one.id === id)
+const card = (await ownCards($)).find(one => one.id === id)
 if (!card || (!said && !picked.length) || card.chat || card.parentId) return
 const wasHeld = isHeld(card)
 if (wasHeld) await changeTodos($, list => list.map(one => (one.id === id && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
@@ -7929,7 +8151,7 @@ return void (await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown,
 }
 const text = card.status === 'working' ? MESSAGE_SENT(words) : wasHeld ? STOPPED_ASKED(words) : CHANGE_ASKED(words)
 const sent = { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
-const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
+const told = (await ownCards($)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
 if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
 else await toEnded($, card, id, text, sent)
 await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`)))
@@ -8007,7 +8229,7 @@ if (!ask.refused) {
 if (isAside) await markAside($, one.id).catch(err => log($, `task ${one.id} not marked set aside: ${String(err)}`))
 queueSoon($, { kind: isAside ? 'aside' : 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}${ask.details ? `\n${ask.details}` : ''}\nAnswer: ${said}` })
 }
-const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
+const working = (await ownCards($)).find(card => card.id === one.id)?.status === 'working'
 const told = working ? await tell($, target, to) : undefined
 if (ask.refused && !isReply) {
 if (told && !told.deny) writtenIn($, target, one.id)
@@ -8040,7 +8262,7 @@ const sent = sentReplies.get(one.id)
 const ask = sent?.asked
 if (!sent || !ask || sent.at !== shownAt) return
 const target = sent.target ?? one.id
-const now = (await read($, todos)).find(card => card.id === one.id)
+const now = (await ownCards($)).find(card => card.id === one.id)
 if (!now || sentReplies.get(one.id) !== sent || !canTakeBack(now, await $.clock.now())) return
 const waiting = wakes.find(w => w.target === target && w.answers.some(a => a.one.id === one.id && a.sent.at === sent.at))
 if (waiting) {
@@ -8073,7 +8295,7 @@ if (answeredAsks.has(key)) return
 answeredAsks.add(key)
 const at = await $.clock.now()
 let isHeld = false
-const listed = await read($, todos)
+const listed = await ownCards($)
 const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
 await changeTodos($, list =>
 ((isHeld = false), list).map(card => (card.id === one.id && hasAsk(card, ask) ? ((isHeld = true), { ...mapAsk(card, ask, kept => ({ ...kept, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(kept.refused ? { talk: [...(kept.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) })), entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
@@ -8088,7 +8310,7 @@ sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCar
 redraw($)
 $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
 if (inChat.has(chatKey(one.id, ask))) (inChat.delete(chatKey(one.id, ask)), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`, ask.text))))
-const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
+const working = (await ownCards($)).find(card => card.id === target)?.status === 'working'
 const to = ask.refused ? `${REFUSAL_WORDS(ask.copy ?? ask.text, said)}${note}` : `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}\n${named(REPLY_HOLDS)}`
 const told = working ? await tell($, target, to) : undefined
 if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
@@ -8096,7 +8318,7 @@ await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: 
 }
 const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[] }[] = []
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
-const list = await read($, todos)
+const list = await ownCards($)
 const top = list.find(card => card.id === topOf(list, target))
 if (top && !top.chat && isInterrupted(top)) {
 sentReplies.set(one.id, { ...sent, to: 'work' })
@@ -8120,7 +8342,7 @@ if (wake) await sendWake($, wake)
 }
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
-if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `task ${wake.target} not started with an answer: the person stopped it`))
+if (isHeld((await ownCards($)).find(one => one.id === wake.target))) return void (await log($, `task ${wake.target} not started with an answer: the person stopped it`))
 const r = (await isReplaced($))
 ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
 : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
@@ -8191,7 +8413,7 @@ await changeTodos($, all => all.map(one => (one.id === a.card.id && hasAsk(one, 
 dropDrafts($, a.card.id, a.ask)
 sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
 writtenIn($, to, a.card.id)
-const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
+const helper = a.ask.from && a.ask.from !== to ? (await ownCards($)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
 if (helper) await tell($, helper.id, `${who(true)} answered your question ("${a.ask.text}") in the chat, in their own words: ${a.words}`)
 redraw($)
 }
@@ -8210,7 +8432,7 @@ const sent = sentReplies.get(card)
 if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
 const markRead = async ($: EngineInterface, agentId: string) => {
-if (!(await read($, todos)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
+if (!(await ownCards($)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
 const now = await $.clock.now()
 const readNow = (entry: Entry): Entry => {
 if (!entry.isUnread || entry.at > now) return entry
@@ -8225,7 +8447,7 @@ if (card === undefined || wakes.some(w => w.target === agentId)) return
 pending.delete(agentId)
 const sent = sentReplies.get(card)
 if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'work' && (sentReplies.set(card, { ...sent, to: 'read' }), redraw($)))
-const one = (await read($, todos)).find(todo => todo.id === card)
+const one = (await ownCards($)).find(todo => todo.id === card)
 if (sent?.to !== 'work' || !one) return
 const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
 await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
@@ -8314,7 +8536,7 @@ if (now - linkReadAt >= BEAT) {
 linkReadAt = now
 myLink = await readLink($, id).catch(() => myLink)
 }
-const list = await read($, todos)
+const list = await ownCards($)
 const withSeen = (one: Todo): Todo => {
 const seen = Object.fromEntries(
 (one.bg ?? []).flatMap(job => {
@@ -8373,6 +8595,8 @@ return Boolean(JSON.parse(text))
 return false
 }
 }
+const LIVE_OLD = 2 * 86_400_000
+let isLiveTidied = false
 const readOthers = async ($: EngineInterface) => {
 const { id } = await read($, me)
 if (!id || !dir) return
@@ -8406,6 +8630,9 @@ const found: Shared[] = []
 const here = new Set<string>([id])
 const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${id}.json`)
 for (const name of [...liveRead.keys()]) if (!listed.some(entry => entry.name === name)) liveRead.delete(name)
+const gone = isLiveTidied ? [] : listed.filter(entry => entry.mtimeMs && now - entry.mtimeMs > LIVE_OLD).slice(0, 500)
+isLiveTidied = true
+if (gone.length) void $.process.run(['rm', '-f', ...gone.map(entry => `${liveDir()}/${entry.name}`)]).catch(() => undefined)
 for (const entry of listed) {
 if (entry.mtimeMs && now - entry.mtimeMs > STALE) continue
 const key = `${entry.mtimeMs}:${entry.size}`
@@ -8464,21 +8691,23 @@ if (isNew) $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, 
 for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
 const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
 const next = ordered(found)
-const was = await read($, others)
+const was = othersKept ?? (await read($, others))
 if (JSON.stringify(next) === JSON.stringify(was)) {
 othersHeld = undefined
 if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
 } else if (calmOthers(next) !== calmOthers(was) || next.some(s => now - (was.find(w => w.host === s.host && w.chat === s.chat)?.at ?? 0) > STALE / 2)) {
 othersHeld = undefined
-await update($, others, () => next)
+othersKept = await update($, others, () => next)
 } else othersHeld = next
 }
 let othersHeld: Shared[] | undefined
+let othersKept: Shared[] | undefined
+const ownOthers = async ($: EngineInterface) => othersKept ?? (await read($, others))
 const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
 const writeHeldOthers = async ($: EngineInterface) => {
 const held = othersHeld
 othersHeld = undefined
-if (held) await update($, others, () => held)
+if (held) othersKept = await update($, others, () => held)
 }
 
 const appIds = new Set<string>()
@@ -8572,7 +8801,7 @@ if (chat === id) {
 const session = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) ?? ''
 return DESKTOP_SESSION.test(session) ? openHere($, { chat, host: '' }, `claude://code/continue?session=${session}`) : log($, `chat ${chat} pressed on ${mac}: not in the Claude app here`)
 }
-const c = (await read($, others)).find(one => one.chat === chat)
+const c = (await ownOthers($)).find(one => one.chat === chat)
 let mine: Link | undefined
 try {
 mine = c ? undefined : linkOf((JSON.parse((await readOr($, `${liveDir()}/${chat}.json`)) || '{}') as { link?: unknown }).link)
@@ -8790,7 +9019,7 @@ if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitC
 const kept = isSame ? (target.archived ?? 0) : wasArchived
 if (kept) archived[id] = kept
 }
-if (changed) await loadReports($, true)
+if (changed) await loadReports($)
 const tried: Record<string, number> = {}
 for (const id of [...missingHere, ...missingThere]) if (was.tried?.[id]) tried[id] = was.tried[id]
 for (const id of [...wanted, ...handed]) tried[id] = now
@@ -8805,20 +9034,33 @@ const pushedFrom = new Set<string>()
 let offChats: (Off & { host: string })[] = []
 let stuckAt = ''
 let afarAt = -Infinity
-const AFAR_EVERY = 30_000
+const AFAR_EVERY = 60_000
+type AfarKept = { at?: number; here?: { exitCode: number; stdout: string }; app?: string; log?: string }
 const lookAfar = async ($: EngineInterface, now: number) => {
-if (now - afarAt < AFAR_EVERY) return false
+const every = AFAR_EVERY * (isOnBattery ? 2 : 1)
+if (now - afarAt < every) return false
 afarAt = now
 const failed = { exitCode: -1, stdout: '' }
-const here = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-const app = await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : []
+const path = (await usagePathOf($)).replace(/usage\.json$/, 'afar.json')
+let kept = parsedOr<AfarKept>(await $.fs.read(path).catch(() => ''), {})
+if (!kept || typeof kept !== 'object') kept = {}
+if (!(kept.here && typeof kept.at === 'number' && now >= kept.at && now - kept.at < every - 1000)) {
+await $.fs.write(path, JSON.stringify({ ...kept, at: now })).catch(() => undefined)
+const ran = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+const stat = await $.fs.stat(`${(await $.env.get('HOME')) ?? ''}/Library/Logs/Claude/main.log`).catch(() => undefined)
+const log = stat?.mtimeMs ? `${stat.size}:${stat.mtimeMs}` : ''
+const app = log && log === kept.log && typeof kept.app === 'string' ? kept.app : (await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)).stdout
+kept = { at: now, here: { exitCode: ran.exitCode, stdout: ran.stdout }, app, log }
+await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
+}
+const here = kept.here ?? failed
+const found = here.exitCode === 0 ? offOf(String(here.stdout)).map(one => ({ ...one, host: '' })) : []
 for (const mac of macs) {
 const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
 if (f.text && now - (f.fetchedAt ?? 0) <= STALE) found.push(...offOf(f.text).map(one => ({ ...one, host: mac })))
 }
 if (found.some(one => one.host)) await readAppIds($, now).catch(() => false)
-const stuck = stuckOf(app.stdout)
+const stuck = stuckOf(String(kept.app ?? ''))
 const isChanged = JSON.stringify([found, stuck]) !== JSON.stringify([offChats, stuckAt])
 offChats = found
 stuckAt = stuck
@@ -8956,14 +9198,21 @@ const BOX_TOLD = (one: Pick<Asked, 'kind' | 'text'>) => `${one.text} Press ${one
 let boxChat = ''
 const boxTold = new Set<string>()
 
+let boxesIdle: number | undefined
 const lookBoxes = async ($: EngineInterface) => {
 if (!dir) return
+if (boxesIdle !== undefined) {
+const at = await $.fs.stat(boxesDir()).then(st => st.mtimeMs || undefined, () => -1)
+if (at === boxesIdle && !boxes.length && !(await ownCards($)).some(card => keyAsksOf(card).length)) return
+boxesIdle = undefined
+}
 if (!(await $.session.surfaces().catch(() => [])).length) return
 boxChat = await $.session.id().catch(() => '')
 const now = await $.clock.now()
 const found: Asked[] = []
+const idleAt = await $.fs.stat(boxesDir()).then(st => st.mtimeMs || undefined, () => -1)
 const entries = await $.fs.list(boxesDir()).catch(() => [])
-const cards = await read($, todos)
+const cards = await ownCards($)
 for (const entry of entries) {
 const marked = entry.name.replace(/\.told$/, '')
 const answered = entry.name.replace(/\.reply$/, '')
@@ -9010,6 +9259,7 @@ for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(
 for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
 for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
 if (barOpen && isBoxKind(barOpen.kind) && !found.some(one => one.id === barOpen?.id)) closeBarOf(barOpen.id)
+if (!entries.length && !found.length) boxesIdle = idleAt
 if (JSON.stringify(found) === JSON.stringify(boxes)) return
 boxes = found
 drawAgain($)
@@ -9085,6 +9335,7 @@ boxSaid.set(id, `It couldn't be saved in ${keptWhere()}. Try again.`)
 await log($, `key ${name} not kept from its box: the keychain ended ${r.exitCode}`)
 return void drawAgain($)
 }
+secrets.at = -SECRETS_MS
 boxSent.add(id)
 boxSaid.delete(id)
 boxHeldReply.delete(id)
@@ -9452,7 +9703,7 @@ redraw($)
 const clearGates = async ($: EngineInterface) => {
 looseGates = looseGates.filter(one => gateHeld.has(one.id))
 const isKept = (gate: Gate) => gateHeld.has(gate.id) || gateParked.has(gate.id)
-if ((await read($, todos)).some(one => one.admins?.some(gate => !isKept(gate))))
+if ((await ownCards($)).some(one => one.admins?.some(gate => !isKept(gate))))
 await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(isKept).length ? one.admins.filter(isKept) : undefined } : one)))
 }
 const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, gate: Gate, top: string): Promise<GateSaid | 'gone' | 'late' | 'blind' | 'words'> => {
@@ -9469,7 +9720,7 @@ whenLeft.add(stop)
 try {
 await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
 await openList($).catch(() => undefined)
-const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
+const card = top ? (await ownCards($)).find(one => one.id === top) : undefined
 const text = `${gateAct(gate)}: ${cut(oneLine(gate.command), 200)}`
 await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
 const act = gateAct(gate)
@@ -9522,7 +9773,7 @@ redraw($)
 const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string, note = '') => {
 const run = (async () => {
 const words = value.trim()
-const one = (await read($, todos)).find(other => other.id === card)
+const one = (await ownCards($)).find(other => other.id === card)
 const gate = one?.admins?.find(other => other.id === id)
 if (!words || !one || !gate || gatePressed.has(id) || gate.isUndone) return
 presses += 1
@@ -9539,9 +9790,9 @@ void run.finally(() => answersOnWay.delete(run)).catch(err => log($, `words on a
 return run
 }
 const toTask = async ($: EngineInterface, card: string, target: string, text: string, label: string, asked: string) => {
-const one = (await read($, todos)).find(other => other.id === card)
+const one = (await ownCards($)).find(other => other.id === card)
 if (!one) return
-const working = (await read($, todos)).find(other => other.id === target)?.status === 'working'
+const working = (await ownCards($)).find(other => other.id === target)?.status === 'working'
 const told = working ? await tell($, target, text) : undefined
 if (told && !told.deny) return void writtenIn($, target, card)
 await toEnded($, one, target, `${text}\n${RESUMED_BY_ANSWER}`, { text: label, ask: asked, at: await $.clock.now(), line: lineOf(one), isCard: true, isPress: true })
@@ -9577,7 +9828,7 @@ const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), $.p
 if (!calls.length || !dir) return { grants: [] }
 const gate = await gateOf($)
 if (gate.mode === 'never') return { grants: [] }
-const list = await read($, todos)
+const list = await ownCards($)
 const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
 const card = list.find(one => one.id === top)
 const grants: string[] = []
@@ -9685,7 +9936,7 @@ return false
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
 const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
 if (!calls.length || !dir) return { grants: [] }
-const list = await read($, todos)
+const list = await ownCards($)
 const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
 const card = list.find(one => one.id === top)
 const grants: string[] = []
@@ -9750,7 +10001,7 @@ typeof input.content === 'string'
 : Array.isArray(input.edits)
 ? input.edits.map(one => String((one as { new_string?: unknown })?.new_string ?? '')).join('\n…\n')
 : String(input.new_source ?? '')
-const list = await read($, todos)
+const list = await ownCards($)
 const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
 const card = list.find(one => one.id === top)
 if (card && (await takeOnce($, top, 'file', file, cut(change, 2000)))) return ''
@@ -9958,7 +10209,7 @@ await personWrote($, dir, name, text)
 const PERSON_UNDONE = (names: string[]) =>
 named(`This command changed ${names.join(', ')} in {name}'s memory folder, and the change was undone: {name}'s own settings and texts are changed only with the Edit or Write tool, which waits for {name}'s press on the task's card. Don't try to change them another way.`)
 const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, name: string, text: string | null) => {
-const list = await read($, todos)
+const list = await ownCards($)
 const top = by?.agentId === undefined ? '' : topOf(list, by.agentId)
 const card = list.find(one => one.id === top)
 const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role file (${name})`
@@ -9982,7 +10233,7 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
 const offer = undoneOffers.get(gate.id)
 undoneOffers.delete(gate.id)
 gateHeld.delete(gate.id)
-const list = await read($, todos)
+const list = await ownCards($)
 await setGates($, list.some(one => one.admins?.some(g => g.id === gate.id)) ? (list.find(one => one.admins?.some(g => g.id === gate.id))?.id ?? '') : '', gates => gates.filter(one => one.id !== gate.id))
 if (said !== 'once' || !offer || !dir) return log($, `change to ${gate.host}: left undone`)
 await personWrote($, dir, offer.name, offer.text)
@@ -10064,7 +10315,7 @@ const countOf = (lines: string[], snippet: string) => lines.filter(line => line.
 const opened = async ($: EngineInterface, agent: string | undefined, tool: string, input: unknown) => {
 const at = await $.clock.now()
 const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`
-const list = await read($, todos)
+const list = await ownCards($)
 const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
 const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
 const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card), card: card.id } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
@@ -10122,7 +10373,7 @@ return one.result
 }
 const sendOne = async ($: EngineInterface, { message, isStill, resolve, reject }: HeldSend, text = message.text) => {
 const id = message.to.agentId
-if (stoppedHere.has(id) || isHeld((await read($, todos)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
+if (stoppedHere.has(id) || isHeld((await ownCards($)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
 if (isStill && !(await isStill().catch(() => false))) return resolve({ isDelivered: false, reason: 'no longer wanted by the time it could be sent' } as SendResult)
 await sendOwnNow($, { ...message, text }).then(resolve, reject)
 }
@@ -10245,7 +10496,7 @@ return undefined
 const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
 const refusal = refusalOf(r)
 if (!refusal || !dir || isOff) return
-const list = await read($, todos)
+const list = await ownCards($)
 const top = list.find(one => one.id === topOf(list, agent))
 const own = list.find(one => one.id === agent)
 if (!top || top.chat) return
@@ -10261,7 +10512,7 @@ await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.refused && 
 if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same command waits on it already`))
 await offerRun($, top.id, agent, at, runnable)
 await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
-const card = (await read($, todos)).find(one => one.id === top.id)
+const card = (await ownCards($)).find(one => one.id === top.id)
 if (card) await askAloud($, card, asked).catch(err => log($, `ask not told: ${String(err)}`))
 if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
@@ -10290,7 +10541,7 @@ let isPut = false
 await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
 if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same action waits on it already`))
 await log($, `refusal of ${tool} for ${agent} put to the person on its card, with the rule that lets it through`)
-const card = (await read($, todos)).find(one => one.id === top)
+const card = (await ownCards($)).find(one => one.id === top)
 if (card) await askAloud($, card, CONNECTOR_ASK).catch(err => log($, `ask not told: ${String(err)}`))
 if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
@@ -10497,22 +10748,33 @@ const end = RUN_END.exec(text)
 const lines = text.replace(RUN_END, '').replace(/\s+$/, '').split('\n')
 return { exit: end ? Number(end[1]) : undefined, isStopped: Boolean(end?.[2]), lines }
 }
+const RUN_ALIVE = 15_000
+const runLooked = new Map<string, { sign: string; aliveAt: number }>()
 const lookRun = async ($: EngineInterface, run: PressRun) => {
 const now = runList.find(one => isSameRun(one, run)) ?? run
-if (now.endedAt || !run.log || !run.pid || !run.startedAt) return true
+const key = runKey(run)
+if (now.endedAt || !run.log || !run.pid || !run.startedAt) return runLooked.delete(key), true
 during('look at a command run on a press')
-const out = runOutputOf(await fileEnd($, run.log, 64_000))
+const stat = await $.fs.stat(run.log).catch(() => undefined)
+const sign = stat?.mtimeMs ? `${stat.size}:${stat.mtimeMs}` : ''
+const was = runLooked.get(key)
+const isMoved = !sign || sign !== was?.sign
+const out = isMoved ? runOutputOf(await fileEnd($, run.log, 64_000)) : { exit: undefined, isStopped: false, lines: [] }
 const at = await $.clock.now()
 const stopped = (isStopped: boolean) => (isStopped || runStopped.has(runKey(run)) ? 'stopped' : 'exited')
-if (out.exit !== undefined) return void (await endRun($, run, stopped(out.isStopped), out.exit, out.lines)), true
+const ended = () => (runLooked.delete(key), true)
+if (out.exit !== undefined) return void (await endRun($, run, stopped(out.isStopped), out.exit, out.lines)), ended()
 if (at - run.startedAt > run.limitMs) {
 await stopProcess($, run)
-return void (await endRun($, run, 'limit', undefined, runOutputOf(await fileEnd($, run.log, 64_000)).lines)), true
+return void (await endRun($, run, 'limit', undefined, runOutputOf(await fileEnd($, run.log, 64_000)).lines)), ended()
 }
+const isAliveDue = !was || at < was.aliveAt || at - was.aliveAt >= RUN_ALIVE - RUN_LOOK / 2
+runLooked.set(key, { sign, aliveAt: isAliveDue ? at : was.aliveAt })
+if (!isAliveDue) return false
 const alive = await $.process.run([`${$.plugin.root}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
 if (alive && alive.exitCode !== 0) {
 const late = runOutputOf(await fileEnd($, run.log, 64_000))
-return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), true
+return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), ended()
 }
 return false
 }
@@ -10526,9 +10788,9 @@ redraw($)
 await stopProcess($, run)
 }
 const deliverRun = async ($: EngineInterface, cardId: string, target: string, run: PressRun, text: string) => {
-const card = (await read($, todos)).find(one => one.id === cardId)
+const card = (await ownCards($)).find(one => one.id === cardId)
 if (!card) return 'held'
-const isWorking = (await read($, todos)).find(one => one.id === target)?.status === 'working'
+const isWorking = (await ownCards($)).find(one => one.id === target)?.status === 'working'
 const told = isWorking ? await tell($, target, text) : undefined
 if (told && !told.deny) return 'sent'
 if (isHeld(card)) return 'held'
@@ -10549,7 +10811,7 @@ const text = kept()?.waiting?.text
 if (!text) return
 const isStill = async () => {
 const one = kept()
-if (!one?.waiting || one.waiting.target !== target || (await read($, todos)).find(card => card.id === target)?.status !== 'working') return false
+if (!one?.waiting || one.waiting.target !== target || (await ownCards($)).find(card => card.id === target)?.status !== 'working') return false
 runSending.add(key)
 return true
 }
@@ -10850,7 +11112,7 @@ return ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), left).
 const NOTICE_HEADER = /\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n(?:(?:This is an automated background-task event|Do NOT interpret this|No human input has been received)[^\n]*\n?)*/
 type Quiet = { isQuiet: boolean; isRepeat: boolean }
 const reportsFor = async ($: EngineInterface, ids?: string[]) => {
-const given = (await read($, todos)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
+const given = (await ownCards($)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
 if (!given.length) return []
 await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
 await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
@@ -10859,7 +11121,7 @@ given.forEach((one, n) => resultGiven(one.id, reports[n] ?? ''))
 return given.map((one, n) => named(REPORT_FOR_CHAT(titleOf(one), one.id, reports[n] ?? '')))
 }
 const partsFor = async ($: EngineInterface) => {
-const given = (await read($, todos)).filter(one => one.partsForChat?.length)
+const given = (await ownCards($)).filter(one => one.partsForChat?.length)
 if (!given.length) return []
 await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)))
 await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
@@ -11233,7 +11495,7 @@ const isAskOf = (need: Need, card: string) => need.id === `ask-${card}` || need.
 type Typed = { need: Need; card?: Todo; title: string; isPressOnly: boolean }
 const typedWaiting = async ($: EngineInterface): Promise<Typed[]> => {
 const now = await $.clock.now()
-const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
+const cards = (await ownCards($)).filter(one => !one.parentId && !one.chat)
 const own = new Set(cards.map(one => one.id))
 const onCards = cards.flatMap(one => needsOf($, asPressed(one), '', now).map(need => ({ need, card: one, title: titleOf(one), isPressOnly: Boolean(isAskOf(need, one.id) && need.card?.ask?.refused) })))
 const loose = [
@@ -11357,9 +11619,9 @@ return answer ? { ...one, answer } : one
 )
 const look = async () => lookOver($, await $.agent.list().catch(() => []), await $.clock.now(), id)
 if (how === 'done') await look().catch(err => log($, `work ${id} not looked at as its turn ended: ${String(err)}`))
-if (how === 'done' && (await read($, todos)).find(one => one.id === id)?.status === 'working') $.clock.after(HELD_LOOK, () => void look().catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
+if (how === 'done' && (await ownCards($)).find(one => one.id === id)?.status === 'working') $.clock.after(HELD_LOOK, () => void look().catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
 await lookEnds($)
-if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+if ((await ownCards($)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
 if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
 await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 return done
@@ -11414,6 +11676,8 @@ const chatHooks = (on: On) => {
 on('session.start', async ($, e, next) => {
 await knowSystem($).catch(() => undefined)
 lastSeen = undefined
+cardsKept = undefined
+othersKept = undefined
 loadedVersion = undefined
 knownSeen = undefined
 const begun = await next(e)
@@ -11424,7 +11688,9 @@ holdAt = 0
 const timing = (await $.env.get('CLAUDOPUS_TIMING')) ?? ''
 isTimed = !/^test\b/.test(timing)
 isDrawTimed = timing !== 'test'
-if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
+if (isTimed) {
+const hold = $.clock.every(HOLD_LOOK, () => (isLeft ? hold.cancel() : lookHold($)))
+}
 void registerKinds($)
 termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
 ;[termFrom = '', , termHere = '', termPort = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
@@ -11457,7 +11723,7 @@ await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(
 await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
 await lookRewound($, id).catch(err => log($, `rewind not looked for: ${String(err)}`))
 const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)
-if ((await read($, todos)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
+if ((await ownCards($)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
 during('load: read the other chats')
 await readOthers($).catch(() => undefined)
 keysOnStart($)
@@ -11566,7 +11832,7 @@ await loadReports($).catch(() => undefined)
 afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
 afterLoad($, PROGRESS_LOAD_AFTER, () => void drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`)))
 await readDrafts($).catch(() => undefined)
-const isRunning = (await read($, todos)).some(one => !one.parentId && one.status === 'working')
+const isRunning = (await ownCards($)).some(one => !one.parentId && one.status === 'working')
 panelSeen = ''
 const choice = await followPanel($).catch(() => undefined)
 if (!choice && (isRunning || isWelcomeOpen)) await openList($)
@@ -11580,7 +11846,7 @@ lingerSet.clear()
 const now = await $.clock.now()
 const last = await read($, lastDrawn)
 lateFrom.clear()
-for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
+for (const one of [...(await read($, flows)), ...(await ownCards($)).filter(card => !card.parentId)])
 if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
 }
 let seconds = 0
@@ -11599,13 +11865,13 @@ if (!isBehind()) await readOthers($).catch(err => log($, `other chats not read: 
 }
 const isFlowing = (await read($, flows)).some(f => f.status === 'working')
 const calmNow = await $.clock.now()
-const isMoving = isFlowing || runList.some(run => Boolean(run.startedAt && !run.endedAt)) || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.some(card => card.status === 'working'))
+const isMoving = isFlowing || runList.some(run => Boolean(run.startedAt && !run.endedAt)) || (await ownCards($)).some(one => !one.parentId && one.status === 'working') || (await ownOthers($)).some(c => c.cards.some(card => card.status === 'working'))
 if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
 if (!isBehind()) await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
-if (!isBehind() && (await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
+if (!isBehind() && (await ownCards($)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 void paceWork($).catch(err => log($, `commands not paced: ${String(err)}`))
 const now = await $.clock.now()
-for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
+for (const one of [...(await read($, flows)), ...(await ownCards($))].filter(card => isLingering(card, now))) {
 const key = `${one.id}:${one.endedAt}`
 if (lingerSet.has(key)) continue
 lingerSet.add(key)
@@ -11670,7 +11936,7 @@ if (dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<
 const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
 const reports = [...(await partsFor($)), ...(await reportsFor($, ids))]
 if (reports.length) e = { ...e, context: [...(e.context ?? []), ...reports] }
-const cards = await read($, todos)
+const cards = await ownCards($)
 const atWork = new Set(cards.filter(one => !one.chat && (one.parentId ? one.parentId !== HELPER || one.tookReport : one.status === 'working')).map(one => one.id))
 const quiet = quietNotices(e.text, atWork, new Set(cards.filter(one => one.reportGiven && !reports.length).map(one => one.id)))
 const held = cards.filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
@@ -11696,8 +11962,8 @@ if (from) await appendWords($, (await read($, me)).id, `## ${new Date().toISOStr
 return next(e)
 }
 const context = [...(e.context ?? []), ...(await partsFor($)), ...(await reportsFor($))]
-const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
-if ((await read($, todos)).some(isHeld)) {
+const stillHeld = (await ownCards($)).filter(one => isHeld(one) && !one.parentId)
+if ((await ownCards($)).some(isHeld)) {
 await changeTodos($, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
 if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
 }
@@ -11722,7 +11988,7 @@ if (!m.isChat || m.needsContext) {
 context.push(`${role}\n${WORDS_LINE(m.id)}\n${PROGRESS_LINE()}\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${await topicsGiven($)}`)
 } else changed = listChanges(index, areas, await read($, listSeen))
 if (!m.isChat || m.needsContext || changed) await update($, listSeen, () => listKeys(index, areas))
-const told = reportsTold(await read($, reports), await $.clock.now())
+const told = reportsTold(await ownReports($), await $.clock.now())
 context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}\nProgress: ${progressDir()}${changed ? `\nChanged since you were given the topic list: ${changed}` : ''}`)
 await update($, me, one => ({ ...one, isChat: true, needsContext: false }))
 
@@ -11739,7 +12005,7 @@ context.push(PASTED)
 said = text
 heard = [...heard, text]
 heardSaid(e.text)
-fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
+fromReport = (await ownReports($)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
 const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
 await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 await appendTo($, `${dir}/words/${m.id}.said.md`, hideKeys(saidEntry(await $.clock.now(), how, pasted ? e.text : text, pasted))).catch(err => log($, `message not saved: ${String(err)}`))
@@ -11922,7 +12188,7 @@ for (const line of resultLines(r.result)) if (!seen.has(line)) ((isNew = true), 
 if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
 else seenLines.set(agent, seen)
 }
-await changeTodos($, list => withRunning(list, agent, isNew ? now : undefined))
+await runSoon($, agent, isNew ? now : undefined)
 }
 
 const runningKids = (list: Todo[], id: string) => list.filter(kid => kid.parentId === id && kid.status === 'working')
@@ -11948,9 +12214,9 @@ return isChanged ? next : list
 })
 for (const one of told) {
 await changeTodos($, all => all.map(card => (card.id === one.id ? { ...card, stuckTold: now } : card)))
-await tellChat($, named(`${STUCK_IN_CHAT(titleOf(one), Math.round((now - movedAt(await read($, todos), one)) / 60_000))} ${STUCK_ASK}`))
+await tellChat($, named(`${STUCK_IN_CHAT(titleOf(one), Math.round((now - movedAt(await ownCards($), one)) / 60_000))} ${STUCK_ASK}`))
 }
-const list = await read($, todos)
+const list = await ownCards($)
 for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
 for (const agent of [...lastResult.keys()]) if (!list.some(one => one.id === agent && one.status === 'working')) (lastResult.delete(agent), changedAt.delete(agent))
 }
@@ -12044,6 +12310,7 @@ return runs.length ? named(NOT_HANDED_RUNS(runs)) : ''
 
 type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; live?: 'busy' | 'idle'; port?: string; wroteAt?: number }
 const jobLog = new Map<string, Seen>()
+const jobRead = new Map<string, { sign: string; m: string; text: string }>()
 const jobNews = new Map<string, number>()
 let jobsLookedAt = 0
 const WATCH_GRACE = 2 * 60_000
@@ -12086,9 +12353,10 @@ const lookJobs = async ($: EngineInterface) => {
 const now = await $.clock.now()
 if (now - jobsLookedAt < JOB_LOOK) return
 jobsLookedAt = now
-const list = await read($, todos)
+const list = await ownCards($)
 const owned = list.flatMap(one => (one.chat ? [] : (one.bg ?? []).map(b => ({ owner: one.id, id: b.id }))))
 for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+for (const id of jobRead.keys()) if (!owned.some(o => o.id === id)) jobRead.delete(id)
 for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
 if (!owned.length) return
 const sid = await $.session.id().catch(() => '')
@@ -12110,15 +12378,23 @@ const moved = new Set<string>()
 if (files.length) {
 const mtime = isLinux ? 'm=$(stat -c %Y "$f" 2>/dev/null || echo 0)' : 'm=$(stat -f %m "$f" 2>/dev/null || echo 0)'
 const script = `for f; do ${mtime}; printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done`
-const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
+const signs = await Promise.all(files.map(file => $.fs.stat(file).then(st => (st.mtimeMs ? `${st.size}:${st.mtimeMs}` : ''), () => '')))
+const moving = asked.flatMap((o, n) => (signs[n] && jobRead.get(o.id)?.sign === signs[n] ? [] : [n]))
+const r = moving.length ? await $.process.run(['sh', '-c', script, 'sh', ...moving.map(n => files[n] ?? '')], { timeoutMs: 5000 }).catch(() => undefined) : { stdout: '' }
 if (!r) return
 const parts = r.stdout.split(/\n@@JOB@@ ([^\n]*)\n/)
 for (let n = 1; n + 1 < parts.length; n += 2) {
-const job = asked[(n - 1) / 2]
-const id = job?.id ?? ''
-const text = parts[n + 1] ?? ''
+const at = moving[(n - 1) / 2] ?? -1
+const id = asked[at]?.id
+if (id) jobRead.set(id, { sign: signs[at] ?? '', m: parts[n] ?? '', text: parts[n + 1] ?? '' })
+}
+for (const job of asked) {
+const id = job.id
+const read = jobRead.get(id)
+if (!read) continue
+const text = read.text
 texts[id] = text
-const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
+const m = Number(read.m.split(' ')[0] ?? 0) * 1000
 const end = runEndOf(text)
 const why = end?.how === 'failed' ? whyOf(text) : ''
 if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}), ...(why ? { why } : {}) }))
@@ -12162,11 +12438,11 @@ if (o && seen && seen.live !== live) (jobLog.set(o.id, { ...seen, live }), (isCh
 void nameJobs($, list, texts, endedAs).catch(err => log($, `commands not named: ${String(err)}`))
 if (ended.length) {
 await dropBackground($, ended, endedAs)
-for (const id of ended) jobLog.delete(id)
+for (const id of ended) (jobLog.delete(id), jobRead.delete(id))
 isChanged = true
 }
 void tellSilent($, list, now).catch(err => log($, `silent runs not told: ${String(err)}`))
-void endWatchers($, await read($, todos), now).catch(err => log($, `watchers not stopped: ${String(err)}`))
+void endWatchers($, await ownCards($), now).catch(err => log($, `watchers not stopped: ${String(err)}`))
 for (const owner of moved) jobNews.set(owner, now)
 if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
 if (ended.length) void drawFresh($)
@@ -12231,7 +12507,7 @@ await log($, `run ${job.id} of work ${one.id} stopped: it only read the output o
 }
 const stopping = async ($: EngineInterface, owner: string, job: Job, said?: string) => {
 const now = await $.clock.now()
-const card = (await read($, todos)).find(one => one.id === owner)
+const card = (await ownCards($)).find(one => one.id === owner)
 const bg = card?.bg?.find(b => b.id === job.id)
 if (!bg) return void (await log($, `run ${job.id} of work ${owner} could not be stopped: its card no longer has it`))
 const r = await $.tool.call({ tool: 'TaskStop', task_id: bg.id }).catch(err => ({ deny: String(err) }))
@@ -12302,7 +12578,7 @@ redraw($)
 })()).catch(err => log($, `log of ${id} not opened: ${String(err)}`))
 }
 const logOf = async ($: EngineInterface, paneId: string) => {
-for (const one of await read($, todos)) {
+for (const one of await ownCards($)) {
 const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
 if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id], b.named), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
 const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
@@ -12490,7 +12766,7 @@ const input = e as { command?: unknown; description?: unknown; tool_use_id?: unk
 const command = String(input.command ?? '')
 if (!heavyOf(command, await scriptsRun($, command))) return {}
 const agent = e.agentId ?? ''
-const list = await read($, todos)
+const list = await ownCards($)
 if (!list.some(one => one.id === agent && !one.chat)) return {}
 const mode = heavyModeOf(await readConfig($, dir))
 if (mode.value === 'never') return {}
@@ -12512,6 +12788,7 @@ const DISK_TOLD_EVERY = 6 * 3600_000
 type DiskKept = { at: number; free: number; total: number }
 let diskKept: DiskKept | undefined
 let diskTriedAt = -Infinity
+let isDiskForced = false
 let diskLowSince = 0
 let diskToldAt = -Infinity
 let tidyPressedAt = 0
@@ -12520,6 +12797,9 @@ let tidyLast: { at: number; freed: number } | undefined
 const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
 const startTidy = async ($: EngineInterface, flags: string[] = []) => {
 if (!dir || isOff) return
+const stamp = flags.length ? 0 : ((await $.fs.stat(`${dir}/tidy/stamp`).catch(() => undefined))?.mtimeMs ?? 0)
+const at = stamp ? await $.clock.now() : 0
+if (stamp && at >= stamp && at - stamp < TIDY_EVERY) return
 const r = await $.process.run(['/bin/sh', '-c', TIDY_START, 'sh', dir, `${$.plugin.root}/bin/tidy`, ...flags, dir])
 if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
@@ -12545,10 +12825,20 @@ const lookDisk = async ($: EngineInterface) => {
 const now = await $.clock.now()
 if (now >= diskTriedAt && now - diskTriedAt < DISK_EVERY / 2) return diskKept
 diskTriedAt = now
-const r = await $.process.run(['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+const path = (await usagePathOf($)).replace(/usage\.json$/, 'disk.json')
+const shared = parsedOr<{ at?: unknown; out?: unknown }>(await $.fs.read(path).catch(() => ''), {}) ?? {}
+const sharedAt = Number(shared.at) || 0
+const every = isDiskLow(diskKept) ? DISK_EVERY / 2 : diskKept && diskKept.free > 2 * DISK_WARN ? 1.5 * DISK_EVERY : DISK_EVERY - 1000
+let out = !isDiskForced && typeof shared.out === 'string' && now >= sharedAt && now - sharedAt < every ? shared.out : undefined
+isDiskForced = false
+if (out === undefined) {
+await $.fs.write(path, JSON.stringify({ ...shared, at: now })).catch(() => undefined)
+out = (await $.process.run(['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined))?.stdout ?? ''
+if (out) await $.fs.write(path, JSON.stringify({ at: now, out })).catch(() => undefined)
+}
 const was = diskKept
 const wasLast = tidyLast
-const [disk = '', power] = (r?.stdout ?? '').split('@@POWER@@')
+const [disk = '', power] = out.split('@@POWER@@')
 diskKept = diskOf(disk, now) ?? diskKept
 if (power !== undefined) isOnBattery = isOnBatteryLook(power, isLinux)
 if (dir) tidyLast = lastOf(await $.fs.read(`${dir}/tidy/last.json`).catch(() => '')) ?? tidyLast
@@ -12572,6 +12862,7 @@ const freeSpace = async ($: EngineInterface) => {
 tidyPressedAt = await $.clock.now()
 presses += 1
 diskTriedAt = -Infinity
+isDiskForced = true
 drawAgain($)
 await log($, 'the person asked to free up disk space')
 await startTidy($, ['--now', '--deep'])
@@ -12608,7 +12899,7 @@ const turnLeftovers = async ($: EngineInterface, e: ToolCallInput) => {
 const input = e as { command?: unknown; description?: unknown }
 const command = String(input.command ?? '')
 const agent = e.agentId ?? ''
-if (!command || !(await read($, todos)).some(one => one.id === agent && !one.chat)) return ''
+if (!command || !(await ownCards($)).some(one => one.id === agent && !one.chat)) return ''
 const scripts = await scriptsRun($, command)
 const plain = command.replace(/\\ /g, ' ').replace(/["']/g, '')
 if ((CHROME_APP.test(plain) && /--headless\b/.test(plain)) || scripts.some(text => CHROME_IN_SCRIPT.test(text) || (CHROME_APP.test(text) && /--headless\b/.test(text)))) {
@@ -12699,7 +12990,7 @@ if (!agent || !dir || isOff) return r
 const now = await $.clock.now()
 const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))
 for (const call of e.tool_calls) callStarts.delete(call.tool_use_id)
-const card = (await read($, todos)).find(one => one.id === agent)
+const card = (await ownCards($)).find(one => one.id === agent)
 const lines = stepLines(agent, calls, !card?.parentId)
 if (!lines.length) return r
 await log($, `work ${agent} told of its step: ${lines.map(line => line.slice(0, 40)).join(' / ')}`)
@@ -12715,7 +13006,7 @@ const isHelperSpawn = (e: { parentAgentId?: string; workflow?: unknown; resume?:
 Boolean(e.parentAgentId) && !flowAgents.has(e.parentAgentId ?? '') && !e.workflow && !e.resume && !e.fork && !e.isTeammate && !e.background && !isOff && Boolean(dir)
 
 const stopHelpers = async ($: EngineInterface, id: string) => {
-const list = await read($, todos)
+const list = await ownCards($)
 for (const one of underOf(list, id).filter(kid => kid.status === 'working')) {
 stoppedByUs.add(one.id)
 const r = await $.tool.call({ tool: 'TaskStop', task_id: one.id }).catch(err => ({ deny: String(err) }))
@@ -12749,7 +13040,7 @@ let ledgerMade = ''
 const saveLedger = async ($: EngineInterface) => {
 const { id, title } = await read($, me)
 if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
-const list = await read($, todos)
+const list = await ownCards($)
 const agents = await agentsFolder($, id)
 const tasks = await Promise.all(ledgerTasks(list).map(async one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${one.chatWas ? await agentsFolder($, one.chatWas) : agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) })))
 const body = { chat: id, title, folder: cwd, pid: enginePid, ...(chatFrom ? { from: chatFrom } : {}), ...(myLink ? { link: myLink } : {}), tasks }
@@ -12763,15 +13054,20 @@ const r = await $.process.run(['mv', '-f', `${path}.part`, path])
 if (r.exitCode !== 0) throw new Error(`ledger not moved into place: ${r.stderr.slice(0, 200)}`)
 ledgerSign = sign
 }
+const LEDGER_GAP = 2000
 let isLedgerBusy = false
 let isLedgerDue = false
+let ledgerAt = 0
 const saveLedgerSoon = ($: EngineInterface) => {
 if (isLedgerBusy) return void (isLedgerDue = true)
 isLedgerBusy = true
 void (async () => {
 try {
 do {
+const wait = isTimed ? ledgerAt + LEDGER_GAP - Date.now() : 0
+if (wait > 0) await new Promise<void>(done => void $.clock.after(wait, done))
 isLedgerDue = false
+ledgerAt = Date.now()
 await saveLedger($).catch(err => log($, `ledger not written: ${String(err)}`))
 } while (isLedgerDue)
 } finally {
@@ -12968,7 +13264,7 @@ brief || 'Not kept: the first line of its saved transcript holds them.',
 }
 const CARRY_PROMPT = (path: string) => `Carry on a task the Claude app's close cut off. Read ${path} first: it holds the task's instructions, its to-dos, its last notes, its worktree and its saved transcript. Then go on from where it stopped.`
 const carryOn = async ($: EngineInterface, id: string, answer = '') => {
-const list = await read($, todos)
+const list = await ownCards($)
 const one = list.find(card => card.id === topOf(list, id))
 const { id: chat } = await read($, me)
 if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat)) return
@@ -13493,7 +13789,7 @@ const crossingOf = async ($: EngineInterface, e: { tool: string; agentId?: strin
 if (!dir || isOff || e.agentId === undefined || !(e.tool === 'Bash' || FILE_TOOLS.includes(e.tool))) return {}
 const paths = crossPaths(e)
 if (!paths.length) return {}
-const list = await read($, todos)
+const list = await ownCards($)
 const top = topOf(list, e.agentId)
 const card = list.find(one => one.id === top)
 if (!card) return {}
@@ -13546,7 +13842,7 @@ return `${String(r?.stdout ?? '')}\n${String(r?.stderr ?? '')}`
 const crossEnded = async ($: EngineInterface, e: { tool: string; agentId?: string; command?: unknown }, crossed: Crossed, result: unknown, isError: boolean): Promise<string> => {
 if (!dir || isOff || e.agentId === undefined) return ''
 const now = await $.clock.now()
-const list = await read($, todos)
+const list = await ownCards($)
 const top = crossed.top ?? topOf(list, e.agentId)
 const isThrough = !(isError && e.tool !== 'Bash')
 if (crossed.noteKey && isThrough) crossWarned.set(crossed.noteKey, crossed.noteIds ?? [top])
@@ -13813,13 +14109,13 @@ if (crossed.deny) {
 await log($, `refused work ${e.agentId}'s ${e.tool} that crosses another task's files`)
 return { deny: crossed.deny }
 }
-if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
+if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await ownCards($), e.agentId)) {
 await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
 return { deny: NO_PERSON_WAIT(who()) }
 }
 if (dir && !isOff && e.agentId !== undefined && (e.tool === 'Bash' || e.tool === 'Monitor')) {
 const command = String((e as { command?: unknown }).command ?? '')
-const card = (await read($, todos)).find(one => one.id === e.agentId)
+const card = (await ownCards($)).find(one => one.id === e.agentId)
 if (isDetaching(e as never)) {
 await log($, `refused ${card?.parentId ? 'helper' : 'work'} ${e.agentId}'s command that detaches what it starts`)
 return { deny: NO_DETACH }
@@ -13933,7 +14229,7 @@ return told
 if (dir && !isOff && (e.tool === 'SendMessage' || e.tool === 'Agent')) {
 const call = e as unknown as { to?: unknown; resume?: unknown; description?: unknown; prompt?: unknown; subagent_type?: unknown }
 const resume = e.tool === 'SendMessage' ? String(call.to ?? '') : String(call.resume ?? '')
-const held = heldFor(await read($, todos), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
+const held = heldFor(await ownCards($), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
 if (held) {
 await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
 return { deny: named(STOPPED_REFUSED(titleOf(held))) }
@@ -13954,7 +14250,7 @@ const theirs = e.agentId === undefined ? heard.findLast(one => carries(message, 
 words = theirs ? quoted(theirs, 600) : ''
 isWhole = Boolean(theirs) && isTheirsWhole(message, theirs ?? '')
 const now = await $.clock.now()
-const list = await read($, todos)
+const list = await ownCards($)
 const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
 const given = target && e.agentId === undefined ? sentReplies.get(target.id) : undefined
 const isRepeat = Boolean(given?.isCard && (given.to === 'work' || given.to === 'read') && now - given.at < ANSWER_ECHO && plainWords(message) === plainWords(given.text))
@@ -14042,21 +14338,21 @@ return sent
 }
 if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
 const agent = e.agentId
-const refused = handbackRefused(await read($, todos), agent)
+const refused = handbackRefused(await ownCards($), agent)
 if (refused) return (await log($, `work ${agent}'s hand-back refused: ${refused.slice(0, 60)}`), { deny: refused })
 const report = String((e as { message?: unknown }).message ?? '').trim()
-const taken = (await read($, todos)).find(one => one.id === agent)
+const taken = (await ownCards($)).find(one => one.id === agent)
 if (dir && !isOff && taken && !taken.parentId && !flowAgents.has(agent)) {
 handedBack.set(agent, report)
 const now = await $.clock.now()
 await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...(one.flagged ? { ...ended(one, 'failed', now), why: WHY_FLAGGED } : { ...ended(one, 'done', now), reportAt: now }), answer: report.slice(0, ANSWER_CHARS) || one.answer, reportForChat: report, reportGiven: undefined, tookReport: String(e.tool_use_id) })))
-let card = (await read($, todos)).find(one => one.id === agent)
+let card = (await ownCards($)).find(one => one.id === agent)
 const asked = card?.ask?.isResult && card.ask.choices?.length && !card.ask.pictures?.length ? card.ask : undefined
 if (card && asked && (await wantsQuestionPictures($).catch(() => false))) {
 const drawn = await questionPicture($, card.id, titleOf(card), asked.text, asked.details ?? '', asked.choices ?? [], asked.at)
 if (drawn) {
 await changeTodos($, list => list.map(one => (one.id === agent && one.ask?.at === asked.at && one.ask.text === asked.text ? { ...one, ask: { ...one.ask, pictures: [drawn] } } : one)))
-card = (await read($, todos)).find(one => one.id === agent)
+card = (await ownCards($)).find(one => one.id === agent)
 await openQuestionPicture($, drawn)
 if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
@@ -14066,7 +14362,7 @@ await lookEnds($)
 await log($, `report of ${agent} taken at its hand-back, for the chat to give with the notice of its end`)
 return { result: { success: true, message: named(REPORT_TAKEN) } } as never
 }
-const above = taken?.parentId ? (await read($, todos)).find(one => one.id === taken.parentId) : undefined
+const above = taken?.parentId ? (await ownCards($)).find(one => one.id === taken.parentId) : undefined
 if (dir && !isOff && taken && above && !above.chat && !flowAgents.has(agent) && !flowAgents.has(above.id)) {
 handedBack.set(agent, report)
 const now = await $.clock.now()
@@ -14145,7 +14441,7 @@ return { turnId: e.turnId, index: e.index, answer: NO_ANSWER, toolUses: [], stop
 const id = e.agentId
 if (id !== undefined) replyRead($, id)
 if (id !== undefined && dir) await markRead($, id).catch(err => log($, `messages not marked read: ${String(err)}`))
-const took = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.tookReport : undefined
+const took = id !== undefined && dir ? (await ownCards($)).find(one => one.id === id)?.tookReport : undefined
 if (id !== undefined && took) {
 if (await isAfterTaken($, id, took)) {
 yield { kind: 'text', index: 0, text: PRESS_ANSWER }
@@ -14154,8 +14450,8 @@ return { turnId: e.turnId, index: e.index, answer: PRESS_ANSWER, toolUses: [], s
 }
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tookReport: undefined } : one)))
 }
-const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
+const chosen = id !== undefined && dir ? (await ownCards($)).find(one => one.id === id)?.chosen : undefined
+const card = id !== undefined && dir ? (await ownCards($)).find(one => one.id === id) : undefined
 if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id) || holdsCard(id)) && (await isPressedForReport($, id, true))) {
 await log($, `work ${id} pressed for its report while it waits for the person: let it end its step, saying nothing`)
 yield { kind: 'text', index: 0, text: PRESS_ANSWER }
@@ -14193,7 +14489,7 @@ sentElsewhere.add(`${id} ${e.model}`)
 await log($, `work ${id} was sent to ${modelName(e.model)} by the app: ${instead ? `its steps go to ${modelName(instead)}` : 'its steps stay there'}`)
 }
 const moved = isMovedByApp ? modelName(e.model) : undefined
-if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+if (id !== undefined && dir && (await ownCards($)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
 const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
 const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
 const stream = next(to ? { ...e, model: to } : e)
@@ -14212,12 +14508,12 @@ const r = await next(e)
 const live = e.background_tasks
 if (dir && Array.isArray(live)) {
 const ids = new Set(live.map(one => one.id))
-const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
+const gone = ((await ownCards($)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
 if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
 }
-if (dir && !isOff && !r.block && (await read($, todos)).some(one => one.id === e.agent_id && !one.parentId && !one.chat)) await startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`))
+if (dir && !isOff && !r.block && (await ownCards($)).some(one => one.id === e.agent_id && !one.parentId && !one.chat)) await startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`))
 if (!dir || r.block || (e as { stop_hook_active?: boolean }).stop_hook_active) return r
-const why = stopRefused(await read($, todos), e.agent_id)
+const why = stopRefused(await ownCards($), e.agent_id)
 if (why) await log($, `work ${e.agent_id} may not stop: to-dos are open and nothing of its own runs`)
 return why ? { ...r, block: why } : r
 })
@@ -14225,7 +14521,7 @@ return why ? { ...r, block: why } : r
 on('agent.spawn', async ($, asked, next) => {
 agentStarted($, asked.tool_use_id)
 if (dir && !isOff && !asked.workflow) {
-const held = heldFor(await read($, todos), asked.parentAgentId ?? helperCalls.get(asked.tool_use_id) ?? '', asked.resume?.agentId ?? '', asked.description ?? '', asked.resume ? '' : (asked.prompt ?? ''))
+const held = heldFor(await ownCards($), asked.parentAgentId ?? helperCalls.get(asked.tool_use_id) ?? '', asked.resume?.agentId ?? '', asked.description ?? '', asked.resume ? '' : (asked.prompt ?? ''))
 if (held) {
 await log($, `refused to start again ${held.id}, which the person stopped`)
 return { deny: named(STOPPED_REFUSED(titleOf(held))) }
@@ -14251,7 +14547,7 @@ const parentId = e.parentAgentId ?? helperCalls.get(e.tool_use_id) ?? ''
 const isOwn = !parentId
 const isTold = isOwn && Boolean(dir) && !isOff && !e.resume && !e.workflow && (await read($, me)).isChat
 const rules = isTold ? await workRules($) : ''
-const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : ''
+const scratch = isTold ? scratchName(await ownCards($), e.description ?? '', await $.clock.now()) : ''
 const isBackground = isHelperSpawn(e)
 const aside = isTold ? await asideTold($, e.description ?? '', e.prompt ?? '').catch(err => (void log($, `set-aside work not told: ${String(err)}`), '')) : ''
 const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}${aside ? `\n\n${aside}` : ''}` } : isBackground ? { ...e, background: true } : e)
@@ -14262,7 +14558,7 @@ if (r.agentId && e.resume) flaggedSteps.delete(r.agentId)
 if (!dir || !r.agentId) return r
 const id = r.agentId
 const now = await $.clock.now()
-const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
+const named1 = isOwn && !fromReport && !e.resume ? (await ownReports($)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
 const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
 const from = fromReport || goesOn
 const carried = isOwn && !e.resume ? carriedFrom(e.prompt ?? '') : ''
@@ -14386,7 +14682,7 @@ const saved = await saveStream($, name, { repo: input.repo, state: input.state?.
 if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
 const page = pageOf(saved.name)
 if (added) {
-const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId)
+const card = e.agentId === undefined ? undefined : (await ownCards($)).find(one => one.id === e.agentId)
 await addHistory($, saved.name, historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
 }
 if (brief && !isLong) await writePage($, saved.name, hideKeys(brief))
@@ -14422,7 +14718,7 @@ const block = latestIn(page)
 if (block) latest.set(file, page.slice(0, page.indexOf(block) + block.length).split('\n').length)
 }
 const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
-const archived = new Set((await loadReports($, true).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
+const archived = new Set((await reportsNow($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
 const seen = new Set<string>()
 const perFile = new Map<string, number>()
 const lines = found
@@ -14480,7 +14776,7 @@ const like = same ? undefined : saved.find(one => sameKey(one.name, keyName))
 const about = cut(keyAskDetails([text === asked ? '' : asked, given1].filter(Boolean).join('\n\n'), from, keyName, same, like), ASK_DETAILS)
 const keyAt = await $.clock.now()
 await change($, e.agentId, one => withKeyAsks(one, [...keyAsksOf(one).filter(other => other.name !== keyName), { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt }]))
-const cards = await read($, todos)
+const cards = await ownCards($)
 const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
 await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
 if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
@@ -14503,7 +14799,7 @@ const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : 
 const pictures: string[] = []
 for (const path of givenPics) if (path.startsWith('/') && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
 const at = await $.clock.now()
-const before = await read($, todos)
+const before = await ownCards($)
 const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
 const isSameAsk = Boolean(was && was.text === text && JSON.stringify(was.choices ?? []) === JSON.stringify(choices))
 const wantsPicture = Boolean(text && choices.length) && (await wantsQuestionPictures($).catch(() => false))
@@ -14538,7 +14834,7 @@ if (!text) return ((cleared = asksOf(one).filter(ask => isOwnAsk(one, ask))), wi
 const kept = asksOf(one).filter(ask => !ask.isResult && !(isOwnAsk(one, ask) && (ask.text === text || (ask.replied && !ask.refused))))
 return withAsks(one, [...kept, { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: asker, ...(pictures.length ? { pictures } : {}), at }])
 })
-const list = await read($, todos)
+const list = await ownCards($)
 const card = list.find(one => one.id === topOf(list, asker))
 if (!text) {
 if (card && keyAsksOf(card).some(ask => ask.from === asker)) await changeTodos($, all => all.map(one => (one.id === card.id ? withKeyAsks(one, keyAsksOf(one).filter(ask => ask.from !== asker)) : one)))
@@ -14568,7 +14864,7 @@ on('tool.call', { tool: 'mcp__claudopus__report' }, async ($, e) => {
 const text = String((e as unknown as { message?: unknown }).message ?? '').trim()
 if (e.agentId === undefined) return { result: `Only a background task hands in a part of its result; the chat tells ${who()} in its reply.` }
 if (!text) return { result: 'A report needs its text, in `message`.' }
-const card = (await read($, todos)).find(one => one.id === e.agentId)
+const card = (await ownCards($)).find(one => one.id === e.agentId)
 if (!card || card.chat || isOff || !dir) return { result: `Not handed in: Claudopus does not follow this task. Put it in your last report instead.` }
 if (card.parentId) return { result: named(PART_FROM_HELPER) }
 if (card.status !== 'working') return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' }
@@ -14589,7 +14885,7 @@ const kind: Entry['kind'] = input.decision ? 'decision' : 'note'
 await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined, questionChoices: asked.length && answers.length ? answers : undefined } : {}) }))
 const task = oneLine(input.task ?? '').slice(0, 400)
 if (!task) return { result: 'Noted.' }
-const list = await read($, todos)
+const list = await ownCards($)
 const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
 const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? ''
 said = words || task
@@ -14615,6 +14911,8 @@ return usageFile
 }
 
 const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
+const USAGE_MORE = 15_000
+const USAGE_MORE_BATTERY = 60_000
 const lookUsage = async ($: EngineInterface) => {
 const now = await $.clock.now()
 const every = usageEvery()
@@ -14633,7 +14931,10 @@ const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.
 const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
 const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= (isOnBattery ? FOOTPRINT_BATTERY_EVERY : FOOTPRINT_EVERY))
 if (isTop) usageTopTriedAt = now
-const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
+const moreAt = base?.raw.slowAt ?? base?.at ?? 0
+const isMore = !moreAt || now < moreAt || now - moreAt >= (isOnBattery ? USAGE_MORE_BATTERY : USAGE_MORE) - 500
+const sys = base ? `${base.raw.memTotal} ${base.raw.ncpu}` : ''
+const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop, isMore, /^[1-9]\d* [1-9]\d*$/.test(sys) ? sys : '')], { timeoutMs: 5000 }).catch(() => undefined)
 const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
 if (!kept) return
 await keepUsage($, kept)
@@ -14642,10 +14943,19 @@ await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
 usageBusy = false
 }
 }
+let usageShown = ''
+const usageSign = (f: UsageFigures) => {
+const meter = (claude: number, used: number) => [meterOf(claude, used, 18), meterOf(claude, used, USAGE_CELLS)]
+return JSON.stringify([gbText(f.memUsed), isMemoryHigh(f), meter(f.memClaude / f.memTotal, f.memUsed / f.memTotal), f.cpu === undefined ? 0 : [pctText(f.cpu), meter(f.cpuClaude ?? 0, f.cpu)], f.gpu === undefined ? 0 : [pctText(f.gpu), meter(f.gpuClaude ?? 0, f.gpu)], f.battery ? batteryShown(f.battery) : 0, f.disk === undefined ? 0 : rateText(f.disk), f.net === undefined ? 0 : rateText(f.net)])
+}
 const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
-const isNew = kept.at !== usageKept?.at
+const was = usageKept
 usageKept = kept
-if (isNew) await update($, figuresAt, () => kept.at)
+if (kept.at === was?.at) return
+const sign = usageSign(kept.figures)
+if (sign === usageShown && was && kept.at - was.at < usageEvery() * 6) return
+usageShown = sign
+await update($, figuresAt, () => kept.at)
 }
 const usageNow = (now: number) => (usageKept && now - usageKept.at < usageEvery() * 6 ? usageKept.figures : undefined)
 const usageHistory = () => ({ points: usageKept?.history ?? [], at: usageKept?.at ?? 0 })
@@ -14892,6 +15202,7 @@ return (h >>> 0).toString(36)
 let pacedAt = 0
 let isPacing = false
 let paceFile = ''
+let paceCores = 0
 const pacePathOf = async ($: EngineInterface) => {
 if (paceFile) return paceFile
 const tmp = ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
@@ -14910,21 +15221,27 @@ return { at: 0, held: 0 }
 const paceWork = async ($: EngineInterface) => {
 if (isLinux || isPacing) return
 const now = await $.clock.now()
-if (now >= pacedAt && now - pacedAt < PACE_EVERY - 500) return
+const every = PACE_EVERY * (isOnBattery ? 2 : 1)
+if (now >= pacedAt && now - pacedAt < every - 500) return
 const path = await pacePathOf($)
 const last = pacedOf(await $.fs.read(path).catch(() => ''))
-const isWorking = (await read($, todos)).some(one => !one.parentId && one.status === 'working')
-if ((!isWorking && !last.held) || (now >= last.at && now - last.at < PACE_EVERY - 500)) return
+const isWorking = (await ownCards($)).some(one => !one.parentId && one.status === 'working')
+if ((!isWorking && !last.held) || (now >= last.at && now - last.at < every - 500)) return
 isPacing = true
 pacedAt = now
 try {
 await $.fs.write(path, JSON.stringify({ ...last, at: now })).catch(() => undefined)
-const looked = await $.process.run(['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
-const look = paceLookOf(looked?.stdout ?? '')
-if (!look.procs.length || !look.cores) return
-const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined, isOnBattery)
+const run = async (script: string) => (await $.process.run(['sh', '-c', script, 'pace', paceCores ? String(paceCores) : ''], { timeoutMs: 5000 }).catch(() => undefined))?.stdout ?? ''
+let text = await run(PACE_LOOK)
+let look = paceLookOf(text)
+paceCores = look.cores || paceCores
+if (!look.procs.length || !paceCores) return
+const isThreads = text.includes('@@THREADS@@') || paceNeedsThreads(look)
+if (isThreads && !text.includes('@@THREADS@@')) look = paceLookOf((text += `\n${await run(PACE_THREADS)}`))
+look.cores = paceCores
+const paced = paceOf(look, isThreads && now - last.at < 30_000 ? last.others : undefined, isOnBattery)
 if (paced.lower.length || paced.lift.length) await $.process.run(['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
-await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, others: paced.others })).catch(() => undefined)
+await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, ...(isThreads ? { others: paced.others } : {}) })).catch(() => undefined)
 if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)
 if (!paced.held && last.held) await log($, "every one of Claude's commands runs at full speed again")
 } finally {
@@ -15141,7 +15458,8 @@ if ((asksForBar(cards).length || boxes.length || barOpen || cards.some(one => on
 }
 if (e.props.hasSurvey) return next(e)
 const bandAt = await $.clock.now()
-const bandKept = await read($, reports)
+await read($, reportsMark)
+const bandKept = await ownReports($)
 const working = cards.filter(one => !one.parentId && (stageOf(cards, one) === 'working' || stageOf(cards, one) === 'waiting'))
 const happy = isHappy(cards, bandAt)
 if (happy) await read($, tick)
@@ -16978,7 +17296,8 @@ if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_
 if (alone && !alone.chat) paneWork.set(paneId, alone.id)
 if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
 const talked = alone ? talks.get(alone.id) : undefined
-const kept = await read($, reports)
+await read($, reportsMark)
+const kept = await ownReports($)
 const ui = uiOf($, e)
 const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
 const notices = looseNeeds($, e.surface, card => Boolean(card && shownIds.has(card)), otherChats, !keysHeldNow()).map(need => ({ at: need.at, what: need.text, sign: `${need.id}:${blockRows(need)}`, node: needBlock($, ui, need, { room, surface: e.surface }) }))
@@ -17223,7 +17542,9 @@ return r
 
 on('ui.render', { component: 'Pane', requestId: REPORTS_PANE }, async ($, e) => {
 const { Box } = uiOf($, e)
-const kept = await read($, reports)
+void reportsLooked($).catch(() => undefined)
+await read($, reportsMark)
+const kept = await ownReports($)
 const line = Math.max(24, Math.floor((e.props.bodyColumns - 8) * (e.surface === 'terminal' ? 1 : 1.25)))
 const now = await $.clock.now()
 const drawn = () => (
@@ -17310,16 +17631,18 @@ return diffView($, uiOf($, e), e.requestId)
 on('ui.render', { component: 'Pane' }, async ($, e, next) => {
 if (!e.requestId?.startsWith('report-')) return next(e)
 const { Box, Text } = uiOf($, e)
-const kept = await read($, reports)
-const r = kept.find(one => paneOf(one) === e.requestId)
-if (!r) return <Text dimColor>This result is no longer available.</Text>
-if (!reportText.has(r.id)) reportText.set(r.id, await readOr($, `${reportPath(r)}/report.md`))
+await read($, reportsMark)
+const kept = await ownReports($)
+const listed = kept.find(one => paneOf(one) === e.requestId)
+if (!listed) return <Text dimColor>This result is no longer available.</Text>
+const text = heldIn(reportText, listed.id, reportText.get(listed.id) ?? (await readOr($, `${reportPath(listed)}/report.md`)), TEXTS_HELD)
+const r = listed.agent ? { ...listed, gist: heldIn(gists, listed.id, gists.get(listed.id) ?? (gistOf(text, listed.title) || listed.gist || ''), TEXTS_HELD) } : listed
 const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
 const file = r.files[at] ?? ''
 const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
 return (
 <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-{reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, reportText.get(r.id) ?? ''), e.surface)}
+{reportShown($, uiOf($, e), r, text || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, text), e.surface)}
 </Box>
 )
 }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

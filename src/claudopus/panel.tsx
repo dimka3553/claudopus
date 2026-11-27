@@ -1942,7 +1942,8 @@ const panelHooks = (on: On) => {
     if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own
-    const kept = await read($, reports)
+    await read($, reportsMark)
+    const kept = await ownReports($)
     const ui = uiOf($, e)
     // A terminal too narrow to dock the panel seats it above the prompt, a few rows tall
     const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'

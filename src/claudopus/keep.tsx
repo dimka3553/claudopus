@@ -38,7 +38,7 @@ let ledgerMade = ''
 const saveLedger = async ($: EngineInterface) => {
   const { id, title } = await read($, me)
   if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
-  const list = await read($, todos)
+  const list = await ownCards($)
   const agents = await agentsFolder($, id)
   const tasks = await Promise.all(ledgerTasks(list).map(async one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${one.chatWas ? await agentsFolder($, one.chatWas) : agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) })))
   const body = { chat: id, title, folder: cwd, pid: enginePid, ...(chatFrom ? { from: chatFrom } : {}), ...(myLink ? { link: myLink } : {}), tasks }
@@ -53,15 +53,23 @@ const saveLedger = async ($: EngineInterface) => {
   ledgerSign = sign
 }
 // One write at a time; a change made while one is written is written after it
+// and at most one every LEDGER_GAP: the list changes at every call of every task, and each save builds the whole ledger to see
+// whether it differs (27 Nov: as costly as the change itself). A change that comes sooner is saved when the gap is over, so a quit
+// or a crash loses at most that long
+const LEDGER_GAP = 2000
 let isLedgerBusy = false
 let isLedgerDue = false
+let ledgerAt = 0
 const saveLedgerSoon = ($: EngineInterface) => {
   if (isLedgerBusy) return void (isLedgerDue = true)
   isLedgerBusy = true
   void (async () => {
     try {
       do {
+        const wait = isTimed ? ledgerAt + LEDGER_GAP - Date.now() : 0
+        if (wait > 0) await new Promise<void>(done => void $.clock.after(wait, done))
         isLedgerDue = false
+        ledgerAt = Date.now()
         await saveLedger($).catch(err => log($, `ledger not written: ${String(err)}`))
       } while (isLedgerDue)
     } finally {
@@ -288,7 +296,7 @@ const CARRY_PROMPT = (path: string) => `Carry on a task the Claude app's close c
 // The person's press on Carry on, or their answer to what a cut-off task asked: the chat starts a fresh task told everything the
 // ledger holds of it. Its card goes under Finished once the fresh task starts, which takes its place, its to-dos and its notes
 const carryOn = async ($: EngineInterface, id: string, answer = '') => {
-  const list = await read($, todos)
+  const list = await ownCards($)
   const one = list.find(card => card.id === topOf(list, id))
   const { id: chat } = await read($, me)
   if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat)) return

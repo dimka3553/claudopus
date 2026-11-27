@@ -15,7 +15,7 @@ const readAreas = async ($: EngineInterface): Promise<ProgressArea[]> => areasFr
 const readEntries = async ($: EngineInterface, areaId: string): Promise<ProgressEntry[]> => (isAreaId(areaId) ? entriesFrom(await readOr($, `${progressDir()}/areas/${areaId}.json`)) : [])
 // The areas a task at work now is sorted into: drawn as being built
 const areasBeingBuilt = async ($: EngineInterface) => {
-  const working = new Set((await read($, todos)).filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id))
+  const working = new Set((await ownCards($)).filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id))
   const found = new Set<string>()
   if (!working.size) return found
   for (const area of await readAreas($)) if ((await readEntries($, area.id)).some(entry => entry.task && working.has(entry.task))) found.add(area.id)

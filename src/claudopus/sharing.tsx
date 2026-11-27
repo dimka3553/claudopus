@@ -46,7 +46,7 @@ const shareMine = async ($: EngineInterface) => {
     linkReadAt = now
     myLink = await readLink($, id).catch(() => myLink)
   }
-  const list = await read($, todos)
+  const list = await ownCards($)
   // Each card and helper carries how its jobs stand, as this chat reads them, so another chat's Details shows them as this one does
   const withSeen = (one: Todo): Todo => {
     const seen = Object.fromEntries(
@@ -121,6 +121,8 @@ const isWhole = (text: string) => {
     return false
   }
 }
+const LIVE_OLD = 2 * 86_400_000
+let isLiveTidied = false
 const readOthers = async ($: EngineInterface) => {
   const { id } = await read($, me)
   if (!id || !dir) return
@@ -158,6 +160,11 @@ const readOthers = async ($: EngineInterface) => {
   const here = new Set<string>([id])
   const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${id}.json`)
   for (const name of [...liveRead.keys()]) if (!listed.some(entry => entry.name === name)) liveRead.delete(name)
+  // The files of chats long gone are taken away, once a load: a chat still open writes its file every BEAT, and 210 of the 256
+  // files listed at every look on 27 Nov were eleven days old
+  const gone = isLiveTidied ? [] : listed.filter(entry => entry.mtimeMs && now - entry.mtimeMs > LIVE_OLD).slice(0, 500)
+  isLiveTidied = true
+  if (gone.length) void $.process.run(['rm', '-f', ...gone.map(entry => `${liveDir()}/${entry.name}`)]).catch(() => undefined)
   for (const entry of listed) {
     // A file not written for longer than STALE is a chat gone silent: not read at all
     if (entry.mtimeMs && now - entry.mtimeMs > STALE) continue
@@ -231,24 +238,28 @@ const readOthers = async ($: EngineInterface) => {
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
-  const was = await read($, others)
+  const was = othersKept ?? (await read($, others))
   if (JSON.stringify(next) === JSON.stringify(was)) {
     othersHeld = undefined
     if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
   } else if (calmOthers(next) !== calmOthers(was) || next.some(s => now - (was.find(w => w.host === s.host && w.chat === s.chat)?.at ?? 0) > STALE / 2)) {
     othersHeld = undefined
-    await update($, others, () => next)
+    othersKept = await update($, others, () => next)
   } else othersHeld = next
 }
 // Other chats' work as the panel shows it, but for what moves by itself as it runs (their beats, times, tokens and output): a change
 // in only that is not written at once, as each write draws the panel afresh under the pointer. It is held here and written with the
 // panel's running times (calmLook), and at the latest once a chat's beat is half way to being taken for gone
 let othersHeld: Shared[] | undefined
+// The list as this copy last wrote it, which only it writes: read from the engine it is copied whole between Claude's two threads
+// (ownCards), and the look each second read it several times
+let othersKept: Shared[] | undefined
+const ownOthers = async ($: EngineInterface) => othersKept ?? (await read($, others))
 const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
 const writeHeldOthers = async ($: EngineInterface) => {
   const held = othersHeld
   othersHeld = undefined
-  if (held) await update($, others, () => held)
+  if (held) othersKept = await update($, others, () => held)
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
@@ -359,7 +370,7 @@ const openTaken = async ($: EngineInterface, chat: string, mac: string) => {
     const session = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) ?? ''
     return DESKTOP_SESSION.test(session) ? openHere($, { chat, host: '' }, `claude://code/continue?session=${session}`) : log($, `chat ${chat} pressed on ${mac}: not in the Claude app here`)
   }
-  const c = (await read($, others)).find(one => one.chat === chat)
+  const c = (await ownOthers($)).find(one => one.chat === chat)
   // A chat of this Mac with nothing going on now still opens by the link its own file shares
   let mine: Link | undefined
   try {

@@ -28,7 +28,7 @@ const standing = (stage: string, endedAt: number) => (stage === 'working' || sta
 const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
   // (each by its stage: one that waits for the person has not ended, and is announced once it has)
-  const list = await read($, todos)
+  const list = await ownCards($)
   const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
@@ -101,7 +101,7 @@ const announce = async ($: EngineInterface) => {
   } catch {
     // A config.json being edited leaves both on
   }
-  const cards = await read($, todos)
+  const cards = await ownCards($)
   const runs = await read($, flows)
   const items = ids.map(one => readyOf(one, cards, runs)).filter(one => one !== undefined)
   if (!items.length) return
@@ -257,7 +257,7 @@ const ASK_NAMED_MOST = REMIND_AT.at(-1)!
 let cardsSent = ''
 const cardsNow = async ($: EngineInterface) => {
   const now = await $.clock.now()
-  const list = (await read($, todos)).filter(one => {
+  const list = (await ownCards($)).filter(one => {
     const waits = one.parentId ? undefined : waitingOnPerson(one)
     return !one.parentId && (one.status === 'working' ? true : waits ? now - waits.at < ASK_NAMED_MOST : now - one.endedAt < 30 * 60_000)
   }).slice(-12)

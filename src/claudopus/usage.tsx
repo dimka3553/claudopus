@@ -21,6 +21,9 @@ const usagePathOf = async ($: EngineInterface) => {
 // small file beside it, so chats that fall due together look once
 // How often it looks: less often on battery, as the look itself costs the processor
 const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
+// How often a look is whole: the others leave out what only the figures' cards show or what moves slowly (usageMac)
+const USAGE_MORE = 15_000
+const USAGE_MORE_BATTERY = 60_000
 const lookUsage = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const every = usageEvery()
@@ -40,7 +43,10 @@ const lookUsage = async ($: EngineInterface) => {
     const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
     const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= (isOnBattery ? FOOTPRINT_BATTERY_EVERY : FOOTPRINT_EVERY))
     if (isTop) usageTopTriedAt = now
-    const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
+    const moreAt = base?.raw.slowAt ?? base?.at ?? 0
+    const isMore = !moreAt || now < moreAt || now - moreAt >= (isOnBattery ? USAGE_MORE_BATTERY : USAGE_MORE) - 500
+    const sys = base ? `${base.raw.memTotal} ${base.raw.ncpu}` : ''
+    const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop, isMore, /^[1-9]\d* [1-9]\d*$/.test(sys) ? sys : '')], { timeoutMs: 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
     if (!kept) return
     await keepUsage($, kept)
@@ -49,11 +55,21 @@ const lookUsage = async ($: EngineInterface) => {
     usageBusy = false
   }
 }
-// New figures are kept, and the band that shows them redraws
+// New figures are kept, and the band that shows them redraws only when its line would read or draw differently (the figures as
+// it rounds them, the meters as it draws them), or after a pause in the looks, when it had let its figures go
+let usageShown = ''
+const usageSign = (f: UsageFigures) => {
+  const meter = (claude: number, used: number) => [meterOf(claude, used, 18), meterOf(claude, used, USAGE_CELLS)]
+  return JSON.stringify([gbText(f.memUsed), isMemoryHigh(f), meter(f.memClaude / f.memTotal, f.memUsed / f.memTotal), f.cpu === undefined ? 0 : [pctText(f.cpu), meter(f.cpuClaude ?? 0, f.cpu)], f.gpu === undefined ? 0 : [pctText(f.gpu), meter(f.gpuClaude ?? 0, f.gpu)], f.battery ? batteryShown(f.battery) : 0, f.disk === undefined ? 0 : rateText(f.disk), f.net === undefined ? 0 : rateText(f.net)])
+}
 const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
-  const isNew = kept.at !== usageKept?.at
+  const was = usageKept
   usageKept = kept
-  if (isNew) await update($, figuresAt, () => kept.at)
+  if (kept.at === was?.at) return
+  const sign = usageSign(kept.figures)
+  if (sign === usageShown && was && kept.at - was.at < usageEvery() * 6) return
+  usageShown = sign
+  await update($, figuresAt, () => kept.at)
 }
 // The figures to show, when a look has been had lately
 const usageNow = (now: number) => (usageKept && now - usageKept.at < usageEvery() * 6 ? usageKept.figures : undefined)

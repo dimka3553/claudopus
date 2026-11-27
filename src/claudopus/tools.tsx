@@ -55,7 +55,7 @@ const toolHooks = (on: On) => {
     if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
     const page = pageOf(saved.name)
     if (added) {
-      const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId)
+      const card = e.agentId === undefined ? undefined : (await ownCards($)).find(one => one.id === e.agentId)
       await addHistory($, saved.name, historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
     }
     if (brief && !isLong) await writePage($, saved.name, hideKeys(brief))
@@ -96,7 +96,7 @@ const toolHooks = (on: On) => {
     }
     const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
     // A result the person put away is still found, marked, so it is answered from only when they name it
-    const archived = new Set((await loadReports($, true).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
+    const archived = new Set((await reportsNow($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
     const seen = new Set<string>()
     const perFile = new Map<string, number>()
     const lines = found
@@ -169,7 +169,7 @@ const toolHooks = (on: On) => {
       const keyAt = await $.clock.now()
       // (beside the task's other questions for keys: the same key asked again takes the place of its earlier question)
       await change($, e.agentId, one => withKeyAsks(one, [...keyAsksOf(one).filter(other => other.name !== keyName), { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt }]))
-      const cards = await read($, todos)
+      const cards = await ownCards($)
       const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
       if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
@@ -198,7 +198,7 @@ const toolHooks = (on: On) => {
     const pictures: string[] = []
     for (const path of givenPics) if (path.startsWith('/') && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
     const at = await $.clock.now()
-    const before = await read($, todos)
+    const before = await ownCards($)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
     // A question with buttons is one picture, made once, when the person wants it and the task gave none: the question said again
     // keeps the picture it had. One that can't be made leaves the question as text
@@ -243,7 +243,7 @@ const toolHooks = (on: On) => {
       const kept = asksOf(one).filter(ask => !ask.isResult && !(isOwnAsk(one, ask) && (ask.text === text || (ask.replied && !ask.refused))))
       return withAsks(one, [...kept, { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: asker, ...(pictures.length ? { pictures } : {}), at }])
     })
-    const list = await read($, todos)
+    const list = await ownCards($)
     const card = list.find(one => one.id === topOf(list, asker))
     if (!text) {
       if (card && keyAsksOf(card).some(ask => ask.from === asker)) await changeTodos($, all => all.map(one => (one.id === card.id ? withKeyAsks(one, keyAsksOf(one).filter(ask => ask.from !== asker)) : one)))
@@ -284,7 +284,7 @@ const toolHooks = (on: On) => {
     const text = String((e as unknown as { message?: unknown }).message ?? '').trim()
     if (e.agentId === undefined) return { result: `Only a background task hands in a part of its result; the chat tells ${who()} in its reply.` }
     if (!text) return { result: 'A report needs its text, in `message`.' }
-    const card = (await read($, todos)).find(one => one.id === e.agentId)
+    const card = (await ownCards($)).find(one => one.id === e.agentId)
     if (!card || card.chat || isOff || !dir) return { result: `Not handed in: Claudopus does not follow this task. Put it in your last report instead.` }
     if (card.parentId) return { result: named(PART_FROM_HELPER) }
     if (card.status !== 'working') return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' }
@@ -311,7 +311,7 @@ const toolHooks = (on: On) => {
     // A session cannot send to itself, so the mod cannot send it for the work
     const task = oneLine(input.task ?? '').slice(0, 400)
     if (!task) return { result: 'Noted.' }
-    const list = await read($, todos)
+    const list = await ownCards($)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? ''
     said = words || task

@@ -249,6 +249,8 @@ const PICS_HELD = 60
 let isThumbsCleared = false
 // Each Details tab's pictures by step number, as last looked for, by the work
 const shots = new Map<string, { key: string; shots: Map<number, Pic[]> }>()
+// The conversations and pictures of the TALKS_HELD tasks read last are kept: an older one is read again when its tab is next drawn
+const TALKS_HELD = 20
 // One picture as the chat shows it: where it is now (the copy a report kept, once the temporary file is gone) and its small copy.
 // Nothing for a file a command only named that was there before the work began
 const picOf = async ($: EngineInterface, given: string, one: Todo, isSeen: boolean, kept: Report[], isDrawn: boolean): Promise<Pic | null> => {
@@ -323,6 +325,9 @@ const picturesIn = async ($: EngineInterface, lines: Line[], one: Todo, kept: Re
 const loading = new Set<string>()
 // A chat the app would not give is asked for again after this long, at the tab's next drawing, never sooner
 const RETRY_READ = 15_000
+const TALK_GAP = 2_000
+const TALK_LONG = 200
+const talkWaits = new Set<string>()
 const loadWork = async ($: EngineInterface, id: string) => {
   if (loading.has(id)) return
   loading.add(id)
@@ -331,26 +336,30 @@ const loadWork = async ($: EngineInterface, id: string) => {
     const one = (await read($, todos)).find(card => card.id === id)
     if (!one) return
     const mark = talkMarks.get(id) ?? 0
-    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':')
-    const kept = await read($, reports)
+    const key = [one.id, one.steps, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':')
+    const kept = await ownReports($)
     const shotsKey = `${key}:${kept.length}`
     const now = await $.clock.now()
     const was = talks.get(id)
-    if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
+    // A long conversation of a task at work is read at most once in TALK_GAP: what changed sooner is read when that is over
+    const wait = was?.key !== key && one.status === 'working' && (was?.lines?.length ?? 0) > TALK_LONG ? (was?.at ?? 0) + TALK_GAP - now : 0
+    if (wait > 0 && wait <= TALK_GAP) {
+      if (!talkWaits.has(id)) (talkWaits.add(id), $.clock.after(wait, () => (talkWaits.delete(id), void loadWork($, id).catch(() => undefined))))
+    } else if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
       during('read a task for its Details')
       const rows = await $.session.messages({ agentId: id }).catch(() => undefined)
-      talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+      heldIn(talks, id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now }, TALKS_HELD)
       if (Array.isArray(rows)) liveCaughtUp(id, mark, now)
       isChanged = true
     }
     const lines = talks.get(id)?.lines
-    if (lines && shots.get(id)?.key !== shotsKey) {
-      shots.set(id, { key: shotsKey, shots: await picturesIn($, lines, one, kept, true).catch(() => new Map<number, Pic[]>()) })
+    if (lines && !(wait > 0 && wait <= TALK_GAP) && shots.get(id)?.key !== shotsKey) {
+      heldIn(shots, id, { key: shotsKey, shots: await picturesIn($, lines, one, kept, true).catch(() => new Map<number, Pic[]>()) }, TALKS_HELD)
       isChanged = true
     }
   } catch (err) {
     // Whatever went wrong, the tab stops saying it is reading, and says the chat is not to be had
-    if (!talks.has(id)) talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) })
+    if (!talks.has(id)) heldIn(talks, id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) }, TALKS_HELD)
     isChanged = true
     await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined)
   } finally {
@@ -422,10 +431,10 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
       .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
       .catch(() => undefined)
     const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
-    talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+    heldIn(talks, id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now }, TALKS_HELD)
     isChanged = true
   } catch (err) {
-    if (!talks.has(id)) talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) })
+    if (!talks.has(id)) heldIn(talks, id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) }, TALKS_HELD)
     isChanged = true
     await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined)
   } finally {

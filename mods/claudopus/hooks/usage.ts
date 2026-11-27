@@ -15,10 +15,13 @@ const USAGE_GAP = 120_000
 // Memory past this part of the whole turns amber
 export const MEMORY_WARN = 0.9
 
+// (a lean look, isMore false, leaves out what only the figures' cards show or what moves slowly, each a process or several: the
+// battery and the power, each process's network, disk and energy; nextKept keeps those from the last look that had them. `sys` is
+// the memory and the cores as an earlier look told them, which never change, in place of asking again)
 // One look on a Mac: the engine's own process, every process with its parent, memory and processor time, the memory as Activity
 // Monitor counts it, the disks' and the network's running totals, and now and then top's own memory of each process
-export const usageMac = (isTop: boolean) =>
-  `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@LOAD@@; sysctl -n vm.loadavg; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"(SystemLoad|SystemPowerIn|Voltage|InstantAmperage|Watts)" ?= ?[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
+export const usageMac = (isTop: boolean, isMore = true, sys = '') =>
+  `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; ${sys ? `echo ${sys}` : 'sysctl -n hw.memsize hw.ncpu'}; echo @@LOAD@@; sysctl -n vm.loadavg; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'${isMore ? `; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"(SystemLoad|SystemPowerIn|Voltage|InstantAmperage|Watts)" ?= ?[0-9]+'` : ''}; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'${isMore ? `; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}` : '; echo @@LEAN@@'}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
 // Each process's disk bytes read and written and the energy its processors used (nanojoules), as the Mac keeps them for Activity
 // Monitor: libproc's proc_pid_rusage, through the system's Python, and only where the developer tools are there, as without them
 // /usr/bin/python3 asks to install them. A process of another user gives nothing. Then the whole processors' and the graphics
@@ -42,7 +45,7 @@ export type UsageProc = { pid: string; ppid: string; pgid?: string; cpu: number;
 export type UsageBattery = { pct: number; state: 'battery' | 'charging' | 'plugged' | 'unknown'; left?: number; finishing?: true }
 // The programs that use the most, by name, for the detail a pointer on a figure shows: [name, bytes] or [name, part of the processor]
 export type UsageTop = [string, number][]
-export type UsageRaw = { load?: number; loadCores?: number; energyAll?: true; cpuNj?: number; gpuNj?: number; gpuNs?: Record<string, number>; netInBy?: Record<string, number>; netOutBy?: Record<string, number>; diskBy?: Record<string, number>; energyBy?: Record<string, number>; watts?: number; battIn?: number; powerIn?: number; adapter?: number; names?: Record<string, string>; memTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; gpu?: number; battery?: UsageBattery; at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: Record<string, number>; net: Record<string, number>; busy?: number; all?: number }
+export type UsageRaw = { slowAt?: number; load?: number; loadCores?: number; energyAll?: true; cpuNj?: number; gpuNj?: number; gpuNs?: Record<string, number>; netInBy?: Record<string, number>; netOutBy?: Record<string, number>; diskBy?: Record<string, number>; energyBy?: Record<string, number>; watts?: number; battIn?: number; powerIn?: number; adapter?: number; names?: Record<string, string>; memTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; gpu?: number; battery?: UsageBattery; at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: Record<string, number>; net: Record<string, number>; busy?: number; all?: number }
 // What the line shows: bytes, parts of the whole processor (0 to 1), bytes a second
 export type UsageFigures = { load?: number; loadCores?: number; gpuTop?: UsageTop; wattsCpu?: number; wattsGpu?: number; wattsGpuClaude?: number; gpuClaude?: number; diskClaude?: number; netInClaude?: number; netOutClaude?: number; wattsClaude?: number; watts?: number; battIn?: number; powerIn?: number; adapter?: number; memTop?: UsageTop; cpuTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; disks?: string[]; ports?: string[]; ncpu?: number; gpu?: number; battery?: UsageBattery; memUsed: number; memTotal: number; memClaude: number; cpu?: number; cpuClaude?: number; disk?: number; net?: number }
 // What is kept between looks, in the shared file: the last look, its figures, top's memory of each process when last had, and when
@@ -454,15 +457,31 @@ const claudeShareOf = (prev: UsageRaw, cur: UsageRaw, span: number): Partial<Usa
   return out
 }
 
+// What a lean look leaves out: read as it stands, running totals, and the figures made from those totals
+const SLOW_NOW = ['battery', 'watts', 'battIn', 'powerIn', 'adapter'] as const
+const SLOW_SUMS = ['netInBy', 'netOutBy', 'diskBy', 'energyBy', 'cpuNj', 'gpuNj'] as const
+const SLOW_FIGURES = ['diskClaude', 'netInClaude', 'netOutClaude', 'wattsClaude', 'wattsCpu', 'wattsGpu', 'wattsGpuClaude'] as const
+const only = <T extends object>(from: T, keys: readonly (keyof T)[]) => Object.fromEntries(keys.flatMap(key => (from[key] !== undefined ? [[key, from[key]]] : []))) as Partial<T>
 // The next kept state from a look: top's memory kept until the next top is due, on battery too, the figures against the look before
 export const nextKept = (was: UsageKept | undefined, text: string, at: number, isLinux: boolean, isTop = false): UsageKept | undefined => {
-  const top = isLinux ? {} : footprintOf(sectionsOf(text).TOP ?? '')
+  const s = sectionsOf(text)
+  const top = isLinux ? {} : footprintOf(s.TOP ?? '')
   const footprint = Object.keys(top).length ? { at, byPid: top } : was?.footprint && at - was.footprint.at < FOOTPRINT_BATTERY_EVERY + FOOTPRINT_EVERY ? was.footprint : undefined
   const raw = isLinux ? rawOfLinux(text, at) : rawOfMac(text, at, footprint?.byPid)
   if (!raw) return undefined
   const topAt = isTop ? at : was?.topAt
+  // A lean look keeps what it left out from the look that last had it (slowAt); the next whole one counts those against that look
+  const old = was?.raw
+  const isLean = !isLinux && s.LEAN !== undefined
+  if (isLean && old) Object.assign(raw, only(old, SLOW_NOW))
+  const figures = figuresOf(old, raw)
+  if (isLean && old) (Object.assign(figures, only(was?.figures ?? figures, SLOW_FIGURES)), Object.assign(raw, only(old, SLOW_SUMS), { slowAt: old.slowAt ?? old.at }))
+  else if (old?.slowAt && old.slowAt < old.at) {
+    for (const key of SLOW_FIGURES) delete figures[key]
+    const span = (at - old.slowAt) / 1000
+    if (figures.cpu !== undefined && span * 1000 <= USAGE_GAP) Object.assign(figures, only(claudeShareOf({ ...old, at: old.slowAt }, raw, span), SLOW_FIGURES))
+  }
   const { names: _names, ...kept } = raw
-  const figures = figuresOf(was?.raw, raw)
   // The figures of the last minutes, this look's added: the charts need no look of their own
   const history = [...(was?.history ?? []).filter(p => p.at < at && at - p.at <= HISTORY_SPAN), pointOf(figures, at)]
   return { at, raw: kept, figures, ...(footprint ? { footprint } : {}), ...(topAt !== undefined ? { topAt } : {}), history }

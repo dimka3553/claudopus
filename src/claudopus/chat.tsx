@@ -86,10 +86,10 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   // engine no longer lists it as running
   const look = async () => lookOver($, await $.agent.list().catch(() => []), await $.clock.now(), id)
   if (how === 'done') await look().catch(err => log($, `work ${id} not looked at as its turn ended: ${String(err)}`))
-  if (how === 'done' && (await read($, todos)).find(one => one.id === id)?.status === 'working') $.clock.after(HELD_LOOK, () => void look().catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
+  if (how === 'done' && (await ownCards($)).find(one => one.id === id)?.status === 'working') $.clock.after(HELD_LOOK, () => void look().catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
   await lookEnds($)
   // A reply it never read goes to the chat; work still at work reads it at its next step
-  if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+  if ((await ownCards($)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
   if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
   await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
   return done
@@ -154,6 +154,9 @@ const chatHooks = (on: On) => {
     await knowSystem($).catch(() => undefined)
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
     lastSeen = undefined
+    // and reads the list of work from the engine again
+    cardsKept = undefined
+    othersKept = undefined
     // and reads its own copy's version again
     loadedVersion = undefined
     // and takes nothing it knew of the person's settings and texts as sealed: the kept copy is checked again
@@ -169,7 +172,10 @@ const chatHooks = (on: On) => {
     const timing = (await $.env.get('CLAUDOPUS_TIMING')) ?? ''
     isTimed = !/^test\b/.test(timing)
     isDrawTimed = timing !== 'test'
-    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
+    // (a timer of its own, which asks the engine nothing: it stops once another of this load's timers has found the load replaced)
+    if (isTimed) {
+      const hold = $.clock.every(HOLD_LOOK, () => (isLeft ? hold.cancel() : lookHold($)))
+    }
     // The mod's own kinds of agent, each starting with only the tools its work takes
     void registerKinds($)
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
@@ -222,7 +228,7 @@ const chatHooks = (on: On) => {
     // A result kept from before that still lists what it asks is that question on its card, as one handed in now
     // and one at work again that still shows it has had its answer
     const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)
-    if ((await read($, todos)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
+    if ((await ownCards($)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
     during('load: read the other chats')
@@ -340,7 +346,7 @@ const chatHooks = (on: On) => {
     // Work that is running when the chat loads brings the panel up, if it has never opened
     // and comes back after a reload of the mod (which closes it) if it was open or work is running
     // Once the person has opened or closed the panel, every chat follows that choice instead, as it loads and every PANEL_EVERY
-    const isRunning = (await read($, todos)).some(one => !one.parentId && one.status === 'working')
+    const isRunning = (await ownCards($)).some(one => !one.parentId && one.status === 'working')
     panelSeen = ''
     const choice = await followPanel($).catch(() => undefined)
     if (!choice && (isRunning || isWelcomeOpen)) await openList($)
@@ -361,7 +367,7 @@ const chatHooks = (on: On) => {
       // Only work that ended after the panel was last drawn: what it already showed ended is not shown again
       const last = await read($, lastDrawn)
       lateFrom.clear()
-      for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
+      for (const one of [...(await read($, flows)), ...(await ownCards($)).filter(card => !card.parentId)])
         if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
     let seconds = 0
@@ -389,18 +395,18 @@ const chatHooks = (on: On) => {
       // A pane held while only its running times moved is drawn again once CALM is over (heldDrawings)
       const calmNow = await $.clock.now()
       // (a command run on the person's press too, whose running time its card shows after its task has ended)
-      const isMoving = isFlowing || runList.some(run => Boolean(run.startedAt && !run.endedAt)) || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.some(card => card.status === 'working'))
+      const isMoving = isFlowing || runList.some(run => Boolean(run.startedAt && !run.endedAt)) || (await ownCards($)).some(one => !one.parentId && one.status === 'working') || (await ownOthers($)).some(c => c.cards.some(card => card.status === 'working'))
       // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
       // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)
       if (!isBehind()) await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
-      if (!isBehind() && (await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
+      if (!isBehind() && (await ownCards($)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // and Claude's commands take their turn on the processor, so the person keeps cores of their own (pace.tsx)
       void paceWork($).catch(err => log($, `commands not paced: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
-      for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
+      for (const one of [...(await read($, flows)), ...(await ownCards($))].filter(card => isLingering(card, now))) {
         const key = `${one.id}:${one.endedAt}`
         if (lingerSet.has(key)) continue
         lingerSet.add(key)
@@ -485,7 +491,7 @@ const chatHooks = (on: On) => {
       const reports = [...(await partsFor($)), ...(await reportsFor($, ids))]
       if (reports.length) e = { ...e, context: [...(e.context ?? []), ...reports] }
       // A task that paused is still working: Claude Code's notice that it ended its step without a report is nothing new
-      const cards = await read($, todos)
+      const cards = await ownCards($)
       // (nor is such a notice of a helper: its result goes to its task, taken at its hand-back, and is never the chat's)
       const atWork = new Set(cards.filter(one => !one.chat && (one.parentId ? one.parentId !== HELPER || one.tookReport : one.status === 'working')).map(one => one.id))
       const quiet = quietNotices(e.text, atWork, new Set(cards.filter(one => one.reportGiven && !reports.length).map(one => one.id)))
@@ -524,8 +530,8 @@ const chatHooks = (on: On) => {
     // A report Claudopus took whose notice never came goes with their message, so it is never left unsaid
     const context = [...(e.context ?? []), ...(await partsFor($)), ...(await reportsFor($))]
     // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
-    const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
-    if ((await read($, todos)).some(isHeld)) {
+    const stillHeld = (await ownCards($)).filter(one => isHeld(one) && !one.parentId)
+    if ((await ownCards($)).some(isHeld)) {
       await changeTodos($, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
       if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
     }
@@ -554,7 +560,7 @@ const chatHooks = (on: On) => {
         context.push(`${role}\n${WORDS_LINE(m.id)}\n${PROGRESS_LINE()}\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${await topicsGiven($)}`)
       } else changed = listChanges(index, areas, await read($, listSeen))
       if (!m.isChat || m.needsContext || changed) await update($, listSeen, () => listKeys(index, areas))
-      const told = reportsTold(await read($, reports), await $.clock.now())
+      const told = reportsTold(await ownReports($), await $.clock.now())
       context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}\nProgress: ${progressDir()}${changed ? `\nChanged since you were given the topic list: ${changed}` : ''}`)
       await update($, me, one => ({ ...one, isChat: true, needsContext: false }))
 
@@ -573,7 +579,7 @@ const chatHooks = (on: On) => {
     // and for the quote over a reply about a task: which task each message went to (colours.tsx)
     heardSaid(e.text)
     // A message that names a report starts work from it: that work's own report is kept linked to it
-    fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
+    fromReport = (await ownReports($)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
     // and on their own, without Claude's replies, so a task reads what they said whole (a paste as its start and where it is)

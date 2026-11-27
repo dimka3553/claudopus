@@ -342,7 +342,9 @@ declare global {
   export import PACE_EVERY = M13.PACE_EVERY
   export import PACE_LOOK = M13.PACE_LOOK
   export import PACE_SET = M13.PACE_SET
+  export import PACE_THREADS = M13.PACE_THREADS
   export import paceLookOf = M13.paceLookOf
+  export import paceNeedsThreads = M13.paceNeedsThreads
   export import paceOf = M13.paceOf
   export import daysOf = M14.daysOf
   export import fewerProgress = M14.fewerProgress

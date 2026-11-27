@@ -276,7 +276,9 @@ const bandHooks = (on: On) => {
     }
     if (e.props.hasSurvey) return next(e)
     const bandAt = await $.clock.now()
-    const bandKept = await read($, reports)
+    // (the mark is what draws it again when the results change: the list itself is megabytes, read from memory)
+    await read($, reportsMark)
+    const bandKept = await ownReports($)
     // (each card by its stage: at work from its start until its result, waiting only while something of its own waits for the person)
     const working = cards.filter(one => !one.parentId && (stageOf(cards, one) === 'working' || stageOf(cards, one) === 'waiting'))
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;

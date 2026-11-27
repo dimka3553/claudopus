@@ -6,6 +6,9 @@
 // What each job wrote last, by its task id: its latest line and when its output last changed
 type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; live?: 'busy' | 'idle'; port?: string; wroteAt?: number }
 const jobLog = new Map<string, Seen>()
+// Each output as last read, by its job: its size and time then, when it last changed (as the shell told it) and its end. One that
+// has not moved since is not read again, and starts no process
+const jobRead = new Map<string, { sign: string; m: string; text: string }>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
 let jobsLookedAt = 0
@@ -64,10 +67,11 @@ const lookJobs = async ($: EngineInterface) => {
   const now = await $.clock.now()
   if (now - jobsLookedAt < JOB_LOOK) return
   jobsLookedAt = now
-  const list = await read($, todos)
+  const list = await ownCards($)
   // A watch's output is its events, read as any other
   const owned = list.flatMap(one => (one.chat ? [] : (one.bg ?? []).map(b => ({ owner: one.id, id: b.id }))))
   for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+  for (const id of jobRead.keys()) if (!owned.some(o => o.id === id)) jobRead.delete(id)
   for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
   if (!owned.length) return
   const sid = await $.session.id().catch(() => '')
@@ -94,16 +98,26 @@ const lookJobs = async ($: EngineInterface) => {
     // (stat as this system has it: a Mac tried Linux's form first, a failed process for each output every few seconds)
     const mtime = isLinux ? 'm=$(stat -c %Y "$f" 2>/dev/null || echo 0)' : 'm=$(stat -f %m "$f" 2>/dev/null || echo 0)'
     const script = `for f; do ${mtime}; printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done`
-    const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
+    // Only the outputs that moved since they were last read (by size and time, asked of the file system, no process), or whose
+    // size and time it does not tell
+    const signs = await Promise.all(files.map(file => $.fs.stat(file).then(st => (st.mtimeMs ? `${st.size}:${st.mtimeMs}` : ''), () => '')))
+    const moving = asked.flatMap((o, n) => (signs[n] && jobRead.get(o.id)?.sign === signs[n] ? [] : [n]))
+    const r = moving.length ? await $.process.run(['sh', '-c', script, 'sh', ...moving.map(n => files[n] ?? '')], { timeoutMs: 5000 }).catch(() => undefined) : { stdout: '' }
     if (!r) return
     const parts = r.stdout.split(/\n@@JOB@@ ([^\n]*)\n/)
+    // The outputs come back in the order they were asked for, each after when it last changed
     for (let n = 1; n + 1 < parts.length; n += 2) {
-      // The outputs come back in the order they were asked for, each after when it last changed
-      const job = asked[(n - 1) / 2]
-      const id = job?.id ?? ''
-      const text = parts[n + 1] ?? ''
+      const at = moving[(n - 1) / 2] ?? -1
+      const id = asked[at]?.id
+      if (id) jobRead.set(id, { sign: signs[at] ?? '', m: parts[n] ?? '', text: parts[n + 1] ?? '' })
+    }
+    for (const job of asked) {
+      const id = job.id
+      const read = jobRead.get(id)
+      if (!read) continue
+      const text = read.text
       texts[id] = text
-      const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
+      const m = Number(read.m.split(' ')[0] ?? 0) * 1000
       // One that ended, by the engine's last line on its output, and when: as that output last changed
       const end = runEndOf(text)
       // (one that failed with why, read from the end of what it wrote)
@@ -158,12 +172,12 @@ const lookJobs = async ($: EngineInterface) => {
   // A background command that has ended, by the engine's last line on its output, leaves its card
   if (ended.length) {
     await dropBackground($, ended, endedAs)
-    for (const id of ended) jobLog.delete(id)
+    for (const id of ended) (jobLog.delete(id), jobRead.delete(id))
     isChanged = true
   }
   // (not waited for: a work's chat may take its time to take a line, and the look goes on meanwhile)
   void tellSilent($, list, now).catch(err => log($, `silent runs not told: ${String(err)}`))
-  void endWatchers($, await read($, todos), now).catch(err => log($, `watchers not stopped: ${String(err)}`))
+  void endWatchers($, await ownCards($), now).catch(err => log($, `watchers not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   // A command that ended leaves its row at once; new output alone waits for the panel's next calm drawing (calmLook, every CALM while
@@ -240,7 +254,7 @@ const endWatchers = async ($: EngineInterface, list: Todo[], now: number) => {
 // (`said`: what the work is told instead of the person's stop, nothing when empty)
 const stopping = async ($: EngineInterface, owner: string, job: Job, said?: string) => {
   const now = await $.clock.now()
-  const card = (await read($, todos)).find(one => one.id === owner)
+  const card = (await ownCards($)).find(one => one.id === owner)
   const bg = card?.bg?.find(b => b.id === job.id)
   if (!bg) return void (await log($, `run ${job.id} of work ${owner} could not be stopped: its card no longer has it`))
   const r = await $.tool.call({ tool: 'TaskStop', task_id: bg.id }).catch(err => ({ deny: String(err) }))
@@ -328,7 +342,7 @@ const openLog = ($: EngineInterface, id: string, label: string) => {
 }
 // The command a log tab is of, running or ended, with its task and the file it writes to
 const logOf = async ($: EngineInterface, paneId: string) => {
-  for (const one of await read($, todos)) {
+  for (const one of await ownCards($)) {
     const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
     if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id], b.named), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
     const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)

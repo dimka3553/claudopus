@@ -278,7 +278,7 @@ export const tripOf = (text: string): { text: string; carried: Carried[] } => {
 // ---- A press on a chat's name in a chat another Mac's Claude app runs here over SSH: that app, and the screen the person looks
 // at, are on the other Mac, so the press is left in live/outbox/<that Mac>/ as o-<time>-<id>.json, which that Mac takes within
 // OPEN_EVERY and opens there with what its own app holds. One pressed more than OPEN_KEPT before it is taken is dropped, not opened late ----
-export const OPEN_EVERY = 2_000
+export const OPEN_EVERY = 5_000
 export const OPEN_KEPT = 30_000
 export const OPEN_MARK = '---claudopus-open---'
 // The command that takes them there, run by sh: its clock in seconds, then each press, every file moved aside before it is read so

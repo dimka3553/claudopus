@@ -239,16 +239,50 @@ let finishedAtTop: string[] = []
 // and a press on a button of the drawing replaced meanwhile reaches nothing. The list was written over with the same list every
 // few seconds while work ran (15 Nov, a minute of running work: seven writes, none of them a change). Should another write land
 // between the look and the write, the change is made again on what that write left
+// The list as this copy last read or wrote it: each read of the whole list from the engine copies it between Claude's two threads,
+// and a busy chat read it a dozen times for every tool call and every second (27 Nov: 1 ms a read and 4 ms a write with 80 cards,
+// the mod's own thread at 60% of a core with five tasks at work). Only changeTodos writes the list, so what it wrote is the list; a
+// write another copy of the mod made in the seconds after a reload is seen at the next write (the engine's own list is what a write
+// changes) and within CARDS_HELD, when the list is read from the engine again. Never changed in place: the test kit freezes it.
+// A drawing still reads the list from the engine itself, which is what draws it again when the list is written
+let cardsKept: Todo[] | undefined
+let cardsAt = 0
+const CARDS_HELD = 5000
+const keepCards = (list: Todo[]) => {
+  if (!isTimed) JSON.stringify(list, (_, v: unknown) => (v && typeof v === 'object' ? Object.freeze(v) : v))
+  cardsAt = Date.now()
+  return (cardsKept = list)
+}
+const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? cardsKept : keepCards(await read($, todos)))
+// What a task's card says it is running, and when something new last came back to it, change as every call ends: they are
+// written with the next change to the list (the next call's start, most often), or by themselves RUN_SOON after, so a call's end
+// writes nothing of its own and several tasks' calls are one write (each write of the list draws the panel again). By agent: when something new came
+// back, undefined for none
+const runDue = new Map<string, number | undefined>()
+const RUN_SOON = 400
+let isRunSet = false
+const runSoon = ($: EngineInterface, agent: string, newAt?: number) => {
+  runDue.set(agent, newAt ?? runDue.get(agent))
+  // (at once in the test kit, whose clock only a test moves)
+  if (!isTimed) return changeTodos($, list => list)
+  if (isRunSet) return
+  isRunSet = true
+  $.clock.after(RUN_SOON, () => void ((isRunSet = false), changeTodos($, list => list).catch(err => log($, `running calls not kept: ${String(err)}`))))
+}
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
-  const now = await read($, todos)
+  const now = await ownCards($)
   const before = JSON.stringify(now)
+  const due = [...runDue]
+  const ran = (list: Todo[]) => due.reduce((all, [agent, newAt]) => withRunning(all, agent, newAt), list)
+  const settled = () => due.forEach(([agent, newAt]) => runDue.get(agent) === newAt && runDue.delete(agent))
   // (a task's card ends done only with its result: holdDone; and keeps what each of its results named: saidKept)
   // (and every question a card holds: the newest of those before comes up as one goes, keepAsks)
   // (and each of the chat's own cards has its colour from the moment it is made: withColours, colours.tsx)
-  const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, fn(list)))))
+  const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, ran(fn(list))))))
   const next = hold(now)
-  if (JSON.stringify(next) === before) return now
-  const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  if (JSON.stringify(next) === before) return (settled(), now)
+  const written = keepCards(await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list))))
+  settled()
   // (and the ledger on disk with it, so a quit or a crash loses nothing: keep.tsx)
   saveLedgerSoon($)
   return written
@@ -280,9 +314,14 @@ const takeCharge = async ($: EngineInterface) => {
 let isLeft = false
 // What a copy that was replaced lets go of the moment it finds out: its waits for a press (holdGate, holdPrompt)
 const whenLeft = new Set<() => void>()
+// (asked of the engine at most every LEFT_LOOK: every timer of the load asks as it fires, a dozen times a second in all)
+const LEFT_LOOK = 2000
+let leftAt = 0
 const isReplaced = async ($: EngineInterface) => {
   if (isLeft) return true
   if (!isMarked) return false
+  if (isTimed && Date.now() - leftAt < LEFT_LOOK) return false
+  leftAt = Date.now()
   const now = (await $.state.get(loadNow).catch(() => undefined))?.value
   if (typeof now === 'string' && now > thisLoad && !isLeft) {
     isLeft = true
@@ -303,7 +342,7 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
 // when it falls behind, does less until it has caught up
 // How often the mod looks at how late its own timer comes, and how late counts as behind: then fresh drawings and the looks that can
 // wait are left out for BEHIND_FOR
-const HOLD_LOOK = 250
+const HOLD_LOOK = 500
 const LATE = 400
 const BEHIND_FOR = 10_000
 // and a drawing is given as it was for this long at most, however long the mod stays behind

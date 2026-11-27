@@ -138,7 +138,7 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
     if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
     else seenLines.set(agent, seen)
   }
-  await changeTodos($, list => withRunning(list, agent, isNew ? now : undefined))
+  await runSoon($, agent, isNew ? now : undefined)
 }
 
 const runningKids = (list: Todo[], id: string) => list.filter(kid => kid.parentId === id && kid.status === 'working')
@@ -170,10 +170,10 @@ const lookStuck = async ($: EngineInterface) => {
   })
   for (const one of told) {
     await changeTodos($, all => all.map(card => (card.id === one.id ? { ...card, stuckTold: now } : card)))
-    await tellChat($, named(`${STUCK_IN_CHAT(titleOf(one), Math.round((now - movedAt(await read($, todos), one)) / 60_000))} ${STUCK_ASK}`))
+    await tellChat($, named(`${STUCK_IN_CHAT(titleOf(one), Math.round((now - movedAt(await ownCards($), one)) / 60_000))} ${STUCK_ASK}`))
   }
   // What agents that have ended had seen come back is let go
-  const list = await read($, todos)
+  const list = await ownCards($)
   for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
   for (const agent of [...lastResult.keys()]) if (!list.some(one => one.id === agent && one.status === 'working')) (lastResult.delete(agent), changedAt.delete(agent))
 }

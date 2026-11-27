@@ -22,7 +22,7 @@ type Typed = { need: Need; card?: Todo; title: string; isPressOnly: boolean }
 // with what a press there already answered left out. Keys, passwords and the disk are never answered in words
 const typedWaiting = async ($: EngineInterface): Promise<Typed[]> => {
   const now = await $.clock.now()
-  const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
+  const cards = (await ownCards($)).filter(one => !one.parentId && !one.chat)
   const own = new Set(cards.map(one => one.id))
   const onCards = cards.flatMap(one => needsOf($, asPressed(one), '', now).map(need => ({ need, card: one, title: titleOf(one), isPressOnly: Boolean(isAskOf(need, one.id) && need.card?.ask?.refused) })))
   const loose = [

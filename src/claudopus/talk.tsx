@@ -203,16 +203,19 @@ const liveBegun = (id: string, from: number) => {
   talkMoved(id)
 }
 // One piece of the response arrives. Only what the person would see: thinking, words, the call's name and its arguments
-const liveChunk = (id: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }, at: number) => {
+// (false when it begins a part and was not told the time: only a part's first piece needs it)
+const liveChunk = (id: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }, at?: number) => {
   const step = liveSteps.get(id)
-  if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number') return
+  if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number') return true
   const kind = chunk.kind === 'input' ? 'tool' : chunk.kind
-  if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool') return
+  if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool') return true
   let block = step.blocks.find(one => one.index === chunk.index && one.kind === kind)
-  if (!block) step.blocks.push((block = { kind, index: chunk.index, text: '', at }))
+  if (!block && at === undefined) return false
+  if (!block) step.blocks.push((block = { kind, index: chunk.index, text: '', at: at ?? 0 }))
   if (chunk.kind === 'tool') Object.assign(block, { id: chunk.id, name: chunk.name })
   const more = chunk.kind === 'input' ? (chunk.json ?? '') : (chunk.text ?? '')
   block.text = kind === 'thinking' ? (block.text + more).slice(-LIVE_THINKING) : (block.text + more).slice(0, SAID_CHARS * 2)
+  return true
 }
 const liveEnded = (id: string, at: number) => {
   const step = liveSteps.get(id)
@@ -243,7 +246,9 @@ async function* followStream<C, R>($: EngineInterface, id: string, stream: Async
     for (;;) {
       const got = await stream.next()
       if (got.done) return ((isDone = true), got.value)
-      liveChunk(id, got.value as never, await $.clock.now())
+      // (the clock is asked only as a part begins: asked at every piece, each piece of every task's response went to the engine
+      // and back once more)
+      if (!liveChunk(id, got.value as never)) liveChunk(id, got.value as never, await $.clock.now())
       yield got.value
     }
   } finally {
