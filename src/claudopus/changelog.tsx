@@ -7,7 +7,7 @@ const CHANGELOG_PAGE = 'https://claudopus.ai/changelog.html'
 // The mod's own copy of CHANGELOG.md, read once a load: it changes only with the mod
 let changelogRead: Promise<Version[]> | undefined
 const versionsLogged = ($: EngineInterface) => {
-  changelogRead ??= readOr($, `${$.plugin.root}/CHANGELOG.md`).then(changelogOf)
+  changelogRead ??= readOr($, `${pluginRoot($)}/CHANGELOG.md`).then(changelogOf)
   return changelogRead
 }
 const openChangelog = async ($: EngineInterface) => {
@@ -79,7 +79,7 @@ const noteSeen = async ($: EngineInterface) => {
   if (!dir || seenIn(await readOr($, seenPath()))) return
   const loaded = (await versionsOf($)).version
   if (!loaded) return
-  const root = $.plugin.root.replace(/\/+$/, '')
+  const root = pluginRoot($).replace(/\/+$/, '')
   const copies = installedFrom(root) ? (await $.fs.list(root.slice(0, root.lastIndexOf('/'))).catch(() => [])).map(one => one.name) : []
   const start = (updatedMoment?.to === loaded && updatedMoment.from) || previousOf(copies, loaded) || loaded
   await writeSeen($, start)

@@ -105,7 +105,7 @@ const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the
 // bin/release, bin/keyring) are let through unread
 const scriptsRun = async ($: EngineInterface, command: string) => {
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  const root = $.plugin.root
+  const root = pluginRoot($)
   const texts: string[] = []
   for (const path of filesRun(command, home, cwd || home)) {
     const runner = /\/bin\/(admin|secret|release|keyring)$/.exec(path)?.[1]
@@ -171,7 +171,7 @@ const touchesKeyring = (e: { tool: string }) => {
 // The rules every piece of work a chat starts is handed after its brief, as they stand when it starts: where the chat's words are, the
 // work's own rules, and its panel's. They are its rules for as long as it runs: a change made since reaches the next task
 const workRules = async ($: EngineInterface) => {
-  const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim()
+  const work = named(fillModels((await inForce($, pluginRoot($), dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${pluginRoot($)}/bin/admin`).replace(/\{secret\}/g, `${pluginRoot($)}/bin/secret`).replace(/\{release\}/g, `${pluginRoot($)}/bin/release`).replace(/\{pane-file\}/g, `${pluginRoot($)}/bin/pane-file`).trim()
   const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
@@ -179,14 +179,14 @@ const workRules = async ($: EngineInterface) => {
 // main checkout of the repo this chat's copy is made from or run from (knowSource, as this load first learnt it): every other repo,
 // a worktree of this one, and what a script it runs does are left to run
 const ownCheckoutChanged = async ($: EngineInterface, texts: string[], start: string) => {
-  const home = (await $.env.get('HOME')) ?? ''
+  const home = (await homeFolder($)) ?? ''
   const folders = texts.flatMap(text => changesOf(text, start, home))
   if (!folders.length) return ''
   const known = await knowSource($).catch(() => undefined)
   const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
   if (!own) return ''
   for (const folder of folders) {
-    const said = await $.process.run(['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+    const said = await runOn($, ['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
     const [gitDir = '', common = '', top = ''] = said.stdout.trim().split('\n').map(line => line.trim())
     if (said.exitCode === 0 && gitDir && gitDir === common && top.replace(/\/+$/, '') === own) return own
   }
@@ -305,7 +305,7 @@ const workHooks = (on: On) => {
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
-      return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+      return { deny: `${NO_PUSH} It is ${pluginRoot($)}/bin/release.` }
     }
     // The Claudopus code chats run stays as it is: work reads other versions with git show and changes code in worktrees of its own.
     // Claudopus refuses it before Claude Code sees it, so no card offers it to be run on a press either
@@ -337,7 +337,7 @@ const workHooks = (on: On) => {
       return { deny: NOT_ONE_COMMAND }
     }
     // The branch a push would go from, which is never main
-    const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
+    const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await runOn($, ['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)

@@ -55,7 +55,7 @@ const withWrote = (one: Todo, e: { tool: string }): Todo => {
 const repoOf = new Map<string, string>()
 const repoTop = async ($: EngineInterface, folder: string) => {
   if (repoOf.has(folder)) return repoOf.get(folder) ?? ''
-  const r = await $.process.run(['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
+  const r = await runOn($, ['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
   const top = r?.exitCode === 0 ? r.stdout.trim() : ''
   if (repoOf.size > 200) repoOf.clear()
   repoOf.set(folder, top)
@@ -70,7 +70,7 @@ const COUNT_LINES =
 const codeOf = async ($: EngineInterface, byTop: Map<string, string[]>, since: number): Promise<CodeMade | undefined> => {
   const files: CodeFile[] = []
   for (const [top, paths] of byTop) {
-    const r = await $.process.run(['sh', '-c', COUNT_LINES, 'sh', top, String(Math.floor(since / 1000)), ...paths.map(path => path.slice(top.length + 1))], { timeoutMs: 8000 }).catch(() => undefined)
+    const r = await runOn($, ['sh', '-c', COUNT_LINES, 'sh', top, String(Math.floor(since / 1000)), ...paths.map(path => path.slice(top.length + 1))], { timeoutMs: 8000 }).catch(() => undefined)
     if (r?.exitCode !== 0) continue
     for (const line of rows(r.stdout)) {
       const [added = '', taken = '', inRepo = '', isNew = ''] = line.split('\t')
@@ -294,7 +294,7 @@ const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
   if (!stat || stat.kind !== 'file') return null
   const to = `${dir}/thumbs/tile-${slug(one.path).slice(-60)}-${mark(one.path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
   if (!(await $.fs.exists(to))) {
-    await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+    await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
     let from = one.path
     let scratch = ''
     // Plain text has no picture worth a tile (Quick Look draws its lines too small to read): it keeps its icon
@@ -303,25 +303,25 @@ const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
       // Quick Look is the Mac's own: elsewhere the tile keeps its icon
       if (isLinux) return null
       scratch = `${dir}/thumbs/ql-${Math.round(await $.clock.now())}-${(qlMade += 1)}`
-      await $.process.run(['mkdir', '-p', scratch])
-      await $.process.run(['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
+      await runOn($, ['mkdir', '-p', scratch])
+      await runOn($, ['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
       from = `${scratch}/${fileName(one.path)}.png`
-      if (!(await $.fs.exists(from))) return (await $.process.run(['rm', '-rf', scratch]).catch(() => undefined), null)
+      if (!(await $.fs.exists(from))) return (await runOn($, ['rm', '-rf', scratch]).catch(() => undefined), null)
     }
     // Only what the tile shows is kept: a page or a tall picture is cut to the tile's shape from its top, at one and a half times the
     // tile's size, so a dozen of them fit in one drawing
-    const said = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', from], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? ''
+    const said = (await runOn($, [sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', from], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? ''
     const [width = 0, height = 0] = [/pixelWidth: (\d+)/, /pixelHeight: (\d+)/].map(re => Number(re.exec(said)?.[1] ?? 0))
     const isTall = width > 0 && height / width > FACE_H / FACE_W
     const mid = `${to}.png`
-    if (isTall) await $.process.run([sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
+    if (isTall) await runOn($, [sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
     for (const quality of ['50', '35', '20']) {
       await $.process
         .run(isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 })
         .catch(() => undefined)
       if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= TILE_THUMB_BYTES) break
     }
-    await $.process.run(['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)
+    await runOn($, ['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)
   }
   const read = (await $.fs.read(to, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined
   return read?.base64 && read.base64.length < TILE_THUMB_BYTES * 2 ? { base64: read.base64 } : null
@@ -791,7 +791,7 @@ const diffView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   const readKey = `${file.path}:${since}:${stat?.mtimeMs ?? 0}`
   if (stat && (!got || got.key !== readKey)) {
     const top = await repoTop($, file.path.slice(0, file.path.lastIndexOf('/')))
-    const r = top ? await $.process.run(['sh', '-c', DIFF_OF, 'sh', top, String(since), file.path.slice(top.length + 1)], { timeoutMs: 8000 }).catch(() => undefined) : undefined
+    const r = top ? await runOn($, ['sh', '-c', DIFF_OF, 'sh', top, String(since), file.path.slice(top.length + 1)], { timeoutMs: 8000 }).catch(() => undefined) : undefined
     const whole = await $.fs.read(file.path).then(text => String(text), () => '')
     got = { key: readKey, text: r?.exitCode === 0 ? r.stdout : '', whole }
     if (diffRead.size > 20) diffRead.delete(diffRead.keys().next().value ?? '')

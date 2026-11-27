@@ -13,8 +13,8 @@ const lookAfar = async ($: EngineInterface, now: number) => {
   if (now - afarAt < AFAR_EVERY) return false
   afarAt = now
   const failed = { exitCode: -1, stdout: '' }
-  const here = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-  const app = await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+  const here = await runOn($, ['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+  const app = await runOn($, ['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
   const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : []
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
@@ -58,7 +58,7 @@ const AFAR_FRESH = 3 * 60_000
 const toldDir = () => `${liveDir()}/${MACS}/told`
 const tellOnce = async ($: EngineInterface, key: string, tell: () => Promise<unknown>) => {
   const path = `${toldDir()}/${key.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 150)}`
-  const r = await $.process.run(['sh', '-c', 'mkdir -p "$1" && mkdir "$2" 2>/dev/null', 'sh', toldDir(), path]).catch(() => ({ exitCode: -1 }))
+  const r = await runOn($, ['sh', '-c', 'mkdir -p "$1" && mkdir "$2" 2>/dev/null', 'sh', toldDir(), path]).catch(() => ({ exitCode: -1 }))
   if (r.exitCode === 0) await tell().catch(err => log($, `${key} not told: ${String(err)}`))
 }
 let toldSwept = -Infinity
@@ -66,7 +66,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
   if (!list.length) return
   if (now - toldSwept > 3_600_000) {
     toldSwept = now
-    await $.process.run(['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined)
+    await runOn($, ['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined)
   }
   let config: { notifications?: unknown } = {}
   try {

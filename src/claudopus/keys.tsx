@@ -59,7 +59,7 @@ const keysRead = async ($: EngineInterface): Promise<KeysState> => {
 // keychain is read from the same listing as the rest, which fails as a whole when the keychain does not answer, so a locked keychain
 // never reads as an empty one
 const localNames = async ($: EngineInterface) => {
-  const all = await $.process.run([`${$.plugin.root}/bin/keyring`, 'entries']).catch(() => undefined)
+  const all = await runOn($, [`${pluginRoot($)}/bin/keyring`, 'entries']).catch(() => undefined)
   const pairs = all?.exitCode === 0 && !all.isStdoutTruncated ? all.stdout.split('\n').filter(Boolean).map(line => line.split('\t')) : undefined
   const claudopus = pairs?.filter(([service]) => service === 'claudopus-secret').map(([, account = '']) => plainName(account)).filter(Boolean)
   // Another app's account is shown only when it is a name such as ELEVENLABS_API_KEY: any other account (an email, an id, a token
@@ -74,7 +74,7 @@ const localNames = async ($: EngineInterface) => {
   for (const folder of folders) {
     const files = (await $.fs.list(folder).catch(() => [])).filter(one => one.kind === 'file' && !one.isLink).map(one => one.name).filter(name => /^\.env(?:\.[\w-]+)?$/.test(name) && !/\.(?:example|sample|template|dist)$/.test(name))
     for (const file of files) {
-      const r = await $.process.run(['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
+      const r = await runOn($, ['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
       for (const line of (r?.stdout ?? '').split('\n')) {
         const name = line.replace(/^\s*(?:export\s+)?/, '').replace(/\s*=$/, '')
         if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && isKeyVariable(name)) env.push({ name, where: `${folder}/${file}` })
@@ -116,12 +116,12 @@ const refreshKeys = async ($: EngineInterface, sbos?: SbosName[], isListed = tru
     entries: entries.map((one, i) => ({ ...one, name: seen[i * 3] ?? '', ...(one.where ? { where: seen[i * 3 + 1] } : {}), ...(one.label ? { label: seen[i * 3 + 2] } : {}) })),
   }
   await $.fs.write(`${dir}/${KEYS_STATE}`, `${JSON.stringify(keys, null, 2)}\n`)
-  await $.fs.write(`${dir}/${KEYS_FILE}`, keysText($.plugin.root, keys))
+  await $.fs.write(`${dir}/${KEYS_FILE}`, keysText(pluginRoot($), keys))
   return keys
 }
 // The text with every kept value hidden, as bin/secret hides a command's output; undefined when it could not be checked
 const keysHidden = async ($: EngineInterface, text: string) => {
-  const r = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
+  const r = await runOn($, [`${pluginRoot($)}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
   return r && r.exitCode === 0 && !r.isStdoutTruncated && r.stdout.trim() ? r.stdout : undefined
 }
 const keysFresh = async ($: EngineInterface) => {
@@ -226,7 +226,7 @@ const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?
 const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; name?: unknown; text?: unknown; copy?: unknown; details?: unknown; for?: unknown; agent?: unknown }
-  const root = $.plugin.root
+  const root = pluginRoot($)
   const listed = async () => (await keysFresh($)).entries.filter(usable)
   if (e.tool === 'mcp__sbos__ask_secret') {
     // One asked for an autonomous agent of SBOS's is its own: the list holds the person's

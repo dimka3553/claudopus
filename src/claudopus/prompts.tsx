@@ -66,7 +66,7 @@ const snippetOf = (tool: string, input: unknown) => {
 // How many of Claude's shells on this Mac run a command that starts so (the Bash tool runs it as `eval '<command>'`): counted as its
 // prompt opens, so only one more than then is this call's
 const running = async ($: EngineInterface) => {
-  const r = await $.process.run(['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
+  const r = await runOn($, ['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
   return r.exitCode === 0 ? r.stdout.split('\n') : undefined
 }
 const countOf = (lines: string[], snippet: string) => lines.filter(line => line.includes(`eval '${snippet}`)).length
@@ -308,7 +308,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const runnable = runnableOf(tool, call)
   if (!runnable && connectorRuleOf(tool)) return void (await refusedConnector($, agent, top.id, own, tool, call, refusal.reason))
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
-  const isRelease = releaseCalls(runnable.command, $.plugin.root, runnable.cwd).length > 0
+  const isRelease = releaseCalls(runnable.command, pluginRoot($), runnable.cwd).length > 0
   const details = [runDetails(runnable, refusal.reason), isRelease ? RELEASE_SECOND_PRESS : '', own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
   const asked = isRelease ? BLOCKED_RELEASE_ASK : BLOCKED_ASK
   const at = await $.clock.now()
@@ -342,7 +342,7 @@ const refusedConnector = async ($: EngineInterface, agent: string, top: string, 
   const name = rule.split('__').slice(2).join('__').replace(/_/g, ' ')
   const input = connectorInput(call)
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  const command = `${zshQuoted(`${$.plugin.root}/bin/allow-tool`)} ${rule}`
+  const command = `${zshQuoted(`${pluginRoot($)}/bin/allow-tool`)} ${rule}`
   const details = [
     `It wanted to ${name}${input ? `: ${input}` : '.'}`,
     `${reason ? `Blocked as “${reason}”. ` : ''}Claude Code never counts a yes on this card or in the chat as yours for this: only your own Claude Code settings let it through.`,

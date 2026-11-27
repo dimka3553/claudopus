@@ -269,11 +269,11 @@ breathAt = Date.now()
 }
 const TAIL_BYTES = 200_000
 const fileEnd = async ($: EngineInterface, path: string, bytes = TAIL_BYTES) => {
-const r = await $.process.run(['tail', '-c', String(bytes), path], { timeoutMs: 10_000 }).catch(() => undefined)
+const r = await runOn($, ['tail', '-c', String(bytes), path], { timeoutMs: 10_000 }).catch(() => undefined)
 return r?.exitCode === 0 ? r.stdout : ''
 }
 const appendTo = async ($: EngineInterface, path: string, text: string) => {
-const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', path, text]).catch(() => undefined)
+const r = await runOn($, ['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', path, text]).catch(() => undefined)
 if (r?.exitCode === 0) return
 const was = await $.fs.read(path).then(String, (err: unknown) => (/ENOENT|no such file/i.test(String(err)) ? '' : undefined))
 if (was === undefined) throw new Error(`${path} not added to: it could not be read`)
@@ -407,7 +407,7 @@ const isWatched = (path: string, text: string) => text.length < 64_000 && !/\.js
 const drawnFiles = new Map<string, string>()
 const log = async ($: EngineInterface, line: string) => {
 const text = `${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`
-const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', `${dir}/log.md`, text]).catch(() => undefined)
+const r = await runOn($, ['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', `${dir}/log.md`, text]).catch(() => undefined)
 if (r?.exitCode !== 0) await $.fs.write(`${dir}/log.md`, `${await readOr($, `${dir}/log.md`)}${text}`).catch(() => undefined)
 }
 const tidyLog = async ($: EngineInterface) => {
@@ -517,11 +517,58 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 )
 
 let isLinux = false
+let isWindows = false
 let hasDesktop = true
+let gitBash = ''
 let keyringRoot = ''
 let keyringOldRoot = ''
+const slashed = (path: string) => (/^(?:[A-Za-z]:\\|\\\\)/.test(path) ? path.replace(/\\/g, '/') : path)
+const isAbsPath = (path: string) => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+const homeFolder = async ($: EngineInterface) => {
+const profile = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT' ? await $.env.get('USERPROFILE').catch(() => undefined) : undefined
+return slashed(profile || ((await $.env.get('HOME').catch(() => undefined)) ?? ''))
+}
+const pluginRoot = ($: EngineInterface) => slashed($.plugin.root)
+const WINDOWS_EXEC = 'exec "$0" "$@"'
+const WINDOWS_OWN = /^(?:git|powershell|pwsh|cmd|explorer|tasklist|taskkill|where|netstat|claude|node)(?:\.exe)?$/i
+const onWindows = (argv: readonly string[]): string[] => {
+const [head = '', ...rest] = argv
+if (!gitBash || /\.(?:exe|com)$/i.test(head) || WINDOWS_OWN.test(head)) return [...argv]
+return [gitBash, '-c', WINDOWS_EXEC, head, ...rest]
+}
+let windowsHome = ''
+const runOn = ($: EngineInterface, argv: readonly string[], init?: Parameters<EngineInterface['process']['run']>[1]) =>
+isWindows ? $.process.run(onWindows(argv), { ...init, env: { ...(windowsHome ? { HOME: windowsHome } : {}), CHERE_INVOKING: '1', ...init?.env } }) : $.process.run(argv, init)
+const findGitBash = async ($: EngineInterface) => {
+const named = [await $.env.get('CLAUDE_CODE_GIT_BASH_PATH').catch(() => undefined), await $.env.get('SHELL').catch(() => undefined)]
+const programs = [await $.env.get('ProgramFiles').catch(() => undefined), await $.env.get('ProgramFiles(x86)').catch(() => undefined)]
+const local = await $.env.get('LOCALAPPDATA').catch(() => undefined)
+const places = [
+...named.filter((one): one is string => Boolean(one && /[\\/]bash(?:\.exe)?$/i.test(one) && /^[A-Za-z]:/.test(one))),
+...programs.filter((one): one is string => Boolean(one)).map(one => `${one}/Git/bin/bash.exe`),
+'C:/Program Files/Git/bin/bash.exe',
+...(local ? [`${local}/Programs/Git/bin/bash.exe`] : []),
+]
+for (const one of places) if (await $.fs.exists(slashed(one)).catch(() => false)) return slashed(one)
+const where = await $.process.run(['where', 'git'], { timeoutMs: 5_000 }).catch(() => undefined)
+for (const line of (where?.stdout ?? '').split(/\r?\n/).map(one => slashed(one.trim())).filter(Boolean)) {
+const bash = line.replace(/\/(?:cmd|bin|mingw64\/bin)\/git\.exe$/i, '/bin/bash.exe')
+if (bash !== line && (await $.fs.exists(bash).catch(() => false))) return bash
+}
+return ''
+}
 const knowSystem = async ($: EngineInterface) => {
-const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
+isWindows = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
+if (isWindows) {
+isLinux = false
+hasDesktop = true
+gitBash = await findGitBash($)
+windowsHome = ((await $.env.get('USERPROFILE').catch(() => undefined)) ?? '').trim()
+keyringRoot = `${await homeFolder($)}/.local/share/claudopus/keyring`
+keyringOldRoot = ''
+return
+}
+const r = await runOn($, ['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
 isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux'
 hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')))
 const data = (await $.env.get('XDG_DATA_HOME')) ?? ''
@@ -529,22 +576,26 @@ keyringRoot = `${(await $.env.get('HOME')) ?? ''}/.local/share/claudopus/keyring
 keyringOldRoot = data.startsWith('/') ? `${data}/claudopus/keyring` : ''
 }
 const hasKeychain = async ($: EngineInterface) => {
-if (isLinux) return true
-const home = (await $.env.get('HOME')) ?? ''
+if (isLinux || isWindows) return true
+const home = (await homeFolder($)) ?? ''
 if (!home.startsWith('/')) return false
 const where = `${home}/Library/Keychains`
 if (!(await $.fs.stat(where).then(() => true, err => !/ENOENT|ENOTDIR/.test(String(err))))) return false
 const found = await $.fs.list(where).catch(() => undefined)
 return !found || found.some(one => one.name !== 'metadata.keychain-db' && /\.keychain(?:-db)?$/.test(one.name))
 }
-const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
-const keptWhere = () => (isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
+const thisMac = () => (isWindows ? 'this PC' : isLinux ? 'this machine' : 'this Mac')
+const keptWhere = () => (isWindows ? 'a file on this PC that only you can read' : isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
 const openOn = async ($: EngineInterface, target: string, isText = false) => {
-if (!isLinux) return $.process.run(isText ? ['open', '-t', target] : ['open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-if (!hasDesktop) return { exitCode: 1, stderr: 'no desktop on this machine to open it on' }
-return $.process.run(['xdg-open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+if (isWindows) {
+const argv = /^[a-z][a-z0-9+.-]*:\/\//i.test(target) ? ['rundll32.exe', 'url.dll,FileProtocolHandler', target] : isText ? ['notepad.exe', target.replace(/\//g, '\\')] : ['explorer.exe', target.replace(/\//g, '\\')]
+return runOn($, argv).then(() => ({ exitCode: 0, stderr: '' }), err => ({ exitCode: 1, stderr: String(err) }))
 }
-const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 'sips')
+if (!isLinux) return runOn($, isText ? ['open', '-t', target] : ['open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+if (!hasDesktop) return { exitCode: 1, stderr: 'no desktop on this machine to open it on' }
+return runOn($, ['xdg-open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+}
+const sips = ($: EngineInterface) => (isLinux || isWindows ? `${pluginRoot($)}/bin/sips` : 'sips')
 
 const RECORD_FOR = 180_000
 const RECORD_SWITCH = 'record-panel.on'
@@ -566,15 +617,15 @@ recordLooked = at
 const on = `${dir}/${RECORD_SWITCH}`
 const stat = await $.fs.stat(on).catch(() => undefined)
 if (!stat) return false
-if (at - stat.mtimeMs > RECORD_FRESH) return void (await $.process.run(['rm', '-f', on]).catch(() => undefined)), false
+if (at - stat.mtimeMs > RECORD_FRESH) return void (await runOn($, ['rm', '-f', on]).catch(() => undefined)), false
 const chat = (await $.session.id().catch(() => '')).slice(0, 8) || 'chat'
 recording = { path: `${dir}/panel-record/${chat}-${new Date(at).toISOString().replace(/[:.]/g, '-')}.jsonl`, until: at + RECORD_FOR, lines: [], written: 0, started: at }
 typedCount = new Map()
-$.clock.after(6000, () => void $.process.run(['rm', '-f', on]).catch(() => undefined))
-const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
+$.clock.after(6000, () => void runOn($, ['rm', '-f', on]).catch(() => undefined))
+const manifest = await readOr($, `${pluginRoot($)}/.claude-plugin/plugin.json`)
 const flushing = () => $.clock.after(2000, () => void (recording ? recordFlush($).then(() => (recording && ((void isRecording($)), flushing()))) : undefined))
 flushing()
-await recordLine($, { ev: 'start', version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
+await recordLine($, { ev: 'start', version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: pluginRoot($).split('/').slice(-3).join('/') })
 return true
 }
 const recordLine = async ($: EngineInterface, event: Record<string, unknown>) => {
@@ -1122,7 +1173,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
 const own = `${memory}/${path}`
 const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
 await personWrote($, memory, path, null)
-const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+const r = await runOn($, ['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
 return r.exitCode === 0 ? '' : r.stderr || "Claudopus couldn't move your copy aside"
 }
 
@@ -1136,15 +1187,15 @@ let secrets = { at: -SECRETS_MS, names: [] as string[], isAdminKept: false }
 const knowKept = async ($: EngineInterface, isNow = false) => {
 const now = await $.clock.now()
 if (now - secrets.at < SECRETS_MS && !isNow) return secrets
-const listed = await $.process.run([`${$.plugin.root}/bin/secret`, '--list']).catch(() => undefined)
-const admins = await $.process.run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin']).catch(() => undefined)
+const listed = await runOn($, [`${pluginRoot($)}/bin/secret`, '--list']).catch(() => undefined)
+const admins = await runOn($, [`${pluginRoot($)}/bin/keyring`, 'list', 'claudopus-admin']).catch(() => undefined)
 if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), isAdminKept: admins?.exitCode === 0 ? Boolean(admins.stdout.trim()) : secrets.isAdminKept }
 return secrets
 }
 const hiddenJson = async ($: EngineInterface, text: string) => {
 const { names, isAdminKept } = await knowKept($)
 if (!names.length && !isAdminKept) return text
-const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...names], { stdin: text }).catch(() => undefined)
+const hidden = await runOn($, [`${pluginRoot($)}/bin/secret`, '--hide', '--json', ...names], { stdin: text }).catch(() => undefined)
 return hidden && hidden.exitCode === 0 && !hidden.isStdoutTruncated && hidden.stdout.trim() ? hidden.stdout : undefined
 }
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
@@ -1192,7 +1243,7 @@ now: await $.clock.now(),
 })(),
 texts: await Promise.all(
 TEXTS.map(async text => {
-const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
+const { isOwn, isStale, path, text: body } = await inForce($, pluginRoot($), dir, text.path)
 return { text, isOwn, isStale, path, body }
 }),
 ),
@@ -1231,12 +1282,12 @@ const configActs = ($: EngineInterface) => ({
 open: (text: (typeof TEXTS)[number]) =>
 configAct($, `Couldn't open ${text.name}`, async () => {
 Object.assign(editing, { key: '', draft: '' })
-return editText($, $.plugin.root, dir, text.path)
+return editText($, pluginRoot($), dir, text.path)
 }),
 edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
 save: (text: (typeof TEXTS)[number], body: string) =>
 configAct($, `Couldn't save ${text.name}`, async () => {
-const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
+const failed = body.trim() ? await saveText($, pluginRoot($), dir, text.path, body) : 'the text was empty, so nothing changed'
 Object.assign(editing, { key: '', draft: '' })
 return failed
 }),
@@ -1395,16 +1446,16 @@ for (const one of await readIndex($)) if (((await $.fs.stat(pageOf(one.name)).ca
 if (!grown.length) return
 const lock = `${dir}/locks/pages`
 const now = await $.clock.now()
-const take = () => $.process.run(['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
+const take = () => runOn($, ['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
 if (!(await take())) {
 if (now - Number((await readOr($, `${lock}/at`)) || now) < SHORTEN_STALE) return
-await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
 if (!(await take())) return
 }
 try {
 for (const one of grown) await shortenPage($, one.name).catch(err => log($, `page of ${one.name} not made short: ${String(err)}`))
 } finally {
-await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
 }
 }
 
@@ -1422,7 +1473,7 @@ for (const { from, to } of tidied.renames) {
 for (const one of await $.fs.list(`${dir}/streams`).catch(() => [])) {
 if (one.name !== `${slug(from)}.md` && !one.name.startsWith(`${slug(from)}.log.`)) continue
 await $.fs.write(`${dir}/streams/${slug(to)}${one.name.slice(slug(from).length)}`, await readOr($, `${dir}/streams/${one.name}`))
-await $.process.run(['rm', '-f', `${dir}/streams/${one.name}`]).catch(() => undefined)
+await runOn($, ['rm', '-f', `${dir}/streams/${one.name}`]).catch(() => undefined)
 }
 for (const [key, value] of Object.entries(aliases)) if (value === from) aliases[key] = to
 aliases[slug(from)] = to
@@ -1508,13 +1559,13 @@ const indexLog = ($: EngineInterface, line: string) => appendTo($, `${progressDi
 const takeLock = async ($: EngineInterface, name: string, stale: number) => {
 const lock = `${dir}/locks/${name}`
 const now = await $.clock.now()
-const take = () => $.process.run(['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
+const take = () => runOn($, ['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
 if (await take()) return lock
 if (now - Number((await readOr($, `${lock}/at`)) || now) < stale) return ''
-await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
 return (await take()) ? lock : ''
 }
-const freeLock = ($: EngineInterface, lock: string) => $.process.run(['rm', '-rf', lock]).then(() => undefined, () => undefined)
+const freeLock = ($: EngineInterface, lock: string) => runOn($, ['rm', '-rf', lock]).then(() => undefined, () => undefined)
 const writing = new Map<string, Promise<unknown>>()
 const withLock = <T,>($: EngineInterface, name: string, fn: () => Promise<T>): Promise<T> => {
 const run = (writing.get(name) ?? Promise.resolve()).then(async () => {
@@ -1569,7 +1620,7 @@ const done = applyProgress(event, answer, picture, areas, entries, await $.clock
 if (!done.isChanged) return done
 for (const id of done.changedEntries) {
 const list = entries.get(id) ?? []
-if (!list.length && !done.areas.some(area => area.id === id)) await $.process.run(['rm', '-f', `${progressDir()}/areas/${id}.json`]).catch(() => undefined)
+if (!list.length && !done.areas.some(area => area.id === id)) await runOn($, ['rm', '-f', `${progressDir()}/areas/${id}.json`]).catch(() => undefined)
 else await writeEntries($, id, list)
 }
 await writeAreas($, done.areas)
@@ -1580,7 +1631,7 @@ const readEvent = async ($: EngineInterface, name: string): Promise<ProgressEven
 const one = answerJson(await readOr($, `${queueDir()}/${name}`)) as Partial<ProgressEvent> | undefined
 return one && typeof one.kind === 'string' && typeof one.text === 'string' && typeof one.at === 'number' ? (one as ProgressEvent) : undefined
 }
-const dropEvent = ($: EngineInterface, name: string) => $.process.run(['rm', '-f', `${queueDir()}/${name}`]).then(() => undefined, () => undefined)
+const dropEvent = ($: EngineInterface, name: string) => runOn($, ['rm', '-f', `${queueDir()}/${name}`]).then(() => undefined, () => undefined)
 
 const keepUp = async ($: EngineInterface, event: ProgressEvent, answer: Record<string, unknown>, places: string[]) => {
 if (event.kind === 'said') for (const id of places) await appendTo($, `${progressDir()}/areas/${id}.said.md`, saidEntry(event.at, '', event.text))
@@ -1710,7 +1761,7 @@ const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', tas
 await $.fs.write(`${queueDir()}/${queueName(r.at)}`, `${JSON.stringify(one)}\n`)
 }
 await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n${all.length}\n`)
-if (isAsked) await $.process.run(['rm', '-f', `${progressDir()}/backfill`]).catch(() => undefined)
+if (isAsked) await runOn($, ['rm', '-f', `${progressDir()}/backfill`]).catch(() => undefined)
 await indexLog($, `history queued: ${all.length} results`)
 }
 
@@ -1932,7 +1983,7 @@ const path = `${folder}/agent-${agent}.jsonl`
 const stat = await $.fs.stat(path).catch(() => undefined)
 const at = stat?.mtimeMs || now
 const size = stat?.size ?? 0
-const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
+const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await runOn($, ['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
 let answer = ''
 let isHandback = false
 const isPressed = isPressedAtEnd(tail.map(row => parsedOr<unknown>(row, {})))
@@ -2243,8 +2294,8 @@ const path = `${folder}/agent-${agentId}.jsonl`
 const text =
 (await readOr($, path)) ||
 [
-(await $.process.run(['head', '-n', '1', path]).catch(() => undefined))?.stdout ?? '',
-((await $.process.run(['tail', '-c', '3000000', path]).catch(() => undefined))?.stdout ?? '').split('\n').slice(1).join('\n'),
+(await runOn($, ['head', '-n', '1', path]).catch(() => undefined))?.stdout ?? '',
+((await runOn($, ['tail', '-c', '3000000', path]).catch(() => undefined))?.stdout ?? '').split('\n').slice(1).join('\n'),
 ].join('\n')
 const engine = live.find(agent => agent.id === agentId)
 const one = { id: agentId, description: meta.description ?? '', type: meta.agentType ?? '', status: engine?.status ?? (meta.finished ? 'completed' : 'killed') }
@@ -2700,8 +2751,8 @@ args
 
 const scanServers = async ($: EngineInterface) => {
 scannedAt = Date.now()
-const home = (await $.env.get('HOME')) ?? ''
-const run = async (argv: string[]) => (await $.process.run(argv).catch(() => undefined))?.stdout ?? ''
+const home = (await homeFolder($)) ?? ''
+const run = async (argv: string[]) => (await runOn($, argv).catch(() => undefined))?.stdout ?? ''
 
 const ports = new Map<number, string[]>()
 let pid = 0
@@ -2781,7 +2832,7 @@ await update($, servers, list => [...list])
 }
 
 const stopServer = async ($: EngineInterface, pid: number) => {
-await $.process.run(['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
+await runOn($, ['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
 await $.clock.sleep(700)
 await scanServers($)
 }
@@ -2902,14 +2953,14 @@ const copies: string[] = []
 const copy = async (from: string, name: string) => {
 if (copies.length >= COPIES_KEPT || copies.includes(name)) return
 const to = `${into}/${name}`
-await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
-if ((await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to])).exitCode === 0) copies.push(name)
+await runOn($, ['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
+if ((await runOn($, ['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await runOn($, ['cp', '-p', from, to])).exitCode === 0) copies.push(name)
 }
 for (const path of namedPaths(text)) {
 const stat = await $.fs.stat(path).catch(() => undefined)
 if (stat?.kind === 'file' && PICTURE.test(path)) await copy(path, fileName(path))
 else if (stat?.kind === 'dir' && TEMP.test(path) && path.includes('/scratchpad/')) {
-const r = await $.process.run(['find', path, '-maxdepth', '2', '-type', 'f'])
+const r = await runOn($, ['find', path, '-maxdepth', '2', '-type', 'f'])
 for (const file of rows(r.stdout).filter(one => PICTURE.test(one)).sort()) await copy(file, `${fileName(path)}/${file.slice(path.length + 1)}`)
 }
 }
@@ -2963,10 +3014,10 @@ const makeThumbs = async ($: EngineInterface, r: Report) => {
 for (const file of r.files.filter(one => RASTER.test(one) && isInside(one))) {
 const to = thumbPath(r, file)
 if (await $.fs.exists(to)) continue
-if ((await $.process.run(['sh', '-c', INSIDE, 'sh', `${reportPath(r)}/${file}`, reportPath(r)]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) continue
-await $.process.run(['mkdir', '-p', `${reportPath(r)}/thumbs`])
+if ((await runOn($, ['sh', '-c', INSIDE, 'sh', `${reportPath(r)}/${file}`, reportPath(r)]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) continue
+await runOn($, ['mkdir', '-p', `${reportPath(r)}/thumbs`])
 for (const size of THUMB_SIZES) {
-await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
+await runOn($, [sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
 if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES) break
 }
 }
@@ -2977,7 +3028,7 @@ if (drawn.has(path)) return drawn.get(path) ?? null
 let one: { source: string; width: number; height: number } | null = null
 try {
 const read = (await $.fs.read(path, { as: 'bytes' })) as { base64: string }
-const sized = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
+const sized = (await runOn($, [sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
 const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0)
 const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0)
 if (width && height && read.base64.length < 50_000) {
@@ -3028,7 +3079,7 @@ const OPENABLE_MOST = 20
 const isMadeHere = (path: string, home: string) => /^\/(?:Users|private|tmp|var)\//.test(path) || (home.startsWith('/') && path.startsWith(`${home}/`))
 const openablesDir = () => (cwd.startsWith('/') && cwd !== '/' ? `${cwd.replace(/\/+$/, '')}/${OPENABLE}` : '')
 const isWithin = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`)
-const homeOf = async ($: EngineInterface) => (await $.env.get('HOME').catch(() => undefined)) ?? ''
+const homeOf = async ($: EngineInterface) => (await homeFolder($).catch(() => undefined)) ?? ''
 const openableOf = (path: string, home: string) => `${openablesDir()}/${home.startsWith('/') && path.startsWith(`${home}/`) ? path.slice(home.length + 1) : path.replace(/^\/+/, '')}`
 const originalOf = async ($: EngineInterface, copy: string, home: string) => {
 const rel = copy.slice(openablesDir().length + 1)
@@ -3037,10 +3088,10 @@ return ''
 }
 const copyOpenable = async ($: EngineInterface, from: string, to: string) => {
 const ignore = `${openablesDir()}/.gitignore`
-await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
+await runOn($, ['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
 if (!(await $.fs.exists(ignore).catch(() => false))) await $.fs.write(ignore, '*\n').catch(() => undefined)
-await $.process.run(['rm', '-f', to]).catch(() => undefined)
-return (await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+await runOn($, ['rm', '-f', to]).catch(() => undefined)
+return (await runOn($, ['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await runOn($, ['cp', '-p', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0
 }
 const openable = async ($: EngineInterface, path: string, home: string) => {
 if (!openablesDir() || !path.startsWith('/') || isWithin(path, cwd) || !isMadeHere(path, home)) return ''
@@ -3120,7 +3171,7 @@ const indexAsk = (root: string) =>
 ].join(' ')
 const indexOldChats = async ($: EngineInterface) => {
 await closeWelcome($)
-await sendForPerson($, indexAsk($.plugin.root))
+await sendForPerson($, indexAsk(pluginRoot($)))
 }
 const welcomeCard = ($: EngineInterface, ui: Ui) => (
 <ui.Box key="welcome" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -3832,7 +3883,7 @@ const CATCH_UP_EVERY = 10 * 60_000
 const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
 const startCatchUp = async ($: EngineInterface) => {
 if (!dir) return
-const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, `${await configDir($)}/projects`])
+const r = await runOn($, ['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${pluginRoot($)}/bin/catch-up`, dir, `${await configDir($)}/projects`])
 if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
 }
 
@@ -3911,7 +3962,7 @@ if (jqBusy >= 6) await new Promise<void>(go => jqLine.push(go))
 else jqBusy += 1
 try {
 for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
-const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
+const r = await runOn($, [jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
 if (!r || r.exitCode !== 0) continue
 jqPath = jq
 return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
@@ -4022,10 +4073,10 @@ const LOCK_STALE = 90_000
 async function statsLock($: EngineInterface, memory: string, now: number) {
 const lock = `${memory}/stats/lock`
 const take = () =>
-$.process.run(['/bin/sh', '-c', 'mkdir -p "$1/chats" "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
+runOn($, ['/bin/sh', '-c', 'mkdir -p "$1/chats" "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
 if (await take()) return true
 if (now - Number(await statsText($, `${lock}/at`)) < LOCK_STALE) return false
-await $.process.run(['rm', '-rf', lock], { timeoutMs: 5000 }).catch(() => undefined)
+await runOn($, ['rm', '-rf', lock], { timeoutMs: 5000 }).catch(() => undefined)
 return take()
 }
 type Looked = { key: string; path: string; size: number; mtime: number; flow: string }
@@ -4048,7 +4099,7 @@ const head = index.head
 if (old && !head.old) ((head.old = 1), index.dirty.add(0))
 if (isThorough && head.old && index.of.size) {
 const left = await $.fs.stat(oldPath).catch(() => undefined)
-if (left && now - left.mtimeMs > OLD_KEPT_FOR) await $.process.run(['rm', '-f', oldPath], { timeoutMs: 5000 }).catch(() => undefined)
+if (left && now - left.mtimeMs > OLD_KEPT_FOR) await runOn($, ['rm', '-f', oldPath], { timeoutMs: 5000 }).catch(() => undefined)
 if (!left || now - left.mtimeMs > OLD_KEPT_FOR) ((head.old = undefined), index.dirty.add(0))
 }
 const mainAt = (folder: string) => (folder ? $.fs.stat(`${folder}/${chatId}.jsonl`).catch(() => undefined) : Promise.resolve(undefined))
@@ -4200,7 +4251,7 @@ await pass(allNew(now), true)
 })
 return 'done'
 } finally {
-await $.process.run(['rm', '-rf', `${memory}/stats/lock`], { timeoutMs: 5000 }).catch(() => undefined)
+await runOn($, ['rm', '-rf', `${memory}/stats/lock`], { timeoutMs: 5000 }).catch(() => undefined)
 }
 }
 
@@ -4266,7 +4317,7 @@ drawAgain($)
 }
 async function loadMemorySizes($: EngineInterface, memory: string) {
 const names = async (folder: string) => (await $.fs.list(`${memory}/${folder}`).catch(() => [])).filter(e => !e.name.startsWith('.'))
-const du = await $.process.run(['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
+const du = await runOn($, ['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
 const kb = new Map((du?.stdout ?? '').split('\n').map(row => row.split('\t')).filter(([n, path]) => n && path).map(([n, path]) => [String(path).slice(memory.length + 1), Number(n) * 1024]))
 const index = await $.fs.read(`${memory}/index.md`).catch(() => '')
 const subjects = index.split('\n').filter(row => row.startsWith('- ')).length
@@ -4346,7 +4397,7 @@ got.kept.months.set(older, monthPieces(await monthRead($, dir, got.all, older)))
 const installedAt = async ($: EngineInterface) => {
 const kept = parsed<{ at?: number }>(await readOr($, `${dir}/installed.json`), {}).at
 if (typeof kept === 'number' && kept > 0) return kept
-const born = await $.process.run(isLinux ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined)
+const born = await runOn($, isLinux ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined)
 const seconds = Number(born?.stdout.trim())
 const at = seconds > 0 ? seconds * 1000 : await $.clock.now()
 await $.fs.write(`${dir}/installed.json`, JSON.stringify({ at })).catch(() => undefined)
@@ -4506,7 +4557,7 @@ const aboutButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
 )
 let loadedVersion: Promise<string> | undefined
 const versionsOf = async ($: EngineInterface) => {
-loadedVersion ??= readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`).then(manifest => {
+loadedVersion ??= readOr($, `${pluginRoot($)}/.claude-plugin/plugin.json`).then(manifest => {
 try {
 return String(JSON.parse(manifest).version ?? '')
 } catch {
@@ -4848,11 +4899,11 @@ const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureS
 if (!termFrom) return say(`It’s at ${path} on ${thisMac()}.`)
 say('Sending it to your device…')
 for (const bin of TAILSCALES) {
-const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
+const targets = await runOn($, [bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
 if (!targets || targets.exitCode !== 0) continue
 const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? []
 if (!name || state.join(' ').startsWith('offline')) break
-const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
+const sent = await runOn($, [bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
 if (sent.exitCode === 0) return say(`✓ Claudopus sent it to ${name} with Tailscale. It’s in Downloads there.`)
 await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
 break
@@ -4918,24 +4969,24 @@ const from = text.indexOf('<svg')
 return from >= 0 && text.length - from <= LARGE_CHARS ? { bands: [text.slice(from)], width: 0, height: 0 } : null
 }
 if (!RASTER.test(path)) return null
-const got = await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }))
+const got = await runOn($, [sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }))
 const width = Number(/pixelWidth:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
 const height = Number(/pixelHeight:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
 if (!width || !height) return null
 const formats = /hasAlpha:\s*yes/.test(got.stdout) ? (['png', 'jpeg'] as const) : (['jpeg'] as const)
 largeMade += 1
 const base = `${dir}/thumbs/large-${Math.round(await $.clock.now())}-${largeMade}`
-await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
 try {
 const sizes = [...new Map(LARGE_SIZES.map(([w, quality]) => [`${Math.min(w, width)}:${quality}`, [Math.min(w, width), quality] as const])).values()]
 for (const format of formats)
 for (const [most, quality] of format === 'png' ? [...new Map(sizes.map(([w]) => [w, [w, 0] as const])).values()] : sizes) {
 const wide = `${base}-${most}.png`
-const sized = await $.process.run([sips($), '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
+const sized = await runOn($, [sips($), '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
 if (sized.exitCode !== 0) continue
-const tall = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+const tall = Number(/pixelHeight:\s*(\d+)/.exec((await runOn($, [sips($), '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
 if (!tall) continue
-const padded = await $.process.run([sips($), '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }))
+const padded = await runOn($, [sips($), '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }))
 if (padded.exitCode !== 0) continue
 const bands: string[] = []
 let band = Math.min(tall, 400)
@@ -4944,8 +4995,8 @@ let isTooMany = false
 for (let y = 0; y < tall; ) {
 const rows = Math.min(band, tall - y)
 const out = `${base}-band.${format === 'png' ? 'png' : 'jpg'}`
-await $.process.run([sips($), '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out])
-const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+await runOn($, [sips($), '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out])
+const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await runOn($, [sips($), '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
 const read = cutTo === rows ? ((await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined) : undefined
 const source = read ? `<svg xmlns="http://www.w3.org/2000/svg" width="${most}" height="${rows}" viewBox="0 0 ${most} ${rows}"><image href="data:image/${format};base64,${read.base64}" width="${most}" height="${rows}"/></svg>` : ''
 if (!source) break
@@ -4969,7 +5020,7 @@ if (whole >= tall) return { bands, width, height }
 }
 return null
 } finally {
-await $.process.run(['sh', '-c', 'rm -f "$1"-*', 'sh', base]).catch(() => undefined)
+await runOn($, ['sh', '-c', 'rm -f "$1"-*', 'sh', base]).catch(() => undefined)
 }
 }
 const largeOf = ($: EngineInterface, path: string, id: string): Large | undefined => {
@@ -5045,9 +5096,9 @@ if (from >= 0) thumb = { source: text.slice(from), width: 0, height: 0 }
 } else if (isDrawn && RASTER.test(asked)) {
 const to = `${dir}/thumbs/${slug(asked).slice(-60)}-${mark(asked).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
 if (!(await $.fs.exists(to))) {
-await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
 for (const size of CHAT_THUMB_SIZES) {
-await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to])
+await runOn($, [sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to])
 if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES) break
 }
 }
@@ -5061,7 +5112,7 @@ return pic
 const picturesIn = async ($: EngineInterface, lines: Line[], one: Todo, kept: Report[], canDraw: boolean) => {
 if (!isThumbsCleared) {
 isThumbsCleared = true
-await $.process.run(['find', `${dir}/thumbs`, '-name', '*.jpg', '-mtime', '+14', '-delete']).catch(() => undefined)
+await runOn($, ['find', `${dir}/thumbs`, '-name', '*.jpg', '-mtime', '+14', '-delete']).catch(() => undefined)
 }
 const last = new Map<string, { at: number; isSeen: boolean }>()
 let uses = 0
@@ -5227,9 +5278,9 @@ thumb = { source: text.slice(from), width: width && height ? width : 0, height: 
 } else if (RASTER.test(path)) {
 const to = `${dir}/thumbs/ask-${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
 if (!(await $.fs.exists(to))) {
-await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
 for (const [size, quality] of ASK_THUMB_SIZES) {
-await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
+await runOn($, [sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
 if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= ASK_THUMB_BYTES) break
 }
 }
@@ -5338,10 +5389,10 @@ const questionPicture = async ($: EngineInterface, id: string, title: string, te
 if (!dir || !choices.length) return ''
 const base = `${questionsDir()}/${id.replace(/[^A-Za-z0-9_-]/g, '-')}-${at}`
 try {
-await $.process.run(['mkdir', '-p', questionsDir()])
+await runOn($, ['mkdir', '-p', questionsDir()])
 await $.fs.write(`${base}.svg`, questionSvg(title, text, details, choices))
-const r = await $.process.run([sips($), '-s', 'format', 'png', `${base}.svg`, '--out', `${base}.png`], { timeoutMs: 20_000 })
-await $.process.run(['rm', '-f', `${base}.svg`]).catch(() => undefined)
+const r = await runOn($, [sips($), '-s', 'format', 'png', `${base}.svg`, '--out', `${base}.png`], { timeoutMs: 20_000 })
+await runOn($, ['rm', '-f', `${base}.svg`]).catch(() => undefined)
 if (r.exitCode !== 0 || (await $.fs.stat(`${base}.png`).catch(() => undefined))?.kind !== 'file') return void (await log($, `picture of a question not made: ${oneLine(r.stderr ?? '').slice(0, 160)}`)), ''
 return `${base}.png`
 } catch (err) {
@@ -5397,7 +5448,7 @@ return paths.length ? { ...one, wrote: [...(one.wrote ?? []), ...paths].slice(-W
 const repoOf = new Map<string, string>()
 const repoTop = async ($: EngineInterface, folder: string) => {
 if (repoOf.has(folder)) return repoOf.get(folder) ?? ''
-const r = await $.process.run(['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
+const r = await runOn($, ['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
 const top = r?.exitCode === 0 ? r.stdout.trim() : ''
 if (repoOf.size > 200) repoOf.clear()
 repoOf.set(folder, top)
@@ -5408,7 +5459,7 @@ const COUNT_LINES =
 const codeOf = async ($: EngineInterface, byTop: Map<string, string[]>, since: number): Promise<CodeMade | undefined> => {
 const files: CodeFile[] = []
 for (const [top, paths] of byTop) {
-const r = await $.process.run(['sh', '-c', COUNT_LINES, 'sh', top, String(Math.floor(since / 1000)), ...paths.map(path => path.slice(top.length + 1))], { timeoutMs: 8000 }).catch(() => undefined)
+const r = await runOn($, ['sh', '-c', COUNT_LINES, 'sh', top, String(Math.floor(since / 1000)), ...paths.map(path => path.slice(top.length + 1))], { timeoutMs: 8000 }).catch(() => undefined)
 if (r?.exitCode !== 0) continue
 for (const line of rows(r.stdout)) {
 const [added = '', taken = '', inRepo = '', isNew = ''] = line.split('\t')
@@ -5586,30 +5637,30 @@ const stat = await $.fs.stat(one.path).catch(() => undefined)
 if (!stat || stat.kind !== 'file') return null
 const to = `${dir}/thumbs/tile-${slug(one.path).slice(-60)}-${mark(one.path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
 if (!(await $.fs.exists(to))) {
-await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
 let from = one.path
 let scratch = ''
 if (TEXT_DOC.test(one.path) && !/\.html?$/i.test(one.path)) return null
 if (one.kind !== 'picture' && one.kind !== 'pdf') {
 if (isLinux) return null
 scratch = `${dir}/thumbs/ql-${Math.round(await $.clock.now())}-${(qlMade += 1)}`
-await $.process.run(['mkdir', '-p', scratch])
-await $.process.run(['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
+await runOn($, ['mkdir', '-p', scratch])
+await runOn($, ['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
 from = `${scratch}/${fileName(one.path)}.png`
-if (!(await $.fs.exists(from))) return (await $.process.run(['rm', '-rf', scratch]).catch(() => undefined), null)
+if (!(await $.fs.exists(from))) return (await runOn($, ['rm', '-rf', scratch]).catch(() => undefined), null)
 }
-const said = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', from], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? ''
+const said = (await runOn($, [sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', from], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? ''
 const [width = 0, height = 0] = [/pixelWidth: (\d+)/, /pixelHeight: (\d+)/].map(re => Number(re.exec(said)?.[1] ?? 0))
 const isTall = width > 0 && height / width > FACE_H / FACE_W
 const mid = `${to}.png`
-if (isTall) await $.process.run([sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
+if (isTall) await runOn($, [sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
 for (const quality of ['50', '35', '20']) {
 await $.process
 .run(isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 })
 .catch(() => undefined)
 if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= TILE_THUMB_BYTES) break
 }
-await $.process.run(['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)
+await runOn($, ['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)
 }
 const read = (await $.fs.read(to, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined
 return read?.base64 && read.base64.length < TILE_THUMB_BYTES * 2 ? { base64: read.base64 } : null
@@ -6020,7 +6071,7 @@ let got = diffRead.get(paneId)
 const readKey = `${file.path}:${since}:${stat?.mtimeMs ?? 0}`
 if (stat && (!got || got.key !== readKey)) {
 const top = await repoTop($, file.path.slice(0, file.path.lastIndexOf('/')))
-const r = top ? await $.process.run(['sh', '-c', DIFF_OF, 'sh', top, String(since), file.path.slice(top.length + 1)], { timeoutMs: 8000 }).catch(() => undefined) : undefined
+const r = top ? await runOn($, ['sh', '-c', DIFF_OF, 'sh', top, String(since), file.path.slice(top.length + 1)], { timeoutMs: 8000 }).catch(() => undefined) : undefined
 const whole = await $.fs.read(file.path).then(text => String(text), () => '')
 got = { key: readKey, text: r?.exitCode === 0 ? r.stdout : '', whole }
 if (diffRead.size > 20) diffRead.delete(diffRead.keys().next().value ?? '')
@@ -6398,7 +6449,7 @@ void log($, `${what}: ${title} — ${sent.isSent ? `notified through ${sent.chan
 return false
 }
 const click = [...(opens ? ['--open', opens] : opens === undefined ? await clickOf($) : []), '--key', key.slice(0, 200)]
-const run = (lead: string[]) => $.process.run([`${$.plugin.root}/bin/notify`, ...lead, '--title', title, '--text', text, ...click]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+const run = (lead: string[]) => runOn($, [`${pluginRoot($)}/bin/notify`, ...lead, '--title', title, '--text', text, ...click]).catch(err => ({ exitCode: -1, stderr: String(err) }))
 const amber = asks ? await run(['--asks', ...(asks.chime ? ['--chime'] : [])]) : undefined
 if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
 void log($, `${what}: ${title} — app said ${sent.reason}; ${amber.exitCode === 0 ? 'notified through Claudopus Asks' : 'macOS asked to allow Claudopus Asks'}`)
@@ -6521,28 +6572,28 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
 const lock = `${dir}/update.lock`
 const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
 const take = async () =>
-(await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+(await runOn($, ['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
 if (!(await take())) {
 const now = await $.clock.now()
 const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
 if (now - at < UPDATE_LOOK && at - now <= LOCK_SKEW) return UPDATE_BUSY
 const seen = await readOr($, lock)
 const aside = `${lock}.${token.split(' ')[1]}`
-if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
-if ((await readOr($, aside)) !== seen) return ((await $.process.run(['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
-await $.process.run(['rm', '-f', aside]).catch(() => undefined)
+if ((await runOn($, ['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
+if ((await readOr($, aside)) !== seen) return ((await runOn($, ['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
+await runOn($, ['rm', '-f', aside]).catch(() => undefined)
 if (!(await take())) return UPDATE_BUSY
 }
 try {
 return await act()
 } finally {
-if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
+if ((await readOr($, lock)) === token) await runOn($, ['rm', '-f', lock]).catch(() => undefined)
 }
 }
 const lookIo = ($: EngineInterface): LookIo => ({
 read: path => readOr($, path),
 write: (path, text) => $.fs.write(path, text),
-run: (argv, timeoutMs) => $.process.run(argv, { timeoutMs }),
+run: (argv, timeoutMs) => runOn($, argv, { timeoutMs }),
 page: () =>
 Promise.race([
 $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
@@ -6556,7 +6607,7 @@ const engineOf = async ($: EngineInterface) => {
 const named = await $.env.get('CLAUDE_CODE_EXECPATH')
 if (named) return named
 const onPath = ((await $.env.get('PATH')) ?? '').split(':').filter(one => one.startsWith('/')).map(one => `${one.replace(/\/+$/, '')}/claude`)
-for (const one of [...onPath, `${(await $.env.get('HOME')) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
+for (const one of [...onPath, `${(await homeFolder($)) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
 if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
 return 'claude'
 }
@@ -6634,7 +6685,7 @@ return pageRead?.page
 let sourceKnown: { src: Source; cannot?: { what: string; why: string }; where: string } | undefined
 const knowSource = async ($: EngineInterface, isAgain = false) => {
 if (sourceKnown && !isAgain) return sourceKnown
-const root = $.plugin.root.replace(/\/+$/, '')
+const root = pluginRoot($).replace(/\/+$/, '')
 const from = installedFrom(root)
 const io = lookIo($)
 const plugins = from?.plugins ?? dir.replace(/\/claudopus$/, '/plugins')
@@ -6822,7 +6873,7 @@ if (!page || page.version !== steps.version || page.tree !== steps.tree) return 
 const key = `${src.repo}|${steps.commit}|${steps.tree}`
 const known = heldChecked.get(key)
 if (known !== undefined) return known
-const git = (args: string[]) => $.process.run(['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+const git = (args: string[]) => runOn($, ['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
 const held = (await git(['rev-parse', '--verify', '-q', 'refs/claudopus/update^{commit}'])).stdout.trim()
 const tree = held === steps.commit ? (await git(['rev-parse', '--verify', '-q', `${steps.commit}:${src.sub}`])).stdout.trim() : ''
 const isHeld = tree === steps.tree
@@ -6989,16 +7040,16 @@ return noticeCard($, ui, n, versions.version).catch(() => null)
 
 const installedNow = async ($: EngineInterface) => (await installedCopy($))?.version ?? ''
 const installedCopy = async ($: EngineInterface) => {
-const from = installedFrom($.plugin.root)
+const from = installedFrom(pluginRoot($))
 if (!from) {
-const root = $.plugin.root.replace(/\/+$/, '')
+const root = pluginRoot($).replace(/\/+$/, '')
 if (!(await readOr($, `${root}/../../.git/HEAD`)).trim()) return undefined
 const version = versionOnPage(await readOr($, `${root}/.claude-plugin/plugin.json`))
 return version ? { version, installPath: root } : undefined
 }
 const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
 const id = `${from.plugin}@${from.marketplace}`
-return copyOf(installed, id, $.plugin.root, cwd)
+return copyOf(installed, id, pluginRoot($), cwd)
 }
 
 const HOLD_EVERY = 1000
@@ -7067,7 +7118,7 @@ const made = await $.process
 .catch(() => ({ exitCode: 1 }))
 if (made.exitCode !== 0) return
 await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {
-await $.process.run(['rm', '-f', played]).catch(() => undefined)
+await runOn($, ['rm', '-f', played]).catch(() => undefined)
 await log($, `updated sound not played: ${String(err)}`)
 })
 }
@@ -7104,7 +7155,7 @@ const CHANGELOG_TITLE = 'Changelog'
 const CHANGELOG_PAGE = 'https://claudopus.ai/changelog.html'
 let changelogRead: Promise<Version[]> | undefined
 const versionsLogged = ($: EngineInterface) => {
-changelogRead ??= readOr($, `${$.plugin.root}/CHANGELOG.md`).then(changelogOf)
+changelogRead ??= readOr($, `${pluginRoot($)}/CHANGELOG.md`).then(changelogOf)
 return changelogRead
 }
 const openChangelog = async ($: EngineInterface) => {
@@ -7166,7 +7217,7 @@ const noteSeen = async ($: EngineInterface) => {
 if (!dir || seenIn(await readOr($, seenPath()))) return
 const loaded = (await versionsOf($)).version
 if (!loaded) return
-const root = $.plugin.root.replace(/\/+$/, '')
+const root = pluginRoot($).replace(/\/+$/, '')
 const copies = installedFrom(root) ? (await $.fs.list(root.slice(0, root.lastIndexOf('/'))).catch(() => [])).map(one => one.name) : []
 const start = (updatedMoment?.to === loaded && updatedMoment.from) || previousOf(copies, loaded) || loaded
 await writeSeen($, start)
@@ -7261,8 +7312,8 @@ const base = `${dir}/terminal`
 const home = `${base}/${slug(one.id) || 'work'}-${at}`
 await $.fs.write(`${home}/command.txt`, ask.copy)
 for (const [name, text] of Object.entries(terminalFiles(ask.cwd || cwd, home))) await $.fs.write(`${home}/${name}`, text)
-const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+const ready = await runOn($, ['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+const r = ready.exitCode === 0 ? await runOn($, ['open', `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
 presses += 1
 openedKey = r.exitCode === 0 ? `${one.id}:${ask.at}:${ask.copy}` : ''
 if (r.exitCode !== 0) void log($, `terminal not opened: ${r.stderr.trim().slice(0, 160)}`)
@@ -7616,10 +7667,10 @@ function run(argv) {
 const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
 const pastePicture = async ($: EngineInterface, id: string) => {
 if (!canAttach()) return
-await $.process.run(['mkdir', '-p', attachedDir()])
+await runOn($, ['mkdir', '-p', attachedDir()])
 const at = new Date(await $.clock.now())
 const to = `${attachedDir()}/pasted-${at.getDate()}-${MONTHS[at.getMonth()]}-${[at.getHours(), at.getMinutes(), at.getSeconds()].map(n => String(n).padStart(2, '0')).join('.')}.png`
-const r = await $.process.run(isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
+const r = await runOn($, isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
 const got = (r?.exitCode === 0 ? r.stdout : '').split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
 if (got.length) return addAttached($, id, got)
 attachSaid.set(id, NOTHING_TO_PASTE)
@@ -7630,7 +7681,7 @@ const PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose fil
 const PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files']
 const pickFiles = async ($: EngineInterface, id: string) => {
 if (!canAttach()) return
-const r = await $.process.run(isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
+const r = await runOn($, isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
 if (!r || r.exitCode !== 0) return
 const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
 if (!picked.length) return
@@ -8277,7 +8328,7 @@ const unshare = async ($: EngineInterface, isSure = false) => {
 const { id } = await read($, me)
 if (!id || !dir || (!sharedSign && !isSure)) return
 sharedSign = ''
-if (await $.fs.exists(ownLive(id)).catch(() => false)) await $.process.run(['rm', '-f', ownLive(id)]).catch(() => undefined)
+if (await $.fs.exists(ownLive(id)).catch(() => false)) await runOn($, ['rm', '-f', ownLive(id)]).catch(() => undefined)
 }
 let pushedYou = ''
 let pushedLatest = ''
@@ -8419,7 +8470,7 @@ const heldApp = (c: Shared) => (c.link?.app && appIds.has(c.link.app) ? c.link.a
 const readAppIds = async ($: EngineInterface, now: number) => {
 if (now - appIdsAt < 30_000) return false
 appIdsAt = now
-const root = `${(await $.env.get('HOME')) ?? ''}/Library/Application Support/Claude/claude-code-sessions`
+const root = `${(await homeFolder($)) ?? ''}/Library/Application Support/Claude/claude-code-sessions`
 const found = new Map<string, string>()
 for (const account of await $.fs.list(root).catch(() => []))
 for (const org of account.kind === 'dir' ? await $.fs.list(`${root}/${account.name}`).catch(() => []) : [])
@@ -8487,7 +8538,7 @@ if (now - (Number(await readOr($, stamp)) || 0) < OPEN_EVERY - 250) continue
 const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
 if (now - (f.fetchedAt ?? 0) > STALE) continue
 await $.fs.write(stamp, String(now))
-const r = await $.process.run(ssh(mac, openTake(from)), { timeoutMs: 8_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+const r = await runOn($, ssh(mac, openTake(from)), { timeoutMs: 8_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
 if (r.exitCode !== 0) continue
 for (const chat of opensOf(r.stdout)) await openTaken($, chat, mac)
 }
@@ -8517,7 +8568,7 @@ const answeredHere = new Set<string>()
 const leaveHere = ($: EngineInterface, folder: string, name: string, body: unknown) =>
 $.fs
 .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(body))
-.then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
+.then(() => runOn($, ['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
 .catch(err => ({ exitCode: -1, stderr: String(err) }))
 const readAnswers = async ($: EngineInterface) => {
 const { id } = await read($, me)
@@ -8525,7 +8576,7 @@ if (!id || !dir) return
 const folder = `${liveDir()}/${ANSWERS}/${id}`
 const all = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json') || entry.name.endsWith('.part'))
 if (!all.length) return
-for (const entry of all) await $.process.run(['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
+for (const entry of all) await runOn($, ['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
 await log($, `${all.length === 1 ? 'an answer' : `${all.length} answers`} left in a file put away unread: an ask is answered only in its own chat`)
 }
 
@@ -8536,7 +8587,7 @@ const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o
 let localName = ''
 const knowLocalName = async ($: EngineInterface) => {
 if (localName) return localName
-const r = await $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+const r = await runOn($, isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
 localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
 return localName
 }
@@ -8600,7 +8651,7 @@ if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY) continue
 const kept = { mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, acks: was.acks ?? [], seen: was.seen ?? [] }
 await $.fs.write(macPath(mac), JSON.stringify({ ...kept, triedAt: now }))
 const push = pushOf(from, keyOf(macName(mac)), now, await ownFiles($, now))
-const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+const r = await runOn($, ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
 if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
 if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
 continue
@@ -8634,10 +8685,10 @@ const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice
 try {
 await syncWith($, mac, was, now, staging)
 } finally {
-await $.process.run(['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
+await runOn($, ['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
 }
 }
-if (isTried) await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
+if (isTried) await runOn($, ['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
 } finally {
 isSyncing = false
 }
@@ -8646,7 +8697,7 @@ const aTrip = (ids: string[], tried: Record<string, number> = {}) =>
 ids.map((id, i) => ({ id, i, at: tried[id] ?? 0 })).sort((a, b) => a.at - b.at || a.i - b.i).slice(0, RESULTS_A_TRIP).map(one => one.id)
 const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: number, staging: string) => {
 const home = dir.slice(0, -'/.claude/claudopus'.length)
-const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
+const looked = await runOn($, ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
 const theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined
 if (!theirs) {
 if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`)
@@ -8664,8 +8715,8 @@ const missingThere = [...mine.keys()].filter(id => !theirs.results.has(id))
 const wanted = aTrip(missingHere, was.tried)
 for (const id of wanted) {
 const into = `${staging}/${id}`
-await $.process.run(['mkdir', '-p', into])
-const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+await runOn($, ['mkdir', '-p', into])
+const r = await runOn($, ['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
 const isWhole = r.exitCode === 0 && (await $.fs.exists(`${into}/_end`).catch(() => false))
 if (!isWhole || (parsedMeta(await readOr($, `${into}/${id}/meta.json`)) as { id?: unknown }).id !== id) {
 await log($, `result ${id} from ${mac} not brought: ${r.exitCode !== 0 ? r.stderr.trim().slice(0, 160) : 'it came cut short'}`)
@@ -8675,23 +8726,23 @@ for (const file of ['meta.json', 'report.md']) {
 const text = await readOr($, `${into}/${id}/${file}`)
 if (text) await $.fs.write(`${into}/${id}/${file}`, rehome(text, theirs.home, home))
 }
-const moved = await $.process.run(['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }))
+const moved = await runOn($, ['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }))
 if (moved.exitCode === 0) changed += 1
 }
 const handed = aTrip(missingThere, was.tried)
 if (handed.length) {
 const out = `${staging}-out`
-await $.process.run(['mkdir', '-p', out])
+await runOn($, ['mkdir', '-p', out])
 const ready: string[] = []
 for (const id of handed) {
-if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
+if ((await runOn($, ['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
 for (const file of ['meta.json', 'report.md']) {
 const text = await readOr($, `${out}/${id}/${file}`)
 if (text) await $.fs.write(`${out}/${id}/${file}`, rehome(text, home, theirs.home))
 }
 ready.push(id)
 }
-const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
+const r = ready.length ? await runOn($, ['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
 if (r.exitCode !== 0) await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`)
 }
 let marked = 0
@@ -8711,7 +8762,7 @@ const ok = await markReport($, { id } as Report, stored => marksOf(broughtBackBy
 }
 const theirsNext = merged(there.text, mineNow, wasArchived)
 if (theirsNext) {
-const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+const r = await runOn($, ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
 if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`)
 ;(isSame &&= r.exitCode === 0), (marked += 1)
 }
@@ -8739,8 +8790,8 @@ const lookAfar = async ($: EngineInterface, now: number) => {
 if (now - afarAt < AFAR_EVERY) return false
 afarAt = now
 const failed = { exitCode: -1, stdout: '' }
-const here = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-const app = await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+const here = await runOn($, ['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+const app = await runOn($, ['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
 const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : []
 for (const mac of macs) {
 const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
@@ -8778,7 +8829,7 @@ const AFAR_FRESH = 3 * 60_000
 const toldDir = () => `${liveDir()}/${MACS}/told`
 const tellOnce = async ($: EngineInterface, key: string, tell: () => Promise<unknown>) => {
 const path = `${toldDir()}/${key.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 150)}`
-const r = await $.process.run(['sh', '-c', 'mkdir -p "$1" && mkdir "$2" 2>/dev/null', 'sh', toldDir(), path]).catch(() => ({ exitCode: -1 }))
+const r = await runOn($, ['sh', '-c', 'mkdir -p "$1" && mkdir "$2" 2>/dev/null', 'sh', toldDir(), path]).catch(() => ({ exitCode: -1 }))
 if (r.exitCode === 0) await tell().catch(err => log($, `${key} not told: ${String(err)}`))
 }
 let toldSwept = -Infinity
@@ -8786,7 +8837,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 if (!list.length) return
 if (now - toldSwept > 3_600_000) {
 toldSwept = now
-await $.process.run(['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined)
+await runOn($, ['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined)
 }
 let config: { notifications?: unknown } = {}
 try {
@@ -8844,7 +8895,7 @@ const BOX_KEY = /^MII[A-Za-z0-9+/]{280,1400}={0,2}$/
 const boxKeys = new Map<string, string>()
 const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A'
 const sealedFor = async ($: EngineInterface, key: string, value: string) => {
-const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
+const r = await runOn($, ['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
 const out = r?.exitCode === 0 ? r.stdout.trim() : ''
 return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
 }
@@ -8896,8 +8947,8 @@ const cards = await read($, todos)
 for (const entry of entries) {
 const marked = entry.name.replace(/\.told$/, '')
 const answered = entry.name.replace(/\.reply$/, '')
-if (entry.name.endsWith('.reply') && BOX_ID.test(answered) && !entries.some(other => other.name === `${answered}.json`) && now - (boxRepliedAt.get(answered) ?? 0) > BOX_REPLY_TAKEN) (boxRepliedAt.delete(answered), await $.process.run(['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined))
-if (entry.name.endsWith('.told') && BOX_ID.test(marked) && !entries.some(other => other.name === `${marked}.json`)) await $.process.run(['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined)
+if (entry.name.endsWith('.reply') && BOX_ID.test(answered) && !entries.some(other => other.name === `${answered}.json`) && now - (boxRepliedAt.get(answered) ?? 0) > BOX_REPLY_TAKEN) (boxRepliedAt.delete(answered), await runOn($, ['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined))
+if (entry.name.endsWith('.told') && BOX_ID.test(marked) && !entries.some(other => other.name === `${marked}.json`)) await runOn($, ['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined)
 const id = entry.name.replace(/\.json$/, '')
 if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
 try {
@@ -8910,7 +8961,7 @@ const isKeySame = !key || boxKeys.get(id) === key
 const card = runner?.agent ? cards.find(other => other.id === topOf(cards, runner.agent ?? ''))?.id : undefined
 if (one.id === id && words && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, ...words, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(runner.agent ? { agent: runner.agent } : {}), ...(card ? { card } : {}), ...(one.kind === 'admin' && key ? { key } : {}) })
 else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
-await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`, `${boxesDir()}/${id}.reply`]).catch(() => undefined)
+await runOn($, ['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`, `${boxesDir()}/${id}.reply`]).catch(() => undefined)
 await boxKeyring($, 'delete', id)
 }
 } catch {
@@ -8925,11 +8976,11 @@ for (const one of found) {
 if (boxTold.has(one.id)) continue
 if (one.chat !== undefined && one.chat !== boxChat && now - one.at < BOX_GRACE) continue
 boxTold.add(one.id)
-const mark = one.isOwn ? { exitCode: 0 } : await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
+const mark = one.isOwn ? { exitCode: 0 } : await runOn($, ['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
 if (mark.exitCode !== 0) continue
 const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(err => (log($, `panel not opened for a box: ${String(err)}`), undefined))
 if (!opened?.isPlaced) {
-if (!one.isOwn) await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
+if (!one.isOwn) await runOn($, ['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
 await log($, `box ${one.id} given back: the panel is not drawn here${opened && !opened.isPlaced ? ` (${opened.reason})` : ''}`)
 continue
 }
@@ -8948,9 +8999,9 @@ const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id
 !(await hasKeychain($))
 ? { exitCode: -1 }
 : isLinux
-? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+? runOn($, [`${pluginRoot($)}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
 : what === 'delete'
-? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+? runOn($, ['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
 : Promise.resolve({ exitCode: -1 })
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
 if (!value) return
@@ -8981,7 +9032,7 @@ const r = !(await hasKeychain($))
 : await $.process
 .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
 .catch(() => ({ exitCode: -1 }))
-const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await runOn($, ['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
 if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
 boxPresses += 1
 boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
@@ -9008,7 +9059,7 @@ const name = one.name ?? ''
 boxPresses += 1
 boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
 if (value.length < SHORTEST_KEY) return void (boxSaid.set(id, `That was shorter than ${SHORTEST_KEY} characters. Paste the whole key.`), drawAgain($))
-const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', 'claudopus-secret', name, `Claudopus: ${name}`], { stdin: `${value}\n`, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+const r = await runOn($, [`${pluginRoot($)}/bin/keyring`, 'set', 'claudopus-secret', name, `Claudopus: ${name}`], { stdin: `${value}\n`, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
 if (r.exitCode !== 0) {
 boxSaid.set(id, `It couldn't be saved in ${keptWhere()}. Try again.`)
 await log($, `key ${name} not kept from its box: the keychain ended ${r.exitCode}`)
@@ -9023,7 +9074,7 @@ pressedLine($, one.card ?? '', '', '', `You gave ${name}`)
 drawAgain($)
 await log($, `key ${name} saved from the box on ${one.card}`)
 await refreshKeys($).catch(err => log($, `keys not made again: ${String(err)}`))
-await ownKeyDone($, one, named(KEY_GIVEN($.plugin.root, name)), `You gave ${name}`)
+await ownKeyDone($, one, named(KEY_GIVEN(pluginRoot($), name)), `You gave ${name}`)
 }
 const ownKeyDone = async ($: EngineInterface, one: Asked, text: string, label: string) => {
 const card = one.card ?? ''
@@ -9050,7 +9101,7 @@ closeBarOf(id)
 boxHeldReply.delete(id)
 if (one) pressedLine($, one.card ?? '', one.kind === 'password' ? DONT_ALLOW : DONT_GIVE, said)
 drawAgain($)
-await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
+await runOn($, ['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
 drawAgain($)
 }
 
@@ -9118,7 +9169,7 @@ boxes = boxes.filter(other => other.id !== id)
 closeBarOf(id)
 pressedLine($, one.card ?? '', '', '', `You answered “${cut(oneLine(said), 60)}”`)
 drawAgain($)
-await $.process.run(['rm', '-f', request]).catch(() => undefined)
+await runOn($, ['rm', '-f', request]).catch(() => undefined)
 await log($, `box ${id} answered in words`)
 }
 const submitBox = ($: EngineInterface, id: string, mode: BoxMode, value: string) => {
@@ -9167,7 +9218,7 @@ else gateOnce.delete(card)
 return at >= 0
 }
 const HELD_STEP = 60
-const heldStep = ($: EngineInterface) => $.process.run(['/bin/sleep', String(HELD_STEP)], { timeoutMs: (HELD_STEP + 10) * 1000 }).then(() => undefined, () => undefined)
+const heldStep = ($: EngineInterface) => runOn($, ['/bin/sleep', String(HELD_STEP)], { timeoutMs: (HELD_STEP + 10) * 1000 }).then(() => undefined, () => undefined)
 let looseGates: Gate[] = []
 const workAllowed = new Set<string>()
 const GATE_DENIED = (gate?: Pick<Gate, 'kind'>) =>
@@ -9261,7 +9312,7 @@ for m in "$@"; do
 done`
 const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
 if (!(await hasKeychain($))) return undefined
-const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
+const r = await runOn($, ['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
 const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
 return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
 }
@@ -9336,7 +9387,7 @@ let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
 if (isKeptForgotten || !dir) return
 isKeptForgotten = true
-if (await hasKeychain($)) await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+if (await hasKeychain($)) await runOn($, ['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
 if ((await readConfig($, dir)).adminPassword !== undefined) await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined)
 }
 
@@ -9346,12 +9397,12 @@ const at = await $.clock.now()
 const name = `${id.replace(/[^A-Za-z0-9_-]/g, '')}-${at}`
 const seal = (await sealed($, 'make', [`${word}\n${name}\n${at}\n${call.host}\n${call.command}`]))?.[0]
 if (!seal) return ''
-await $.process.run(['/usr/bin/find', grantsDir(), '-type', 'f', '-mmin', '+10', '-delete'], { timeoutMs: 10_000 }).catch(() => undefined)
+await runOn($, ['/usr/bin/find', grantsDir(), '-type', 'f', '-mmin', '+10', '-delete'], { timeoutMs: 10_000 }).catch(() => undefined)
 await $.fs.write(`${grantsDir()}/${name}.json`, JSON.stringify({ id: name, host: call.host, command: call.command, at, seal }))
 return name
 }
 const dropGrants = async ($: EngineInterface, names: string[]) => {
-for (const name of names) await $.process.run(['rm', '-f', `${grantsDir()}/${name}.json`]).catch(() => undefined)
+for (const name of names) await runOn($, ['rm', '-f', `${grantsDir()}/${name}.json`]).catch(() => undefined)
 }
 
 const unquoted = (command: string) => command.replace(/["'\\]/g, '')
@@ -9502,7 +9553,7 @@ void run.finally(() => answersOnWay.delete(run)).catch(err => log($, `press on a
 const PERMIT_TALK_KEPT = 8
 
 const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
-const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root)
+const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), pluginRoot($))
 if (!calls.length || !dir) return { grants: [] }
 const gate = await gateOf($)
 if (gate.mode === 'never') return { grants: [] }
@@ -9586,7 +9637,7 @@ const RELEASE_ALLOWED = 60 * 60_000
 const RELEASE_IT = 'Release it'
 const releaseAllowed = new Map<string, { folder: string; branch: string; at: number; tips?: string[] }>()
 const allowRelease = async ($: EngineInterface, card: string, folder: string) => {
-const git = (args: string[]) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
+const git = (args: string[]) => runOn($, ['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
 const repo = await git(['rev-parse', '--show-toplevel'])
 const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD'])
 if (!repo || !branch || branch === 'HEAD' || (await $.fs.stat(`${repo}/.release`).catch(() => undefined))?.kind !== 'file') return false
@@ -9612,14 +9663,14 @@ for (const tip of tips) if ((await git(['merge-base', tip, main])) === tip) retu
 return false
 }
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
-const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
+const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), pluginRoot($), cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
 if (!calls.length || !dir) return { grants: [] }
 const list = await read($, todos)
 const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
 const card = list.find(one => one.id === top)
 const grants: string[] = []
 for (const [n, call] of calls.entries()) {
-const git = (args: string[]) => $.process.run(['git', '-C', call.folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
+const git = (args: string[]) => runOn($, ['git', '-C', call.folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
 const repo = await git(['rev-parse', '--show-toplevel'])
 const branch = call.branch || (await git(['rev-parse', '--abbrev-ref', 'HEAD']))
 if (!repo || !branch || branch === 'HEAD') continue
@@ -9730,7 +9781,7 @@ return undefined
 }
 const knownKey = async ($: EngineInterface): Promise<'yes' | 'no' | 'error'> => {
 if (!(await hasKeychain($))) return 'error'
-const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
+const r = await runOn($, ['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
 return r?.exitCode === 0 ? 'yes' : r?.exitCode === 3 ? 'no' : 'error'
 }
 let isKnownWarned = false
@@ -9751,7 +9802,7 @@ throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
 const text = `${JSON.stringify({ files, count, seal }, null, 2)}\n`
 const aside = `${knownPath()}.${count}-${Math.random().toString(36).slice(2)}.new`
 await $.fs.write(aside, text)
-const moved = await $.process.run(['mv', '-f', aside, knownPath()], { timeoutMs: 10_000 }).catch(() => undefined)
+const moved = await runOn($, ['mv', '-f', aside, knownPath()], { timeoutMs: 10_000 }).catch(() => undefined)
 if (moved?.exitCode !== 0) await $.fs.write(knownPath(), text)
 if (knownSeen) knownPast.add(knownSeen.text)
 knownSeen = { text, files: new Map(known), count }
@@ -9775,7 +9826,7 @@ if (is !== null) {
 const at = new Date(await $.clock.now()).toISOString().slice(0, 23).replace(/[-:]/g, '').replace('T', '-').replace('.', '')
 await $.fs.write(`${dir}/${name}.${at}${Math.random().toString(36).slice(2, 6)}.put-back`, is).catch(() => undefined)
 }
-await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
+await runOn($, ['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
 if (text !== null) await $.fs.write(`${dir}/${name}`, text)
 }
 let personChecking: Promise<string[]> | undefined
@@ -9986,7 +10037,7 @@ const head = (String((input as { command?: unknown } | undefined)?.command ?? ''
 return head.trim().length >= 4 ? head.slice(0, 80) : ''
 }
 const running = async ($: EngineInterface) => {
-const r = await $.process.run(['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
+const r = await runOn($, ['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
 return r.exitCode === 0 ? r.stdout.split('\n') : undefined
 }
 const countOf = (lines: string[], snippet: string) => lines.filter(line => line.includes(`eval '${snippet}`)).length
@@ -10181,7 +10232,7 @@ if (!top || top.chat) return
 const runnable = runnableOf(tool, call)
 if (!runnable && connectorRuleOf(tool)) return void (await refusedConnector($, agent, top.id, own, tool, call, refusal.reason))
 if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
-const isRelease = releaseCalls(runnable.command, $.plugin.root, runnable.cwd).length > 0
+const isRelease = releaseCalls(runnable.command, pluginRoot($), runnable.cwd).length > 0
 const details = [runDetails(runnable, refusal.reason), isRelease ? RELEASE_SECOND_PRESS : '', own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
 const asked = isRelease ? BLOCKED_RELEASE_ASK : BLOCKED_ASK
 const at = await $.clock.now()
@@ -10207,7 +10258,7 @@ const rule = connectorRuleOf(tool)
 const name = rule.split('__').slice(2).join('__').replace(/_/g, ' ')
 const input = connectorInput(call)
 const home = dir.replace(/\/\.claude\/claudopus$/, '')
-const command = `${zshQuoted(`${$.plugin.root}/bin/allow-tool`)} ${rule}`
+const command = `${zshQuoted(`${pluginRoot($)}/bin/allow-tool`)} ${rule}`
 const details = [
 `It wanted to ${name}${input ? `: ${input}` : '.'}`,
 `${reason ? `Blocked as “${reason}”. ` : ''}Claude Code never counts a yes on this card or in the chat as yours for this: only your own Claude Code settings let it through.`,
@@ -10351,7 +10402,7 @@ return { command, cwd: cwd || dir.replace(/\/\.claude\/claudopus$/, ''), limitMs
 }
 const offerRun = async ($: EngineInterface, card: string, from: string, askAt: number, runnable: NonNullable<ReturnType<typeof runnableOf>>) => {
 await saveRuns($, list => [...list.filter(one => !isSameRun(one, { card, askAt })), { card, from, askAt, ...runnable }])
-if (dir) void $.process.run(['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15_000 }).catch(() => undefined)
+if (dir) void runOn($, ['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15_000 }).catch(() => undefined)
 }
 const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs once in ${shortPath(run.cwd, 60)}, for at most ${limitText(run.limitMs)}${reason ? ` · blocked as “${reason}”` : ''}.`
 
@@ -10373,7 +10424,7 @@ const at = await $.clock.now()
 const logFile = `${dir}/runs/${slug(one.id) || 'work'}-${at}.log`
 const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
 const r = isLogged
-? await $.process.run([`${$.plugin.root}/bin/run-it`, 'start', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15_000 }).catch(err => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+? await runOn($, [`${pluginRoot($)}/bin/run-it`, 'start', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15_000 }).catch(err => ({ exitCode: 1, stdout: '', stderr: String(err) }))
 : { exitCode: 1, stdout: '', stderr: 'its output file could not be made' }
 const pid = r.exitCode === 0 ? /^(\d+)\s*$/.exec(r.stdout.trim())?.[1] : undefined
 if (!pid) {
@@ -10427,7 +10478,7 @@ if (at - run.startedAt > run.limitMs) {
 await stopProcess($, run)
 return void (await endRun($, run, 'limit', undefined, runOutputOf(await fileEnd($, run.log, 64_000)).lines)), true
 }
-const alive = await $.process.run([`${$.plugin.root}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
+const alive = await runOn($, [`${pluginRoot($)}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
 if (alive && alive.exitCode !== 0) {
 const late = runOutputOf(await fileEnd($, run.log, 64_000))
 return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), true
@@ -10435,7 +10486,7 @@ return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopp
 return false
 }
 const stopProcess = ($: EngineInterface, run: PressRun) =>
-run.pid && run.log ? $.process.run([`${$.plugin.root}/bin/run-it`, 'stop', run.pid, run.log], { timeoutMs: 15_000 }).catch(err => log($, `run of ${run.card} not stopped: ${String(err)}`)) : Promise.resolve()
+run.pid && run.log ? runOn($, [`${pluginRoot($)}/bin/run-it`, 'stop', run.pid, run.log], { timeoutMs: 15_000 }).catch(err => log($, `run of ${run.card} not stopped: ${String(err)}`)) : Promise.resolve()
 const stopRun = async ($: EngineInterface, run: PressRun) => {
 presses += 1
 if (runStopped.has(runKey(run))) return
@@ -10987,7 +11038,7 @@ const mode: BoxMode = (inBar ? undefined : boxModes.get(one.id)) ?? 'key'
 const isOpen = Boolean(barOpen && isBoxKind(barOpen.kind) && barOpen.id === one.id)
 const close = { key: `${id}-close-${boxPresses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) }
 const refuse = { key: `${id}-cancel-${boxPresses}`, label: isKey ? DONT_GIVE : DONT_ALLOW, onPress: () => void cancelBox($, one.id) }
-const command = isKey ? '' : (adminCalls(one.command ?? '', $.plugin.root)[0]?.command ?? '')
+const command = isKey ? '' : (adminCalls(one.command ?? '', pluginRoot($))[0]?.command ?? '')
 return {
 id,
 kind: one.kind,
@@ -11324,7 +11375,7 @@ if (entry.name === `${id}.json`) {
 const text = await readOr($, path)
 if (text) await $.fs.write(path, text)
 }
-if (entry.name !== `${id}.json` && entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await $.process.run(['rm', '-f', path]).catch(() => undefined)
+if (entry.name !== `${id}.json` && entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await runOn($, ['rm', '-f', path]).catch(() => undefined)
 }
 }
 
@@ -11335,7 +11386,7 @@ lastSeen = undefined
 loadedVersion = undefined
 knownSeen = undefined
 const begun = await next(e)
-const home = (await $.env.get('HOME')) ?? ''
+const home = (await homeFolder($)) ?? ''
 dir = `${home}/.claude/claudopus`
 claudeDir = await configDir($)
 holdAt = 0
@@ -11347,7 +11398,7 @@ void registerKinds($)
 termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
 ;[termFrom = '', , termHere = '', termPort = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
 for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
-const text = await readOr($, `${$.plugin.root}/art/${file}`)
+const text = await readOr($, `${pluginRoot($)}/art/${file}`)
 ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
 }
 ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
@@ -11630,7 +11681,7 @@ let pasted = ''
 const m = await read($, me)
 
 if (!isOff) {
-const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
+const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, pluginRoot($), dir, 'roles/chat.md')).text, models, lean)))
 const index = (await readIndex($)).filter(s => !isScratchTopic(s.repo))
 const areas = await readAreas($)
 let changed = ''
@@ -11707,7 +11758,7 @@ on('prompt.context', async ($, e, next) => {
 const r = await next(e)
 const files = r.instructionFiles ?? e.instructionFiles
 const { path, content } = await keptRule($, 'principles', async () => {
-const now = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
+const now = await inForce($, pluginRoot($), dir, 'rules/CLAUDE.md')
 return { path: now.path, content: now.text }
 })
 if (!files || !content.trim()) return r
@@ -12025,7 +12076,7 @@ const moved = new Set<string>()
 if (files.length) {
 const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
 const script = `for f; do ${mtime}; printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done`
-const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
+const r = await runOn($, ['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
 if (!r) return
 const parts = r.stdout.split(/\n@@JOB@@ ([^\n]*)\n/)
 for (let n = 1; n + 1 < parts.length; n += 2) {
@@ -12066,7 +12117,7 @@ return now - (seen.wroteAt && !seen.isEmpty ? seen.wroteAt : b.at) >= SILENT_WAR
 for (const o of asked) if (!quiet.includes(o) && jobLog.get(o.id)?.live) (jobLog.set(o.id, { ...(jobLog.get(o.id) as Seen), live: undefined }), (isChanged = true))
 if (quiet.length && now - liveLookedAt >= LIVE_LOOK) {
 liveLookedAt = now
-const r = await $.process.run(['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
+const r = await runOn($, ['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
 for (const m of (r?.stdout ?? '').matchAll(/^@@LIVE@@ (\d+) (.*)$/gm)) {
 const o = quiet.find(o => `${tasksDir}/${o.id}.output` === m[2])
 const seen = o ? jobLog.get(o.id) : undefined
@@ -12199,8 +12250,8 @@ const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
 const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
 const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. It shows here as soon as the command writes something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
 await $.fs.write(`${home}/output.command`, script)
-const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+const ready = await runOn($, ['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+const r = ready.exitCode === 0 ? await runOn($, ['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
 if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }
 
@@ -12238,7 +12289,7 @@ const label = job ? (job.title ?? job.label) : run ? runLabel(run) : 'A command'
 const why = run?.how === 'failed' ? run.named?.why : undefined
 const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
 const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
-const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
+const r = file && canOpenFile(file) ? await runOn($, ['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
 const all = logLines(r?.stdout ?? '')
 const lines = all.slice(-LOG_LINES)
 const isFailed = run?.how === 'failed'
@@ -12435,7 +12486,7 @@ let tidyLast: { at: number; freed: number } | undefined
 const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
 const startTidy = async ($: EngineInterface, flags: string[] = []) => {
 if (!dir || isOff) return
-const r = await $.process.run(['/bin/sh', '-c', TIDY_START, 'sh', dir, `${$.plugin.root}/bin/tidy`, ...flags, dir])
+const r = await runOn($, ['/bin/sh', '-c', TIDY_START, 'sh', dir, `${pluginRoot($)}/bin/tidy`, ...flags, dir])
 if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
 
@@ -12459,7 +12510,7 @@ const lookDisk = async ($: EngineInterface) => {
 const now = await $.clock.now()
 if (now >= diskTriedAt && now - diskTriedAt < DISK_EVERY / 2) return diskKept
 diskTriedAt = now
-const r = await $.process.run(['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+const r = await runOn($, ['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
 const was = diskKept
 const wasLast = tidyLast
 diskKept = diskOf(r?.stdout ?? '', now) ?? diskKept
@@ -12654,7 +12705,7 @@ const ids = new Set(tops.map(one => one.id))
 return [...tops, ...list.filter(one => !one.chat && one.parentId && one.status === 'working' && ids.has(topOf(list, one.id)))]
 }
 let enginePid = ''
-const pidOfEngine = async ($: EngineInterface) => ((await $.process.run(['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
+const pidOfEngine = async ($: EngineInterface) => ((await runOn($, ['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
 let isLedgerRead = false
 let ledgerSign = ''
 let ledgerMade = ''
@@ -12669,9 +12720,9 @@ const sign = JSON.stringify(body)
 if (sign === ledgerSign) return
 const path = ledgerFile(id)
 const ledger: Ledger = { ...body, savedAt: await $.clock.now() }
-if (ledgerMade !== id) (await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`]), (ledgerMade = id))
+if (ledgerMade !== id) (await runOn($, ['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`]), (ledgerMade = id))
 await $.fs.write(`${path}.part`, JSON.stringify(ledger, null, 1))
-const r = await $.process.run(['mv', '-f', `${path}.part`, path])
+const r = await runOn($, ['mv', '-f', `${path}.part`, path])
 if (r.exitCode !== 0) throw new Error(`ledger not moved into place: ${r.stderr.slice(0, 200)}`)
 ledgerSign = sign
 }
@@ -12746,7 +12797,7 @@ isLedgerRead = true
 const saveBrief = async ($: EngineInterface, task: string, prompt: string) => {
 const { id } = await read($, me)
 if (!dir || !SAFE_CHAT.test(id) || !isTaskId(task) || !prompt.trim()) return
-await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`])
+await runOn($, ['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`])
 await $.fs.write(ledgerPart(id, task, 'brief'), prompt)
 }
 const worktreeOf = (command: string, folder: string) => {
@@ -12819,7 +12870,7 @@ const one = list.find(card => card.id === topOf(list, id))
 const { id: chat } = await read($, me)
 if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat)) return
 const path = ledgerPart(chat, one.id, 'carry')
-await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${chat}`])
+await runOn($, ['mkdir', '-p', `${dir}/${LEDGER_DIR}/${chat}`])
 await $.fs.write(path, await carryText($, one, answer))
 const model = modelName(one.model ?? '')
 await log($, `carry on ${one.id}: the chat is asked to start a fresh task from ${path}`)
@@ -12853,7 +12904,7 @@ if (cards.length) found.push({ ledger, cards })
 if (!found.length) return []
 const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort()
 if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
-const r = pids.length ? await $.process.run(['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
+const r = pids.length ? await runOn($, ['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
 pidsSeen.alive = new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)))
 pidsSeen.at = now
 pidsSeen.asked = pids.join(',')
@@ -12875,12 +12926,12 @@ cards: cards.map(one => (isInterrupted(one) ? one : cutOff(one, Math.min(now, Nu
 
 const BEAT_EVERY = 3000
 const beatFile = (id: string) => `${dir}/keep/${id}.beat`
-const configDir = async ($: EngineInterface) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+const configDir = async ($: EngineInterface) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeFolder($)) ?? ''}/.claude`
 const ownKey = async ($: EngineInterface, configDir: string) => {
-const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec($.plugin.root)?.[1]
+const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec(pluginRoot($))?.[1]
 if (market && /^[\w.-]+$/.test(market)) return `claudopus@${market}`
 const known = parsedOr<Record<string, { installLocation?: string }>>(await readOr($, `${configDir}/plugins/known_marketplaces.json`), {})
-const name = Object.entries(known).find(([, one]) => typeof one?.installLocation === 'string' && one.installLocation && ($.plugin.root === one.installLocation || $.plugin.root.startsWith(`${one.installLocation.replace(/\/$/, '')}/`)))?.[0]
+const name = Object.entries(known).find(([, one]) => typeof one?.installLocation === 'string' && one.installLocation && (pluginRoot($) === one.installLocation || pluginRoot($).startsWith(`${one.installLocation.replace(/\/$/, '')}/`)))?.[0]
 return name && /^[\w.-]+$/.test(name) ? `claudopus@${name}` : 'claudopus@inline'
 }
 let beatLine = ''
@@ -12890,7 +12941,7 @@ await $.fs.write(beatFile(id), beatLine)
 const proof = `${dir}/keep/${id}.hold-test`
 if (!isHoldTestDue && (await $.fs.exists(proof))) {
 const said = (await readOr($, proof)).trim()
-await $.process.run(['rm', '-f', proof])
+await runOn($, ['rm', '-f', proof])
 if (said !== enginePid) return void log($, "a hold-test file that did not name this chat's process was taken away")
 isHoldTestDue = true
 $.ui.invalidate('ui.render')
@@ -12918,13 +12969,13 @@ beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n${thisLoad}\n
 await beat($, id)
 everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
 const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" >/dev/null 2>&1 </dev/null &`
-const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+const r = await runOn($, ['/bin/sh', '-c', script, 'sh', `${pluginRoot($)}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
 if (r.exitCode !== 0) await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`)
 }
 const endBeat = async ($: EngineInterface, id: string) => {
 beatLine = ''
 if (dir && SAFE_CHAT.test(id) && enginePid) await $.fs.write(`${dir}/keep/${id}.ended`, `${enginePid}\t${Math.round(await $.clock.now())}\n`).catch(() => undefined)
-if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
+if (dir && SAFE_CHAT.test(id)) await runOn($, ['rm', '-f', beatFile(id)]).catch(() => undefined)
 }
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
 
@@ -12988,7 +13039,7 @@ return { at: 0, entries: [] }
 }
 
 const localNames = async ($: EngineInterface) => {
-const all = await $.process.run([`${$.plugin.root}/bin/keyring`, 'entries']).catch(() => undefined)
+const all = await runOn($, [`${pluginRoot($)}/bin/keyring`, 'entries']).catch(() => undefined)
 const pairs = all?.exitCode === 0 && !all.isStdoutTruncated ? all.stdout.split('\n').filter(Boolean).map(line => line.split('\t')) : undefined
 const claudopus = pairs?.filter(([service]) => service === 'claudopus-secret').map(([, account = '']) => plainName(account)).filter(Boolean)
 const keychain = pairs
@@ -13000,7 +13051,7 @@ const folders = [...new Set((await readIndex($).catch(() => [] as Stream[])).map
 for (const folder of folders) {
 const files = (await $.fs.list(folder).catch(() => [])).filter(one => one.kind === 'file' && !one.isLink).map(one => one.name).filter(name => /^\.env(?:\.[\w-]+)?$/.test(name) && !/\.(?:example|sample|template|dist)$/.test(name))
 for (const file of files) {
-const r = await $.process.run(['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
+const r = await runOn($, ['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
 for (const line of (r?.stdout ?? '').split('\n')) {
 const name = line.replace(/^\s*(?:export\s+)?/, '').replace(/\s*=$/, '')
 if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && isKeyVariable(name)) env.push({ name, where: `${folder}/${file}` })
@@ -13038,11 +13089,11 @@ sbosAt: sbos && isListed ? now : before.sbosAt,
 entries: entries.map((one, i) => ({ ...one, name: seen[i * 3] ?? '', ...(one.where ? { where: seen[i * 3 + 1] } : {}), ...(one.label ? { label: seen[i * 3 + 2] } : {}) })),
 }
 await $.fs.write(`${dir}/${KEYS_STATE}`, `${JSON.stringify(keys, null, 2)}\n`)
-await $.fs.write(`${dir}/${KEYS_FILE}`, keysText($.plugin.root, keys))
+await $.fs.write(`${dir}/${KEYS_FILE}`, keysText(pluginRoot($), keys))
 return keys
 }
 const keysHidden = async ($: EngineInterface, text: string) => {
-const r = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
+const r = await runOn($, [`${pluginRoot($)}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
 return r && r.exitCode === 0 && !r.isStdoutTruncated && r.stdout.trim() ? r.stdout : undefined
 }
 const keysFresh = async ($: EngineInterface) => {
@@ -13128,7 +13179,7 @@ const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?
 const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
 if (!dir) return ''
 const input = e as { command?: unknown; name?: unknown; text?: unknown; copy?: unknown; details?: unknown; for?: unknown; agent?: unknown }
-const root = $.plugin.root
+const root = pluginRoot($)
 const listed = async () => (await keysFresh($)).entries.filter(usable)
 if (e.tool === 'mcp__sbos__ask_secret') {
 if (typeof input.agent === 'string' && input.agent) return ''
@@ -13507,7 +13558,7 @@ const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the
 
 const scriptsRun = async ($: EngineInterface, command: string) => {
 const home = dir.replace(/\/\.claude\/claudopus$/, '')
-const root = $.plugin.root
+const root = pluginRoot($)
 const texts: string[] = []
 for (const path of filesRun(command, home, cwd || home)) {
 const runner = /\/bin\/(admin|secret|release|keyring)$/.exec(path)?.[1]
@@ -13560,19 +13611,19 @@ return roots.some(root => path === root || path.startsWith(`${root}/`) || (isSea
 }
 
 const workRules = async ($: EngineInterface) => {
-const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim()
+const work = named(fillModels((await inForce($, pluginRoot($), dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${pluginRoot($)}/bin/admin`).replace(/\{secret\}/g, `${pluginRoot($)}/bin/secret`).replace(/\{release\}/g, `${pluginRoot($)}/bin/release`).replace(/\{pane-file\}/g, `${pluginRoot($)}/bin/pane-file`).trim()
 const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`
 return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
 const ownCheckoutChanged = async ($: EngineInterface, texts: string[], start: string) => {
-const home = (await $.env.get('HOME')) ?? ''
+const home = (await homeFolder($)) ?? ''
 const folders = texts.flatMap(text => changesOf(text, start, home))
 if (!folders.length) return ''
 const known = await knowSource($).catch(() => undefined)
 const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
 if (!own) return ''
 for (const folder of folders) {
-const said = await $.process.run(['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+const said = await runOn($, ['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
 const [gitDir = '', common = '', top = ''] = said.stdout.trim().split('\n').map(line => line.trim())
 if (said.exitCode === 0 && gitDir && gitDir === common && top.replace(/\/+$/, '') === own) return own
 }
@@ -13671,7 +13722,7 @@ return { deny: SEND_BACKGROUND(who()) }
 }
 if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
 await log($, 'refused a command that pushes or merges to main itself')
-return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+return { deny: `${NO_PUSH} It is ${pluginRoot($)}/bin/release.` }
 }
 if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
 const command = String((e as { command?: unknown }).command ?? '')
@@ -13695,7 +13746,7 @@ if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)
 await log($, "refused a chat's own command that is more than one command")
 return { deny: NOT_ONE_COMMAND }
 }
-const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
+const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await runOn($, ['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
 const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
 const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
 const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
@@ -14225,7 +14276,7 @@ if (!query) return { result: 'Nothing to search for.' }
 const within = input.area?.trim() ? await recallWithin($, input.area.trim()) : undefined
 if (within && !within.length) return { result: `No area or topic is named "${input.area}". The areas: ${(await readAreas($)).map(one => one.name).join(', ') || 'none yet'}.` }
 const isWithin = (line: string) => !within || within.some(one => line.startsWith(`${dir}/${one}`))
-const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
+const grep = async (phrase: string) => (await runOn($, ['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
 const words = recallStems(query)
 const said = (line: string) => line.slice(line.indexOf(':', dir.length + 1))
 let found = [...(await progressLines($, within, line => said(line).toLowerCase().includes(query.toLowerCase()))), ...(await grep(query))]
@@ -14304,7 +14355,7 @@ const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
 await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
 if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
 await log($, `key ${keyName} asked for with its box on ${card?.id ?? e.agentId}`)
-return { result: named(KEY_ASK_SHOWN($.plugin.root, keyName, Boolean(same), like?.name)) }
+return { result: named(KEY_ASK_SHOWN(pluginRoot($), keyName, Boolean(same), like?.name)) }
 }
 if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
 const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
@@ -14428,7 +14479,7 @@ let usageFile = ''
 const usagePathOf = async ($: EngineInterface) => {
 if (usageFile) return usageFile
 const tmp = isLinux ? '' : ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
-const home = (await $.env.get('HOME')) ?? ''
+const home = (await homeFolder($)) ?? ''
 usageFile = tmp ? `${tmp}/claudopus-usage.json` : `${home}/.cache/claudopus-usage.json`
 return usageFile
 }
@@ -14450,7 +14501,7 @@ const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.
 const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
 const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
 if (isTop) usageTopTriedAt = now
-const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
+const r = await runOn($, ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
 const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
 if (!kept) return
 await keepUsage($, kept)
@@ -14712,7 +14763,7 @@ let paceFile = ''
 const pacePathOf = async ($: EngineInterface) => {
 if (paceFile) return paceFile
 const tmp = ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
-paceFile = `${tmp || (await $.env.get('HOME')) || ''}/claudopus-pace.json`
+paceFile = `${tmp || (await homeFolder($)) || ''}/claudopus-pace.json`
 return paceFile
 }
 const pacedOf = (text: string): { at: number; held: number; others?: number } => {
@@ -14736,11 +14787,11 @@ isPacing = true
 pacedAt = now
 try {
 await $.fs.write(path, JSON.stringify({ ...last, at: now })).catch(() => undefined)
-const looked = await $.process.run(['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+const looked = await runOn($, ['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
 const look = paceLookOf(looked?.stdout ?? '')
 if (!look.procs.length || !look.cores) return
 const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined)
-if (paced.lower.length || paced.lift.length) await $.process.run(['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
+if (paced.lower.length || paced.lift.length) await runOn($, ['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
 await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, others: paced.others })).catch(() => undefined)
 if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)
 if (!paced.held && last.held) await log($, "every one of Claude's commands runs at full speed again")
@@ -15106,7 +15157,7 @@ const smallThumbOf = async ($: EngineInterface, ref: ProgressRef): Promise<Progr
 const small = ref.thumb.replace(/\.jpg$/, '.small.jpg')
 if (await $.fs.exists(small)) return thumbOf($, small)
 if (!(await $.fs.exists(ref.thumb))) return (askThumbs($, ref.report), null)
-await $.process.run([sips($), '-Z', '160', '-s', 'format', 'jpeg', '-s', 'formatOptions', '50', ref.thumb, '--out', small]).catch(() => undefined)
+await runOn($, [sips($), '-Z', '160', '-s', 'format', 'jpeg', '-s', 'formatOptions', '50', ref.thumb, '--out', small]).catch(() => undefined)
 return (await $.fs.exists(small)) ? thumbOf($, small) : null
 }
 const largeThumbOf = async ($: EngineInterface, ref: ProgressRef): Promise<ProgressThumb> => ((await $.fs.exists(ref.thumb)) ? thumbOf($, ref.thumb) : (askThumbs($, ref.report), null))

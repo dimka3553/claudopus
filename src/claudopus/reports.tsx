@@ -119,16 +119,16 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
   const copy = async (from: string, name: string) => {
     if (copies.length >= COPIES_KEPT || copies.includes(name)) return
     const to = `${into}/${name}`
-    await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
+    await runOn($, ['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
     // A copy that shares the file's space until either changes, where the disk allows it (the Mac's), so the same picture in a task's
     // several results takes its room once; elsewhere a plain copy
-    if ((await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to])).exitCode === 0) copies.push(name)
+    if ((await runOn($, ['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await runOn($, ['cp', '-p', from, to])).exitCode === 0) copies.push(name)
   }
   for (const path of namedPaths(text)) {
     const stat = await $.fs.stat(path).catch(() => undefined)
     if (stat?.kind === 'file' && PICTURE.test(path)) await copy(path, fileName(path))
     else if (stat?.kind === 'dir' && TEMP.test(path) && path.includes('/scratchpad/')) {
-      const r = await $.process.run(['find', path, '-maxdepth', '2', '-type', 'f'])
+      const r = await runOn($, ['find', path, '-maxdepth', '2', '-type', 'f'])
       for (const file of rows(r.stdout).filter(one => PICTURE.test(one)).sort()) await copy(file, `${fileName(path)}/${file.slice(path.length + 1)}`)
     }
   }
@@ -192,10 +192,10 @@ const makeThumbs = async ($: EngineInterface, r: Report) => {
   for (const file of r.files.filter(one => RASTER.test(one) && isInside(one))) {
     const to = thumbPath(r, file)
     if (await $.fs.exists(to)) continue
-    if ((await $.process.run(['sh', '-c', INSIDE, 'sh', `${reportPath(r)}/${file}`, reportPath(r)]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) continue
-    await $.process.run(['mkdir', '-p', `${reportPath(r)}/thumbs`])
+    if ((await runOn($, ['sh', '-c', INSIDE, 'sh', `${reportPath(r)}/${file}`, reportPath(r)]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) continue
+    await runOn($, ['mkdir', '-p', `${reportPath(r)}/thumbs`])
     for (const size of THUMB_SIZES) {
-      await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
+      await runOn($, [sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
       if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES) break
     }
   }
@@ -207,7 +207,7 @@ const thumbOf = async ($: EngineInterface, path: string) => {
   let one: { source: string; width: number; height: number } | null = null
   try {
     const read = (await $.fs.read(path, { as: 'bytes' })) as { base64: string }
-    const sized = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
+    const sized = (await runOn($, [sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
     const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0)
     const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0)
     if (width && height && read.base64.length < 50_000) {

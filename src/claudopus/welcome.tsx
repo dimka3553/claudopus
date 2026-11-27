@@ -40,7 +40,7 @@ const indexAsk = (root: string) =>
   ].join(' ')
 const indexOldChats = async ($: EngineInterface) => {
   await closeWelcome($)
-  await sendForPerson($, indexAsk($.plugin.root))
+  await sendForPerson($, indexAsk(pluginRoot($)))
 }
 const welcomeCard = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="welcome" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>

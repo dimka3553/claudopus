@@ -60,8 +60,8 @@ const openTerminal = async ($: EngineInterface, one: Todo) => {
   const home = `${base}/${slug(one.id) || 'work'}-${at}`
   await $.fs.write(`${home}/command.txt`, ask.copy)
   for (const [name, text] of Object.entries(terminalFiles(ask.cwd || cwd, home))) await $.fs.write(`${home}/${name}`, text)
-  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  const ready = await runOn($, ['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await runOn($, ['open', `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
   presses += 1
   openedKey = r.exitCode === 0 ? `${one.id}:${ask.at}:${ask.copy}` : ''
   if (r.exitCode !== 0) void log($, `terminal not opened: ${r.stderr.trim().slice(0, 160)}`)
@@ -624,11 +624,11 @@ function run(argv) {
 const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
 const pastePicture = async ($: EngineInterface, id: string) => {
   if (!canAttach()) return
-  await $.process.run(['mkdir', '-p', attachedDir()])
+  await runOn($, ['mkdir', '-p', attachedDir()])
   // Named by when it was pasted, as a person reads it: pasted-19-Nov-14.05.09.png
   const at = new Date(await $.clock.now())
   const to = `${attachedDir()}/pasted-${at.getDate()}-${MONTHS[at.getMonth()]}-${[at.getHours(), at.getMinutes(), at.getSeconds()].map(n => String(n).padStart(2, '0')).join('.')}.png`
-  const r = await $.process.run(isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
+  const r = await runOn($, isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
   const got = (r?.exitCode === 0 ? r.stdout : '').split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
   if (got.length) return addAttached($, id, got)
   attachSaid.set(id, NOTHING_TO_PASTE)
@@ -643,7 +643,7 @@ const pickFiles = async ($: EngineInterface, id: string) => {
   if (!canAttach()) return
   // (a picker left open is the person's: it waits for them, the ten minutes a command of the mod's may run at most; cancelled, it
   // adds nothing)
-  const r = await $.process.run(isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
+  const r = await runOn($, isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
   if (!r || r.exitCode !== 0) return
   const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
   if (!picked.length) return

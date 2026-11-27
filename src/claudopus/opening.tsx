@@ -13,7 +13,7 @@ const isMadeHere = (path: string, home: string) => /^\/(?:Users|private|tmp|var)
 // The folder the copies go in, in the chat's own folder
 const openablesDir = () => (cwd.startsWith('/') && cwd !== '/' ? `${cwd.replace(/\/+$/, '')}/${OPENABLE}` : '')
 const isWithin = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`)
-const homeOf = async ($: EngineInterface) => (await $.env.get('HOME').catch(() => undefined)) ?? ''
+const homeOf = async ($: EngineInterface) => (await homeFolder($).catch(() => undefined)) ?? ''
 // Where the copy of a file goes: under its path from the home folder, else from the top
 const openableOf = (path: string, home: string) => `${openablesDir()}/${home.startsWith('/') && path.startsWith(`${home}/`) ? path.slice(home.length + 1) : path.replace(/^\/+/, '')}`
 // The file a copy was made from: under the home folder, else from the top; '' when it is gone
@@ -25,10 +25,10 @@ const originalOf = async ($: EngineInterface, copy: string, home: string) => {
 // Copies a file to `to` anew, as it is now, where git leaves it out
 const copyOpenable = async ($: EngineInterface, from: string, to: string) => {
   const ignore = `${openablesDir()}/.gitignore`
-  await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
+  await runOn($, ['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
   if (!(await $.fs.exists(ignore).catch(() => false))) await $.fs.write(ignore, '*\n').catch(() => undefined)
-  await $.process.run(['rm', '-f', to]).catch(() => undefined)
-  return (await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+  await runOn($, ['rm', '-f', to]).catch(() => undefined)
+  return (await runOn($, ['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await runOn($, ['cp', '-p', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0
 }
 // The copy the person can open of a file outside the chat's folder; '' for one inside it, one that is no file here, or no copy
 const openable = async ($: EngineInterface, path: string, home: string) => {

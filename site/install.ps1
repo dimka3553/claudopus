@@ -2,7 +2,7 @@
 #   irm https://www.claudopus.ai/install.ps1 | iex
 # The same steps as install.sh on a Mac or Linux: it finds Claude Code (the Claude desktop app's own copy, or `claude` in a
 # terminal), makes sure git is there (Claude Code fetches the marketplace with it; it offers Git for Windows through winget and
-# carries on once it is in), then runs Claude Code's own steps: add the claudopus marketplace from GitHub (dimka3553/claudopus),
+# carries on once it is in) and jq (for Stats and the memory, the same way), then runs Claude Code's own steps: add the claudopus marketplace from GitHub (dimka3553/claudopus),
 # install claudopus@claudopus for you (user scope) and switch it on. Claude Code merges both into %USERPROFILE%\.claude\settings.json
 # and keeps everything else in it. It then sets subagentPromptCacheTtl to "1h" there, so tasks and their helpers keep their prompt
 # cache an hour, as the chat does, unless the file already holds a value for it. Running it again brings Claudopus up to date.
@@ -29,6 +29,7 @@
   $appFolders = @()
   if ($env:APPDATA) { $appFolders += Join-Path $env:APPDATA 'Claude\claude-code' }
   if ($env:LOCALAPPDATA) {
+    $appFolders += Join-Path $env:LOCALAPPDATA 'Claude-Data\claude-code'
     $appFolders += Join-Path $env:LOCALAPPDATA 'Claude\claude-code'
     $appFolders += @(Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Packages') -Directory -Filter '*Claude*' -ErrorAction SilentlyContinue |
       ForEach-Object { Join-Path $_.FullName 'LocalCache\Roaming\Claude\claude-code' })
@@ -64,6 +65,19 @@
     AddGitToPath
     if (-not (HasGit)) { Stop "Git for Windows did not install. Install it from https://git-scm.com/download/win, then paste this line again." }
     Say 'Git for Windows is in.'
+  }
+
+  # jq: Claudopus reads Claude Code's chat records with it, for Stats and the memory. Asked of winget as Git is; without it
+  # Claudopus still installs and runs, and says where it is missing
+  $wingetLinks = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+  if (-not (Get-Command jq -CommandType Application -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath (Join-Path $wingetLinks 'jq.exe'))) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+      Say 'Installing jq, which Claudopus reads your chats with for Stats and its memory...'
+      & winget install --id jqlang.jq --exact --source winget --silent --accept-package-agreements --accept-source-agreements | Out-Null
+    }
+    if (-not (Get-Command jq -CommandType Application -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath (Join-Path $wingetLinks 'jq.exe'))) {
+      Say 'jq is not installed, so Stats and the memory stay empty until it is: winget install jqlang.jq'
+    }
   }
 
   # run <words...>: Claude Code with those words, reading nothing; its words are shown only when it fails

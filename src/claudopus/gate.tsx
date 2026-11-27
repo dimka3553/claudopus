@@ -47,7 +47,7 @@ const takeOnce = async ($: EngineInterface, card: string, kind: 'admin' | 'file'
 // press, one sleep run by the engine is in flight, and the wait itself is the promise the press resolves, raced with it. The press
 // ends the wait at once; the sleep only keeps the clock stopped, and is started again each HELD_STEP while nothing is pressed
 const HELD_STEP = 60
-const heldStep = ($: EngineInterface) => $.process.run(['/bin/sleep', String(HELD_STEP)], { timeoutMs: (HELD_STEP + 10) * 1000 }).then(() => undefined, () => undefined)
+const heldStep = ($: EngineInterface) => runOn($, ['/bin/sleep', String(HELD_STEP)], { timeoutMs: (HELD_STEP + 10) * 1000 }).then(() => undefined, () => undefined)
 // A gate of the chat's own thread, which has no card (a chat that does its own work): drawn at the top of the panel
 let looseGates: Gate[] = []
 // The pieces of work allowed under "work", by card: taken out as the work ends (ended, in cards), so one that comes back asks again
@@ -153,7 +153,7 @@ for m in "$@"; do
 done`
 const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
   if (!(await hasKeychain($))) return undefined
-  const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
+  const r = await runOn($, ['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
   const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
 }
@@ -236,7 +236,7 @@ let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
   isKeptForgotten = true
-  if (await hasKeychain($)) await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+  if (await hasKeychain($)) await runOn($, ['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
   if ((await readConfig($, dir)).adminPassword !== undefined) await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined)
 }
 
@@ -249,12 +249,12 @@ const issueGrant = async ($: EngineInterface, id: string, call: AdminCall, word:
   const seal = (await sealed($, 'make', [`${word}\n${name}\n${at}\n${call.host}\n${call.command}`]))?.[0]
   if (!seal) return ''
   // Grants a call sent to the background never took are cleared as the next one is made
-  await $.process.run(['/usr/bin/find', grantsDir(), '-type', 'f', '-mmin', '+10', '-delete'], { timeoutMs: 10_000 }).catch(() => undefined)
+  await runOn($, ['/usr/bin/find', grantsDir(), '-type', 'f', '-mmin', '+10', '-delete'], { timeoutMs: 10_000 }).catch(() => undefined)
   await $.fs.write(`${grantsDir()}/${name}.json`, JSON.stringify({ id: name, host: call.host, command: call.command, at, seal }))
   return name
 }
 const dropGrants = async ($: EngineInterface, names: string[]) => {
-  for (const name of names) await $.process.run(['rm', '-f', `${grantsDir()}/${name}.json`]).catch(() => undefined)
+  for (const name of names) await runOn($, ['rm', '-f', `${grantsDir()}/${name}.json`]).catch(() => undefined)
 }
 
 // A tool call that would read or write the list, the grants or the key itself
@@ -437,7 +437,7 @@ const PERMIT_TALK_KEPT = 8
 // Before a Bash call runs: each admin command in it is allowed already (never asked, this work allowed, the command always
 // allowed) or waits for the press; allowed, it gets its grant. Refused, the call does not run
 const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
-  const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root)
+  const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), pluginRoot($))
   if (!calls.length || !dir) return { grants: [] }
   const gate = await gateOf($)
   if (gate.mode === 'never') return { grants: [] }
@@ -537,7 +537,7 @@ const RELEASE_ALLOWED = 60 * 60_000
 const RELEASE_IT = 'Release it'
 const releaseAllowed = new Map<string, { folder: string; branch: string; at: number; tips?: string[] }>()
 const allowRelease = async ($: EngineInterface, card: string, folder: string) => {
-  const git = (args: string[]) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
+  const git = (args: string[]) => runOn($, ['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
   const repo = await git(['rev-parse', '--show-toplevel'])
   const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD'])
   // Only a worktree on a branch, of a repo that says how it is released
@@ -568,14 +568,14 @@ const isReleased = async (git: (args: string[]) => Promise<string>, tips: string
   return false
 }
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
-  const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
+  const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), pluginRoot($), cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
   if (!calls.length || !dir) return { grants: [] }
   const list = await read($, todos)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
   const grants: string[] = []
   for (const [n, call] of calls.entries()) {
-    const git = (args: string[]) => $.process.run(['git', '-C', call.folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
+    const git = (args: string[]) => runOn($, ['git', '-C', call.folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
     const repo = await git(['rev-parse', '--show-toplevel'])
     const branch = call.branch || (await git(['rev-parse', '--abbrev-ref', 'HEAD']))
     // Not a repo, or no branch: the runner itself says what is wrong, and it releases nothing without a grant
@@ -710,7 +710,7 @@ const knownRead = async ($: EngineInterface): Promise<Map<string, string | null>
 // Whether the kept copy's own key is there: 'no' only when the keychain answered that it is not, 'error' when it did not answer
 const knownKey = async ($: EngineInterface): Promise<'yes' | 'no' | 'error'> => {
   if (!(await hasKeychain($))) return 'error'
-  const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
+  const r = await runOn($, ['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
   return r?.exitCode === 0 ? 'yes' : r?.exitCode === 3 ? 'no' : 'error'
 }
 // Said once in a chat, at the top of the panel: while the key cannot be made or read, a change made outside Claudopus is not caught
@@ -733,7 +733,7 @@ const knownWrite = async ($: EngineInterface, known: Map<string, string | null>,
   // Written beside it and moved into place, so no chat ever reads half of it
   const aside = `${knownPath()}.${count}-${Math.random().toString(36).slice(2)}.new`
   await $.fs.write(aside, text)
-  const moved = await $.process.run(['mv', '-f', aside, knownPath()], { timeoutMs: 10_000 }).catch(() => undefined)
+  const moved = await runOn($, ['mv', '-f', aside, knownPath()], { timeoutMs: 10_000 }).catch(() => undefined)
   if (moved?.exitCode !== 0) await $.fs.write(knownPath(), text)
   if (knownSeen) knownPast.add(knownSeen.text)
   knownSeen = { text, files: new Map(known), count }
@@ -763,7 +763,7 @@ const personPut = async ($: EngineInterface, name: string, text: string | null, 
     await $.fs.write(`${dir}/${name}.${at}${Math.random().toString(36).slice(2, 6)}.put-back`, is).catch(() => undefined)
   }
   // Taken away first, so a link put in its place is replaced, never written through
-  await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
+  await runOn($, ['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
   if (text !== null) await $.fs.write(`${dir}/${name}`, text)
 }
 // The files compared with what they are known to hold: what differs is put back and offered on a card. `by` is the call whose

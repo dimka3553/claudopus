@@ -64,7 +64,7 @@ const boxKeys = new Map<string, string>()
 // on openssl's stdin, the key on a pipe of its own, so neither is ever in a file or a command line but the key, which is public
 const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A'
 const sealedFor = async ($: EngineInterface, key: string, value: string) => {
-  const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
+  const r = await runOn($, ['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
   const out = r?.exitCode === 0 ? r.stdout.trim() : ''
   return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
 }
@@ -137,8 +137,8 @@ const lookBoxes = async ($: EngineInterface) => {
     const marked = entry.name.replace(/\.told$/, '')
     // and a response its runner never took, once that runner has had its moment to take it
     const answered = entry.name.replace(/\.reply$/, '')
-    if (entry.name.endsWith('.reply') && BOX_ID.test(answered) && !entries.some(other => other.name === `${answered}.json`) && now - (boxRepliedAt.get(answered) ?? 0) > BOX_REPLY_TAKEN) (boxRepliedAt.delete(answered), await $.process.run(['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined))
-    if (entry.name.endsWith('.told') && BOX_ID.test(marked) && !entries.some(other => other.name === `${marked}.json`)) await $.process.run(['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined)
+    if (entry.name.endsWith('.reply') && BOX_ID.test(answered) && !entries.some(other => other.name === `${answered}.json`) && now - (boxRepliedAt.get(answered) ?? 0) > BOX_REPLY_TAKEN) (boxRepliedAt.delete(answered), await runOn($, ['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined))
+    if (entry.name.endsWith('.told') && BOX_ID.test(marked) && !entries.some(other => other.name === `${marked}.json`)) await runOn($, ['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined)
     const id = entry.name.replace(/\.json$/, '')
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
@@ -155,7 +155,7 @@ const lookBoxes = async ($: EngineInterface) => {
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
-        await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`, `${boxesDir()}/${id}.reply`]).catch(() => undefined)
+        await runOn($, ['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`, `${boxesDir()}/${id}.reply`]).catch(() => undefined)
         await boxKeyring($, 'delete', id)
       }
     } catch {
@@ -176,11 +176,11 @@ const lookBoxes = async ($: EngineInterface) => {
     // The first chat to make the mark brings its panel up with the field ready to type in (focus is given only over an empty
     // prompt), and tells it. A panel that cannot be drawn here gives the mark back, so another chat or the runner's own box asks
     // (a task's own question for a key has no runner to tell, and its card is this chat's alone)
-    const mark = one.isOwn ? { exitCode: 0 } : await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
+    const mark = one.isOwn ? { exitCode: 0 } : await runOn($, ['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
     if (mark.exitCode !== 0) continue
     const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(err => (log($, `panel not opened for a box: ${String(err)}`), undefined))
     if (!opened?.isPlaced) {
-      if (!one.isOwn) await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
+      if (!one.isOwn) await runOn($, ['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
       await log($, `box ${one.id} given back: the panel is not drawn here${opened && !opened.isPlaced ? ` (${opened.reason})` : ''}`)
       continue
     }
@@ -201,9 +201,9 @@ const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id
   !(await hasKeychain($))
     ? { exitCode: -1 }
     : isLinux
-    ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+    ? runOn($, [`${pluginRoot($)}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
     : what === 'delete'
-      ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+      ? runOn($, ['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
       : Promise.resolve({ exitCode: -1 })
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
@@ -238,7 +238,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
         .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
         .catch(() => ({ exitCode: -1 }))
   // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
-  const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+  const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await runOn($, ['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
   // and one whose runner stopped meanwhile is taken out again
   if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
@@ -269,7 +269,7 @@ const keepOwnKey = async ($: EngineInterface, one: Asked, value: string) => {
   boxPresses += 1
   boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (value.length < SHORTEST_KEY) return void (boxSaid.set(id, `That was shorter than ${SHORTEST_KEY} characters. Paste the whole key.`), drawAgain($))
-  const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', 'claudopus-secret', name, `Claudopus: ${name}`], { stdin: `${value}\n`, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+  const r = await runOn($, [`${pluginRoot($)}/bin/keyring`, 'set', 'claudopus-secret', name, `Claudopus: ${name}`], { stdin: `${value}\n`, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
   if (r.exitCode !== 0) {
     boxSaid.set(id, `It couldn't be saved in ${keptWhere()}. Try again.`)
     await log($, `key ${name} not kept from its box: the keychain ended ${r.exitCode}`)
@@ -284,7 +284,7 @@ const keepOwnKey = async ($: EngineInterface, one: Asked, value: string) => {
   drawAgain($)
   await log($, `key ${name} saved from the box on ${one.card}`)
   await refreshKeys($).catch(err => log($, `keys not made again: ${String(err)}`))
-  await ownKeyDone($, one, named(KEY_GIVEN($.plugin.root, name)), `You gave ${name}`)
+  await ownKeyDone($, one, named(KEY_GIVEN(pluginRoot($), name)), `You gave ${name}`)
 }
 // A task's own key question answered: gone from its card, and its task told what was done
 const ownKeyDone = async ($: EngineInterface, one: Asked, text: string, label: string) => {
@@ -314,7 +314,7 @@ const cancelBox = async ($: EngineInterface, id: string, said = '') => {
   // The block goes in the press's own drawing, before its request is removed, and one grey line says what was pressed
   if (one) pressedLine($, one.card ?? '', one.kind === 'password' ? DONT_ALLOW : DONT_GIVE, said)
   drawAgain($)
-  await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
+  await runOn($, ['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
   drawAgain($)
 }
 
@@ -398,7 +398,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
   closeBarOf(id)
   pressedLine($, one.card ?? '', '', '', `You answered “${cut(oneLine(said), 60)}”`)
   drawAgain($)
-  await $.process.run(['rm', '-f', request]).catch(() => undefined)
+  await runOn($, ['rm', '-f', request]).catch(() => undefined)
   await log($, `box ${id} answered in words`)
 }
 // What is typed in a key's field goes by its mode: the key to the keychain, a response to the command that asked

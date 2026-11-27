@@ -9,7 +9,7 @@ let paceFile = ''
 const pacePathOf = async ($: EngineInterface) => {
   if (paceFile) return paceFile
   const tmp = ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
-  paceFile = `${tmp || (await $.env.get('HOME')) || ''}/claudopus-pace.json`
+  paceFile = `${tmp || (await homeFolder($)) || ''}/claudopus-pace.json`
   return paceFile
 }
 // What the last look on the Mac left: when, how many commands it left waiting, and how many other threads were ready at full speed
@@ -35,11 +35,11 @@ const paceWork = async ($: EngineInterface) => {
   pacedAt = now
   try {
     await $.fs.write(path, JSON.stringify({ ...last, at: now })).catch(() => undefined)
-    const looked = await $.process.run(['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+    const looked = await runOn($, ['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
     const look = paceLookOf(looked?.stdout ?? '')
     if (!look.procs.length || !look.cores) return
     const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined)
-    if (paced.lower.length || paced.lift.length) await $.process.run(['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
+    if (paced.lower.length || paced.lift.length) await runOn($, ['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
     await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, others: paced.others })).catch(() => undefined)
     if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)
     if (!paced.held && last.held) await log($, "every one of Claude's commands runs at full speed again")

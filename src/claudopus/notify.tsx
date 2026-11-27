@@ -144,7 +144,7 @@ const alertPerson = async ($: EngineInterface, what: string, title: string, text
   // The desktop app takes no notification from a mod yet (no-surface): Claudopus.app raises it. 0 shown, 5 macOS is asking the
   // person to allow Claudopus and it is shown once they do
   const click = [...(opens ? ['--open', opens] : opens === undefined ? await clickOf($) : []), '--key', key.slice(0, 200)]
-  const run = (lead: string[]) => $.process.run([`${$.plugin.root}/bin/notify`, ...lead, '--title', title, '--text', text, ...click]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  const run = (lead: string[]) => runOn($, [`${pluginRoot($)}/bin/notify`, ...lead, '--title', title, '--text', text, ...click]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   const amber = asks ? await run(['--asks', ...(asks.chime ? ['--chime'] : [])]) : undefined
   if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
     void log($, `${what}: ${title} — app said ${sent.reason}; ${amber.exitCode === 0 ? 'notified through Claudopus Asks' : 'macOS asked to allow Claudopus Asks'}`)

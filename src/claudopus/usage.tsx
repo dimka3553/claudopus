@@ -12,7 +12,7 @@ let usageFile = ''
 const usagePathOf = async ($: EngineInterface) => {
   if (usageFile) return usageFile
   const tmp = isLinux ? '' : ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
-  const home = (await $.env.get('HOME')) ?? ''
+  const home = (await homeFolder($)) ?? ''
   usageFile = tmp ? `${tmp}/claudopus-usage.json` : `${home}/.cache/claudopus-usage.json`
   return usageFile
 }
@@ -37,7 +37,7 @@ const lookUsage = async ($: EngineInterface) => {
     const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
     const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
     if (isTop) usageTopTriedAt = now
-    const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
+    const r = await runOn($, ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
     if (!kept) return
     await keepUsage($, kept)

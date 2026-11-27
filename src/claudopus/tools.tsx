@@ -77,7 +77,7 @@ const toolHooks = (on: On) => {
     const within = input.area?.trim() ? await recallWithin($, input.area.trim()) : undefined
     if (within && !within.length) return { result: `No area or topic is named "${input.area}". The areas: ${(await readAreas($)).map(one => one.name).join(', ') || 'none yet'}.` }
     const isWithin = (line: string) => !within || within.some(one => line.startsWith(`${dir}/${one}`))
-    const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
+    const grep = async (phrase: string) => (await runOn($, ['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
     // The phrase as given; when nothing holds it whole, the lines that hold each of its words in any order, by their stems
     const words = recallStems(query)
     const said = (line: string) => line.slice(line.indexOf(':', dir.length + 1))
@@ -174,7 +174,7 @@ const toolHooks = (on: On) => {
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
       if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
       await log($, `key ${keyName} asked for with its box on ${card?.id ?? e.agentId}`)
-      return { result: named(KEY_ASK_SHOWN($.plugin.root, keyName, Boolean(same), like?.name)) }
+      return { result: named(KEY_ASK_SHOWN(pluginRoot($), keyName, Boolean(same), like?.name)) }
     }
     if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)

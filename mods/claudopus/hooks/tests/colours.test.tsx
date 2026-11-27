@@ -8,6 +8,9 @@ import { timelineRows } from '../stats'
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
 const HOME = '/home/sam'
+// The same person's profile on a Windows PC, and Git for Windows' bash there
+const WINDOWS_HOME = 'C:\\Users\\sam'
+const GIT_BASH = 'C:/Program Files/Git/bin/bash.exe'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
 // Every test may take three minutes, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's
@@ -65,7 +68,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; pace?: (argv: string[]) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
+const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; pace?: (argv: string[]) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -136,7 +139,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
   // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
-  mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
+  // `windows`: a Windows PC, as the Claude app runs the engine there: no HOME, the person's profile, and Git for Windows' bash where
+  // Claude Code finds it. Each command the mod runs is kept as it was sent (`windowsRuns`) and answered as the command it carries
+  if (options.windows) files.set(GIT_BASH, '')
+  mock.env(on, { ...(options.windows ? { OS: 'Windows_NT', USERPROFILE: WINDOWS_HOME, HOME: '', SHELL: GIT_BASH.replace(/\//g, '\\') } : { HOME }), CLAUDOPUS_TIMING: 'test', ...options.env })
   const kitClock = mock.clock(on, { now: 1_700_000_000_000 })
   // A hook of the mod follows each move of the clock, as in the app, where a drawing or a step of some task is never far: what the
   // mod's timers leave for a hook to send (sendHeld) goes then. A test that names `unseen` moves the clock bare, and brings the
@@ -167,7 +173,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     const { Text } = $.ui.resolve(e)
     return <Text>the engine's own</Text>
   })
-  on('fs.read', (_, e) => {
+  // On a Windows PC a path from a drive (C:/Users/sam/...) is whole; the kit on a Mac or Linux takes it as under the folder it runs in
+  const inProfile = <T extends { path: string }>(e: T): T => (options.windows ? { ...e, path: e.path.replace(/^.*?\/(?=[A-Za-z]:\/)/, '') } : e)
+  on('fs.read', (_, raw) => {
+    const e = inProfile(raw)
     // A picture's bytes, as base64, where the test gives them
     const bytes = options.bytes?.(e.path)
     if (bytes !== undefined) return { value: { base64: bytes } as never }
@@ -192,19 +201,21 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (text.length > FS_READ_MOST) throw new Error(`${e.path} refused: the file is over the ${FS_READ_MOST}-byte limit`)
     return { value: text }
   })
-  on('fs.write', (_, e) => {
+  on('fs.write', (_, raw) => {
+    const e = inProfile(raw)
     files.set(e.path, e.text)
     return { value: undefined }
   })
-  on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
+  on('fs.exists', (_, e) => ({ value: files.has(inProfile(e).path) }))
   // What a folder holds: its files, and the folders its deeper files are in
-  on('fs.list', (_, e) => (events.push(`list ${e.path}`), {
+  on('fs.list', (_, raw) => { const e = inProfile(raw); return (events.push(`list ${e.path}`), {
     value: [...new Set([...files.keys()].filter(path => path.startsWith(`${e.path}/`)).map(path => path.slice(e.path.length + 1)))]
       // A file's time is 0 unless the test lays it as mtime:<path>
       .map(rest => ({ name: rest.split('/')[0] ?? rest, kind: rest.includes('/') ? 'dir' : 'file', size: 1, mtimeMs: Number(files.get(`mtime:${e.path}/${rest}`) ?? 0), isLink: false }))
       .filter((one, i, all) => all.findIndex(other => other.name === one.name) === i) as never,
-  }))
-  on('fs.stat', (_, e) => {
+  }) })
+  on('fs.stat', (_, raw) => {
+    const e = inProfile(raw)
     const kind = files.has(e.path) ? 'file' : [...files.keys()].some(path => path.startsWith(`${e.path}/`)) ? 'dir' : ''
     if (!kind) throw new Error(`ENOENT ${e.path}`)
     return { value: { kind, size: 1, mtimeMs: Number(files.get(`mtime:${e.path}`) ?? 0), isLink: false } as never }
@@ -276,8 +287,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     return { value: undefined }
   })
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
+  const windowsRuns: string[][] = []
   on('process.run', (_, e) => {
-    const [tool, ...rest] = e.argv
+    if (options.windows) windowsRuns.push([...e.argv])
+    const [tool, ...rest] = options.windows && e.argv[0] === GIT_BASH && e.argv[1] === '-c' && e.argv[2] === 'exec "$0" "$@"' ? e.argv.slice(3) : e.argv
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
     // The end or the first line of a file, as tail and head give them
@@ -751,7 +764,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     return { messages: e.messages }
   })
 
-  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, boarded, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { windowsRuns, files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, boarded, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two

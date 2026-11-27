@@ -15,8 +15,8 @@ const short = (args: string) =>
 
 const scanServers = async ($: EngineInterface) => {
   scannedAt = Date.now()
-  const home = (await $.env.get('HOME')) ?? ''
-  const run = async (argv: string[]) => (await $.process.run(argv).catch(() => undefined))?.stdout ?? ''
+  const home = (await homeFolder($)) ?? ''
+  const run = async (argv: string[]) => (await runOn($, argv).catch(() => undefined))?.stdout ?? ''
 
   // lsof -F prints one field a line: p<pid>, then n<address:port> for each socket of that process
   const ports = new Map<number, string[]>()
@@ -105,7 +105,7 @@ const refresh = async ($: EngineInterface) => {
 }
 
 const stopServer = async ($: EngineInterface, pid: number) => {
-  await $.process.run(['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
+  await runOn($, ['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
   await $.clock.sleep(700)
   await scanServers($)
 }

@@ -208,7 +208,7 @@ const boxNeed = ($: EngineInterface, one: Asked, surface: string, canFocus = fal
   const close = { key: `${id}-close-${boxPresses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) }
   const refuse = { key: `${id}-cancel-${boxPresses}`, label: isKey ? DONT_GIVE : DONT_ALLOW, onPress: () => void cancelBox($, one.id) }
   // The admin command it is for, as the person allowed it; a key's command is the task's own and is not shown again
-  const command = isKey ? '' : (adminCalls(one.command ?? '', $.plugin.root)[0]?.command ?? '')
+  const command = isKey ? '' : (adminCalls(one.command ?? '', pluginRoot($))[0]?.command ?? '')
   return {
     id,
     kind: one.kind,

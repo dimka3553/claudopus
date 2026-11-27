@@ -93,7 +93,7 @@ const lookJobs = async ($: EngineInterface) => {
     // One go: the end of each output with when it last changed
     const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
     const script = `for f; do ${mtime}; printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done`
-    const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
+    const r = await runOn($, ['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
     if (!r) return
     const parts = r.stdout.split(/\n@@JOB@@ ([^\n]*)\n/)
     for (let n = 1; n + 1 < parts.length; n += 2) {
@@ -144,7 +144,7 @@ const lookJobs = async ($: EngineInterface) => {
   for (const o of asked) if (!quiet.includes(o) && jobLog.get(o.id)?.live) (jobLog.set(o.id, { ...(jobLog.get(o.id) as Seen), live: undefined }), (isChanged = true))
   if (quiet.length && now - liveLookedAt >= LIVE_LOOK) {
     liveLookedAt = now
-    const r = await $.process.run(['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
+    const r = await runOn($, ['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
     for (const m of (r?.stdout ?? '').matchAll(/^@@LIVE@@ (\d+) (.*)$/gm)) {
       const o = quiet.find(o => `${tasksDir}/${o.id}.output` === m[2])
       const seen = o ? jobLog.get(o.id) : undefined
@@ -304,8 +304,8 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
   const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
   const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. It shows here as soon as the command writes something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
   await $.fs.write(`${home}/output.command`, script)
-  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  const ready = await runOn($, ['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await runOn($, ['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
   if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }
 
@@ -350,7 +350,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   const why = run?.how === 'failed' ? run.named?.why : undefined
   const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
   const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
-  const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
+  const r = file && canOpenFile(file) ? await runOn($, ['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
   const all = logLines(r?.stdout ?? '')
   const lines = all.slice(-LOG_LINES)
   const isFailed = run?.how === 'failed'

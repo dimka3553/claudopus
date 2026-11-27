@@ -357,13 +357,13 @@ const breathe = async ($: EngineInterface) => {
 // (a log, a command's output) is read from its end
 const TAIL_BYTES = 200_000
 const fileEnd = async ($: EngineInterface, path: string, bytes = TAIL_BYTES) => {
-  const r = await $.process.run(['tail', '-c', String(bytes), path], { timeoutMs: 10_000 }).catch(() => undefined)
+  const r = await runOn($, ['tail', '-c', String(bytes), path], { timeoutMs: 10_000 }).catch(() => undefined)
   return r?.exitCode === 0 ? r.stdout : ''
 }
 // and is added to at its end, never read and written back whole: a file over 4 MB read as nothing would be written back as only the
 // new text
 const appendTo = async ($: EngineInterface, path: string, text: string) => {
-  const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', path, text]).catch(() => undefined)
+  const r = await runOn($, ['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', path, text]).catch(() => undefined)
   if (r?.exitCode === 0) return
   const was = await $.fs.read(path).then(String, (err: unknown) => (/ENOENT|no such file/i.test(String(err)) ? '' : undefined))
   if (was === undefined) throw new Error(`${path} not added to: it could not be read`)
@@ -570,7 +570,7 @@ const drawnFiles = new Map<string, string>()
 // empty bytes in it, which make grep take the log for binary and find nothing. Where the shell cannot add it, it is written whole
 const log = async ($: EngineInterface, line: string) => {
   const text = `${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`
-  const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', `${dir}/log.md`, text]).catch(() => undefined)
+  const r = await runOn($, ['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', `${dir}/log.md`, text]).catch(() => undefined)
   if (r?.exitCode !== 0) await $.fs.write(`${dir}/log.md`, `${await readOr($, `${dir}/log.md`)}${text}`).catch(() => undefined)
 }
 // The empty bytes earlier versions left in the log are taken out once, as a chat starts
@@ -711,17 +711,78 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 )
 
 // ---- Which system this chat runs on ----
-// Linux, as uname says once at the chat's start (chat.tsx), else a Mac: what only a Mac has (its keychain, Finder and Preview,
-// Terminal, sips, its own notifications) takes Linux's own way there, or says plainly that it is not there. `hasDesktop` is a
-// Linux desktop session the person sees (DISPLAY or WAYLAND_DISPLAY): without one, as in a terminal over SSH, nothing opens a window
+// Linux, as uname says once at the chat's start (chat.tsx), Windows, as its own OS variable says, else a Mac: what only a Mac has
+// (its keychain, Finder and Preview, Terminal, sips, its own notifications) takes Linux's own way there, or says plainly that it is
+// not there. `hasDesktop` is a Linux desktop session the person sees (DISPLAY or WAYLAND_DISPLAY): without one, as in a terminal over
+// SSH, nothing opens a window. Windows has its desktop, and Git for Windows' bash, in which Claude Code runs its own commands there:
+// the mod's commands run in it too (runOn), so every Unix tool they name is Git's own, as on Linux
 let isLinux = false
+let isWindows = false
 let hasDesktop = true
-// Where bin/keyring keeps its files on Linux, ~/.local/share/claudopus/keyring (never under $XDG_DATA_HOME, which a caller sets),
-// and where earlier versions kept them when XDG_DATA_HOME was set, guarded the same (the mod moves them home as it loads)
+// Git for Windows' bash.exe, as Claude Code finds it (CLAUDE_CODE_GIT_BASH_PATH, its SHELL, Git's own folders), '' where none is
+let gitBash = ''
+// Where bin/keyring keeps its files on Linux and Windows, ~/.local/share/claudopus/keyring (never under $XDG_DATA_HOME, which a
+// caller sets), and where earlier versions kept them when XDG_DATA_HOME was set, guarded the same (the mod moves them home as it loads)
 let keyringRoot = ''
 let keyringOldRoot = ''
+// A path as the mod keeps it: a Windows one (C:\Users\x, \\server\share) with forward slashes, which Windows takes as well, so every
+// path the mod builds, splits and compares has one separator on every system. Any other path stays as it is
+const slashed = (path: string) => (/^(?:[A-Za-z]:\\|\\\\)/.test(path) ? path.replace(/\\/g, '/') : path)
+// A path from the root, on any system: /x on a Mac or Linux, C:/x or C:\x on Windows
+const isAbsPath = (path: string) => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+// The person's home folder: HOME on a Mac or Linux; on Windows their profile, as Claude Code's own ~ is there (HOME is unset in the
+// app, and in Git's bash it names the same folder another way)
+const homeFolder = async ($: EngineInterface) => {
+  const profile = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT' ? await $.env.get('USERPROFILE').catch(() => undefined) : undefined
+  return slashed(profile || ((await $.env.get('HOME').catch(() => undefined)) ?? ''))
+}
+// The plugin's own folder, as slashed keeps paths
+const pluginRoot = ($: EngineInterface) => slashed($.plugin.root)
+// A command, run as on a Mac or Linux. On Windows a Unix tool, a shell or one of the plugin's own scripts runs in Git's bash (as
+// `exec "$0" "$@"`, so its own words reach it untouched), and a Windows program by itself: what the mod's commands ask of Unix
+// tools is answered by Git's, and HOME names the person's profile, as Claude Code's own commands have it there
+const WINDOWS_EXEC = 'exec "$0" "$@"'
+const WINDOWS_OWN = /^(?:git|powershell|pwsh|cmd|explorer|tasklist|taskkill|where|netstat|claude|node)(?:\.exe)?$/i
+const onWindows = (argv: readonly string[]): string[] => {
+  const [head = '', ...rest] = argv
+  if (!gitBash || /\.(?:exe|com)$/i.test(head) || WINDOWS_OWN.test(head)) return [...argv]
+  return [gitBash, '-c', WINDOWS_EXEC, head, ...rest]
+}
+let windowsHome = ''
+const runOn = ($: EngineInterface, argv: readonly string[], init?: Parameters<EngineInterface['process']['run']>[1]) =>
+  isWindows ? $.process.run(onWindows(argv), { ...init, env: { ...(windowsHome ? { HOME: windowsHome } : {}), CHERE_INVOKING: '1', ...init?.env } }) : $.process.run(argv, init)
+// Git for Windows' bash: the one Claude Code is told of, or names in SHELL as it starts there, else where Claude Code looks for it
+const findGitBash = async ($: EngineInterface) => {
+  const named = [await $.env.get('CLAUDE_CODE_GIT_BASH_PATH').catch(() => undefined), await $.env.get('SHELL').catch(() => undefined)]
+  const programs = [await $.env.get('ProgramFiles').catch(() => undefined), await $.env.get('ProgramFiles(x86)').catch(() => undefined)]
+  const local = await $.env.get('LOCALAPPDATA').catch(() => undefined)
+  const places = [
+    ...named.filter((one): one is string => Boolean(one && /[\\/]bash(?:\.exe)?$/i.test(one) && /^[A-Za-z]:/.test(one))),
+    ...programs.filter((one): one is string => Boolean(one)).map(one => `${one}/Git/bin/bash.exe`),
+    'C:/Program Files/Git/bin/bash.exe',
+    ...(local ? [`${local}/Programs/Git/bin/bash.exe`] : []),
+  ]
+  for (const one of places) if (await $.fs.exists(slashed(one)).catch(() => false)) return slashed(one)
+  // git on the PATH, as Git's cmd folder puts it there: its bash is in Git's bin
+  const where = await $.process.run(['where', 'git'], { timeoutMs: 5_000 }).catch(() => undefined)
+  for (const line of (where?.stdout ?? '').split(/\r?\n/).map(one => slashed(one.trim())).filter(Boolean)) {
+    const bash = line.replace(/\/(?:cmd|bin|mingw64\/bin)\/git\.exe$/i, '/bin/bash.exe')
+    if (bash !== line && (await $.fs.exists(bash).catch(() => false))) return bash
+  }
+  return ''
+}
 const knowSystem = async ($: EngineInterface) => {
-  const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
+  isWindows = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
+  if (isWindows) {
+    isLinux = false
+    hasDesktop = true
+    gitBash = await findGitBash($)
+    windowsHome = ((await $.env.get('USERPROFILE').catch(() => undefined)) ?? '').trim()
+    keyringRoot = `${await homeFolder($)}/.local/share/claudopus/keyring`
+    keyringOldRoot = ''
+    return
+  }
+  const r = await runOn($, ['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
   isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux'
   hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')))
   const data = (await $.env.get('XDG_DATA_HOME')) ?? ''
@@ -732,8 +793,8 @@ const knowSystem = async ($: EngineInterface) => {
 // the person's screen for a keychain to keep an item in ("Keychain Not Found"), so nothing is asked of the keychain there: what
 // would use it fails as a keychain that does not answer. Looked at each time, so one made later is used. Linux keeps files instead
 const hasKeychain = async ($: EngineInterface) => {
-  if (isLinux) return true
-  const home = (await $.env.get('HOME')) ?? ''
+  if (isLinux || isWindows) return true
+  const home = (await homeFolder($)) ?? ''
   if (!home.startsWith('/')) return false
   // No folder of keychains at all is a home of its own; a folder that cannot be listed is left to security as before. A keychain
   // there may be a link (one moved and linked back); metadata.keychain-db alone is no keychain
@@ -743,14 +804,20 @@ const hasKeychain = async ($: EngineInterface) => {
   return !found || found.some(one => one.name !== 'metadata.keychain-db' && /\.keychain(?:-db)?$/.test(one.name))
 }
 // How this computer is named in what the person reads
-const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
-const keptWhere = () => (isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
-// A file, folder or link opened as the person's own system opens it: `open` on a Mac, xdg-open on a Linux desktop. Linux without
-// a desktop has nothing to open it on, and says so as a failed run does
+const thisMac = () => (isWindows ? 'this PC' : isLinux ? 'this machine' : 'this Mac')
+const keptWhere = () => (isWindows ? 'a file on this PC that only you can read' : isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
+// A file, folder or link opened as the person's own system opens it: `open` on a Mac, xdg-open on a Linux desktop, and on Windows
+// Explorer for a file or folder (its own path, with backslashes) and the system's handler for a link, each of which says nothing
+// of how it went. Linux without a desktop has nothing to open it on, and says so as a failed run does
 const openOn = async ($: EngineInterface, target: string, isText = false) => {
-  if (!isLinux) return $.process.run(isText ? ['open', '-t', target] : ['open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (isWindows) {
+    const argv = /^[a-z][a-z0-9+.-]*:\/\//i.test(target) ? ['rundll32.exe', 'url.dll,FileProtocolHandler', target] : isText ? ['notepad.exe', target.replace(/\//g, '\\')] : ['explorer.exe', target.replace(/\//g, '\\')]
+    return runOn($, argv).then(() => ({ exitCode: 0, stderr: '' }), err => ({ exitCode: 1, stderr: String(err) }))
+  }
+  if (!isLinux) return runOn($, isText ? ['open', '-t', target] : ['open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (!hasDesktop) return { exitCode: 1, stderr: 'no desktop on this machine to open it on' }
-  return $.process.run(['xdg-open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  return runOn($, ['xdg-open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
 }
 // macOS's sips on a Mac; on Linux bin/sips, which answers the same calls with ImageMagick and fails, drawing no small copy, without it
-const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 'sips')
+// (and on Windows, where it runs in Git's bash)
+const sips = ($: EngineInterface) => (isLinux || isWindows ? `${pluginRoot($)}/bin/sips` : 'sips')

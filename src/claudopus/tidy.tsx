@@ -25,7 +25,7 @@ let tidyLast: { at: number; freed: number } | undefined
 const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
 const startTidy = async ($: EngineInterface, flags: string[] = []) => {
   if (!dir || isOff) return
-  const r = await $.process.run(['/bin/sh', '-c', TIDY_START, 'sh', dir, `${$.plugin.root}/bin/tidy`, ...flags, dir])
+  const r = await runOn($, ['/bin/sh', '-c', TIDY_START, 'sh', dir, `${pluginRoot($)}/bin/tidy`, ...flags, dir])
   if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
 
@@ -51,7 +51,7 @@ const lookDisk = async ($: EngineInterface) => {
   const now = await $.clock.now()
   if (now >= diskTriedAt && now - diskTriedAt < DISK_EVERY / 2) return diskKept
   diskTriedAt = now
-  const r = await $.process.run(['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+  const r = await runOn($, ['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
   const was = diskKept
   const wasLast = tidyLast
   diskKept = diskOf(r?.stdout ?? '', now) ?? diskKept

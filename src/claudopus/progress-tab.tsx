@@ -36,7 +36,7 @@ const smallThumbOf = async ($: EngineInterface, ref: ProgressRef): Promise<Progr
   const small = ref.thumb.replace(/\.jpg$/, '.small.jpg')
   if (await $.fs.exists(small)) return thumbOf($, small)
   if (!(await $.fs.exists(ref.thumb))) return (askThumbs($, ref.report), null)
-  await $.process.run([sips($), '-Z', '160', '-s', 'format', 'jpeg', '-s', 'formatOptions', '50', ref.thumb, '--out', small]).catch(() => undefined)
+  await runOn($, [sips($), '-Z', '160', '-s', 'format', 'jpeg', '-s', 'formatOptions', '50', ref.thumb, '--out', small]).catch(() => undefined)
   return (await $.fs.exists(small)) ? thumbOf($, small) : null
 }
 const largeThumbOf = async ($: EngineInterface, ref: ProgressRef): Promise<ProgressThumb> => ((await $.fs.exists(ref.thumb)) ? thumbOf($, ref.thumb) : (askThumbs($, ref.report), null))

@@ -253,7 +253,7 @@ const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, no
   const stat = await $.fs.stat(path).catch(() => undefined)
   const at = stat?.mtimeMs || now
   const size = stat?.size ?? 0
-  const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
+  const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await runOn($, ['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
   let answer = ''
   let isHandback = false
   const isPressed = isPressedAtEnd(tail.map(row => parsedOr<unknown>(row, {})))
@@ -642,8 +642,8 @@ const recoverEnded = async ($: EngineInterface) => {
       const text =
         (await readOr($, path)) ||
         [
-          (await $.process.run(['head', '-n', '1', path]).catch(() => undefined))?.stdout ?? '',
-          ((await $.process.run(['tail', '-c', '3000000', path]).catch(() => undefined))?.stdout ?? '').split('\n').slice(1).join('\n'),
+          (await runOn($, ['head', '-n', '1', path]).catch(() => undefined))?.stdout ?? '',
+          ((await runOn($, ['tail', '-c', '3000000', path]).catch(() => undefined))?.stdout ?? '').split('\n').slice(1).join('\n'),
         ].join('\n')
       const engine = live.find(agent => agent.id === agentId)
       const one = { id: agentId, description: meta.description ?? '', type: meta.agentType ?? '', status: engine?.status ?? (meta.finished ? 'completed' : 'killed') }

@@ -74,13 +74,13 @@ const indexLog = ($: EngineInterface, line: string) => appendTo($, `${progressDi
 const takeLock = async ($: EngineInterface, name: string, stale: number) => {
   const lock = `${dir}/locks/${name}`
   const now = await $.clock.now()
-  const take = () => $.process.run(['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
+  const take = () => runOn($, ['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
   if (await take()) return lock
   if (now - Number((await readOr($, `${lock}/at`)) || now) < stale) return ''
-  await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+  await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
   return (await take()) ? lock : ''
 }
-const freeLock = ($: EngineInterface, lock: string) => $.process.run(['rm', '-rf', lock]).then(() => undefined, () => undefined)
+const freeLock = ($: EngineInterface, lock: string) => runOn($, ['rm', '-rf', lock]).then(() => undefined, () => undefined)
 // Files written under a lock of their name (locks/<name>): one at a time in this chat, and across chats, waiting a moment for
 // another chat's write. Every write of progress/'s files goes under locks/progress
 const writing = new Map<string, Promise<unknown>>()
@@ -140,7 +140,7 @@ const applyEvent = ($: EngineInterface, event: ProgressEvent, answer: Record<str
     if (!done.isChanged) return done
     for (const id of done.changedEntries) {
       const list = entries.get(id) ?? []
-      if (!list.length && !done.areas.some(area => area.id === id)) await $.process.run(['rm', '-f', `${progressDir()}/areas/${id}.json`]).catch(() => undefined)
+      if (!list.length && !done.areas.some(area => area.id === id)) await runOn($, ['rm', '-f', `${progressDir()}/areas/${id}.json`]).catch(() => undefined)
       else await writeEntries($, id, list)
     }
     await writeAreas($, done.areas)
@@ -151,7 +151,7 @@ const readEvent = async ($: EngineInterface, name: string): Promise<ProgressEven
   const one = answerJson(await readOr($, `${queueDir()}/${name}`)) as Partial<ProgressEvent> | undefined
   return one && typeof one.kind === 'string' && typeof one.text === 'string' && typeof one.at === 'number' ? (one as ProgressEvent) : undefined
 }
-const dropEvent = ($: EngineInterface, name: string) => $.process.run(['rm', '-f', `${queueDir()}/${name}`]).then(() => undefined, () => undefined)
+const dropEvent = ($: EngineInterface, name: string) => runOn($, ['rm', '-f', `${queueDir()}/${name}`]).then(() => undefined, () => undefined)
 
 // What an indexed event keeps up beside progress/: a result's topic gets its state line in the index from the model's answer and,
 // at the top of its page, the Latest block of the areas it went into; the person's words go into each area's own log of them
@@ -293,7 +293,7 @@ const backfillProgress = async ($: EngineInterface) => {
   }
   // (with how many it queued, which the Progress tab counts down from)
   await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n${all.length}\n`)
-  if (isAsked) await $.process.run(['rm', '-f', `${progressDir()}/backfill`]).catch(() => undefined)
+  if (isAsked) await runOn($, ['rm', '-f', `${progressDir()}/backfill`]).catch(() => undefined)
   await indexLog($, `history queued: ${all.length} results`)
 }
 

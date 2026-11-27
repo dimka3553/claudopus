@@ -43,12 +43,12 @@ const sendPicture = async ($: EngineInterface, path: string) => {
   if (!termFrom) return say(`It’s at ${path} on ${thisMac()}.`)
   say('Sending it to your device…')
   for (const bin of TAILSCALES) {
-    const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
+    const targets = await runOn($, [bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
     if (!targets || targets.exitCode !== 0) continue
     // Each line a device: its address, its name, and a word when it is not reachable now
     const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? []
     if (!name || state.join(' ').startsWith('offline')) break
-    const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
+    const sent = await runOn($, [bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
     if (sent.exitCode === 0) return say(`✓ Claudopus sent it to ${name} with Tailscale. It’s in Downloads there.`)
     await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
     break
@@ -126,7 +126,7 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
     return from >= 0 && text.length - from <= LARGE_CHARS ? { bands: [text.slice(from)], width: 0, height: 0 } : null
   }
   if (!RASTER.test(path)) return null
-  const got = await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }))
+  const got = await runOn($, [sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }))
   const width = Number(/pixelWidth:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
   const height = Number(/pixelHeight:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
   if (!width || !height) return null
@@ -135,7 +135,7 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
   const formats = /hasAlpha:\s*yes/.test(got.stdout) ? (['png', 'jpeg'] as const) : (['jpeg'] as const)
   largeMade += 1
   const base = `${dir}/thumbs/large-${Math.round(await $.clock.now())}-${largeMade}`
-  await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+  await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
   try {
     // Each size once: a picture narrower than a width is taken at its own width
     const sizes = [...new Map(LARGE_SIZES.map(([w, quality]) => [`${Math.min(w, width)}:${quality}`, [Math.min(w, width), quality] as const])).values()]
@@ -143,13 +143,13 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
     for (const [most, quality] of format === 'png' ? [...new Map(sizes.map(([w]) => [w, [w, 0] as const])).values()] : sizes) {
       // The picture at this width, then cut into bands down it, each as tall as fits
       const wide = `${base}-${most}.png`
-      const sized = await $.process.run([sips($), '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
+      const sized = await runOn($, [sips($), '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
       if (sized.exitCode !== 0) continue
-      const tall = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+      const tall = Number(/pixelHeight:\s*(\d+)/.exec((await runOn($, [sips($), '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
       if (!tall) continue
       // sips crops only a band that neither starts at the top nor reaches the bottom (one that does comes out centred, or whole),
       // so the picture is given a row above and below first, and each band is cut one row down
-      const padded = await $.process.run([sips($), '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }))
+      const padded = await runOn($, [sips($), '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }))
       if (padded.exitCode !== 0) continue
       const bands: string[] = []
       let band = Math.min(tall, 400)
@@ -158,8 +158,8 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
       for (let y = 0; y < tall; ) {
         const rows = Math.min(band, tall - y)
         const out = `${base}-band.${format === 'png' ? 'png' : 'jpg'}`
-        await $.process.run([sips($), '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out])
-        const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+        await runOn($, [sips($), '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out])
+        const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await runOn($, [sips($), '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
         const read = cutTo === rows ? ((await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined) : undefined
         const source = read ? `<svg xmlns="http://www.w3.org/2000/svg" width="${most}" height="${rows}" viewBox="0 0 ${most} ${rows}"><image href="data:image/${format};base64,${read.base64}" width="${most}" height="${rows}"/></svg>` : ''
         if (!source) break
@@ -184,7 +184,7 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
     }
     return null
   } finally {
-    await $.process.run(['sh', '-c', 'rm -f "$1"-*', 'sh', base]).catch(() => undefined)
+    await runOn($, ['sh', '-c', 'rm -f "$1"-*', 'sh', base]).catch(() => undefined)
   }
 }
 // The large copy as made, else nothing yet: it is made once, out of the drawing, which is drawn again when it is ready. One that
@@ -267,9 +267,9 @@ const picOf = async ($: EngineInterface, given: string, one: Todo, isSeen: boole
   } else if (isDrawn && RASTER.test(asked)) {
     const to = `${dir}/thumbs/${slug(asked).slice(-60)}-${mark(asked).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
     if (!(await $.fs.exists(to))) {
-      await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+      await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
       for (const size of CHAT_THUMB_SIZES) {
-        await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to])
+        await runOn($, [sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to])
         if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES) break
       }
     }
@@ -286,7 +286,7 @@ const picturesIn = async ($: EngineInterface, lines: Line[], one: Todo, kept: Re
   // Small copies not looked at for two weeks are cleared, once a load
   if (!isThumbsCleared) {
     isThumbsCleared = true
-    await $.process.run(['find', `${dir}/thumbs`, '-name', '*.jpg', '-mtime', '+14', '-delete']).catch(() => undefined)
+    await runOn($, ['find', `${dir}/thumbs`, '-name', '*.jpg', '-mtime', '+14', '-delete']).catch(() => undefined)
   }
   const last = new Map<string, { at: number; isSeen: boolean }>()
   // Steps are numbered as the chat numbers them, and only the lines it shows count
@@ -479,9 +479,9 @@ const askPicOf = async ($: EngineInterface, path: string): Promise<Pic | null> =
   } else if (RASTER.test(path)) {
     const to = `${dir}/thumbs/ask-${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
     if (!(await $.fs.exists(to))) {
-      await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+      await runOn($, ['mkdir', '-p', `${dir}/thumbs`])
       for (const [size, quality] of ASK_THUMB_SIZES) {
-        await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
+        await runOn($, [sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
         if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= ASK_THUMB_BYTES) break
       }
     }
@@ -604,10 +604,10 @@ const questionPicture = async ($: EngineInterface, id: string, title: string, te
   if (!dir || !choices.length) return ''
   const base = `${questionsDir()}/${id.replace(/[^A-Za-z0-9_-]/g, '-')}-${at}`
   try {
-    await $.process.run(['mkdir', '-p', questionsDir()])
+    await runOn($, ['mkdir', '-p', questionsDir()])
     await $.fs.write(`${base}.svg`, questionSvg(title, text, details, choices))
-    const r = await $.process.run([sips($), '-s', 'format', 'png', `${base}.svg`, '--out', `${base}.png`], { timeoutMs: 20_000 })
-    await $.process.run(['rm', '-f', `${base}.svg`]).catch(() => undefined)
+    const r = await runOn($, [sips($), '-s', 'format', 'png', `${base}.svg`, '--out', `${base}.png`], { timeoutMs: 20_000 })
+    await runOn($, ['rm', '-f', `${base}.svg`]).catch(() => undefined)
     if (r.exitCode !== 0 || (await $.fs.stat(`${base}.png`).catch(() => undefined))?.kind !== 'file') return void (await log($, `picture of a question not made: ${oneLine(r.stderr ?? '').slice(0, 160)}`)), ''
     return `${base}.png`
   } catch (err) {

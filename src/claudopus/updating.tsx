@@ -20,7 +20,7 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
   const lock = `${dir}/update.lock`
   const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
   const take = async () =>
-    (await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+    (await runOn($, ['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
   if (!(await take())) {
     const now = await $.clock.now()
     const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
@@ -28,24 +28,24 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
     if (now - at < UPDATE_LOOK && at - now <= LOCK_SKEW) return UPDATE_BUSY
     const seen = await readOr($, lock)
     const aside = `${lock}.${token.split(' ')[1]}`
-    if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
+    if ((await runOn($, ['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
     // Another chat took the stale lock over in between: what was moved is its fresh lock, put back where it was
-    if ((await readOr($, aside)) !== seen) return ((await $.process.run(['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
-    await $.process.run(['rm', '-f', aside]).catch(() => undefined)
+    if ((await readOr($, aside)) !== seen) return ((await runOn($, ['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
+    await runOn($, ['rm', '-f', aside]).catch(() => undefined)
     if (!(await take())) return UPDATE_BUSY
   }
   try {
     return await act()
   } finally {
     // Only this chat's own lock is removed: one taken over meanwhile is the other chat's
-    if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
+    if ((await readOr($, lock)) === token) await runOn($, ['rm', '-f', lock]).catch(() => undefined)
   }
 }
 // The Mac, as one step needs it
 const lookIo = ($: EngineInterface): LookIo => ({
   read: path => readOr($, path),
   write: (path, text) => $.fs.write(path, text),
-  run: (argv, timeoutMs) => $.process.run(argv, { timeoutMs }),
+  run: (argv, timeoutMs) => runOn($, argv, { timeoutMs }),
   page: () =>
     Promise.race([
       $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
@@ -62,7 +62,7 @@ const engineOf = async ($: EngineInterface) => {
   if (named) return named
   // The PATH first, as the shell would find it, so an install by npm or another copy earlier on it is still the one used
   const onPath = ((await $.env.get('PATH')) ?? '').split(':').filter(one => one.startsWith('/')).map(one => `${one.replace(/\/+$/, '')}/claude`)
-  for (const one of [...onPath, `${(await $.env.get('HOME')) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
+  for (const one of [...onPath, `${(await homeFolder($)) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
     if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
   return 'claude'
 }
@@ -154,7 +154,7 @@ const pageFor = async ($: EngineInterface, version: string) => {
 let sourceKnown: { src: Source; cannot?: { what: string; why: string }; where: string } | undefined
 const knowSource = async ($: EngineInterface, isAgain = false) => {
   if (sourceKnown && !isAgain) return sourceKnown
-  const root = $.plugin.root.replace(/\/+$/, '')
+  const root = pluginRoot($).replace(/\/+$/, '')
   const from = installedFrom(root)
   const io = lookIo($)
   const plugins = from?.plugins ?? dir.replace(/\/claudopus$/, '/plugins')
@@ -371,7 +371,7 @@ const isDownloadHeld = async ($: EngineInterface, src: Source, steps: Steps) => 
   const key = `${src.repo}|${steps.commit}|${steps.tree}`
   const known = heldChecked.get(key)
   if (known !== undefined) return known
-  const git = (args: string[]) => $.process.run(['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+  const git = (args: string[]) => runOn($, ['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
   const held = (await git(['rev-parse', '--verify', '-q', 'refs/claudopus/update^{commit}'])).stdout.trim()
   const tree = held === steps.commit ? (await git(['rev-parse', '--verify', '-q', `${steps.commit}:${src.sub}`])).stdout.trim() : ''
   const isHeld = tree === steps.tree
@@ -561,18 +561,18 @@ const configUpdateBox = async ($: EngineInterface, ui: Ui) => {
 // run from a folder of its code, the version that folder has now, which a reload loads
 const installedNow = async ($: EngineInterface) => (await installedCopy($))?.version ?? ''
 const installedCopy = async ($: EngineInterface) => {
-  const from = installedFrom($.plugin.root)
+  const from = installedFrom(pluginRoot($))
   if (!from) {
     // Only a main checkout (its .git a folder, not a worktree's file) follows its folder: a worktree's version rises as work merges
     // main or a release numbers it, mid-build, and a chat loaded from it is reloaded by hand
-    const root = $.plugin.root.replace(/\/+$/, '')
+    const root = pluginRoot($).replace(/\/+$/, '')
     if (!(await readOr($, `${root}/../../.git/HEAD`)).trim()) return undefined
     const version = versionOnPage(await readOr($, `${root}/.claude-plugin/plugin.json`))
     return version ? { version, installPath: root } : undefined
   }
   const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
   const id = `${from.plugin}@${from.marketplace}`
-  return copyOf(installed, id, $.plugin.root, cwd)
+  return copyOf(installed, id, pluginRoot($), cwd)
 }
 
 // A /reload-plugins run from afar loads the new copy but leaves the old one's timers running in the same chat, and copies before
@@ -659,7 +659,7 @@ const playUpdated = async ($: EngineInterface, version: string) => {
   if (made.exitCode !== 0) return
   // A sound that could not play leaves the version free for the next chat that moves to it
   await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {
-    await $.process.run(['rm', '-f', played]).catch(() => undefined)
+    await runOn($, ['rm', '-f', played]).catch(() => undefined)
     await log($, `updated sound not played: ${String(err)}`)
   })
 }

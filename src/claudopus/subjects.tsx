@@ -128,16 +128,16 @@ const shortenPages = async ($: EngineInterface) => {
   if (!grown.length) return
   const lock = `${dir}/locks/pages`
   const now = await $.clock.now()
-  const take = () => $.process.run(['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
+  const take = () => runOn($, ['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
   if (!(await take())) {
     if (now - Number((await readOr($, `${lock}/at`)) || now) < SHORTEN_STALE) return
-    await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+    await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
     if (!(await take())) return
   }
   try {
     for (const one of grown) await shortenPage($, one.name).catch(err => log($, `page of ${one.name} not made short: ${String(err)}`))
   } finally {
-    await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+    await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
   }
 }
 
@@ -157,7 +157,7 @@ const tidyIndex = async ($: EngineInterface) => {
       for (const one of await $.fs.list(`${dir}/streams`).catch(() => [])) {
         if (one.name !== `${slug(from)}.md` && !one.name.startsWith(`${slug(from)}.log.`)) continue
         await $.fs.write(`${dir}/streams/${slug(to)}${one.name.slice(slug(from).length)}`, await readOr($, `${dir}/streams/${one.name}`))
-        await $.process.run(['rm', '-f', `${dir}/streams/${one.name}`]).catch(() => undefined)
+        await runOn($, ['rm', '-f', `${dir}/streams/${one.name}`]).catch(() => undefined)
       }
       for (const [key, value] of Object.entries(aliases)) if (value === from) aliases[key] = to
       aliases[slug(from)] = to

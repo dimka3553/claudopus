@@ -27,16 +27,16 @@ const isRecording = async ($: EngineInterface) => {
   const stat = await $.fs.stat(on).catch(() => undefined)
   if (!stat) return false
   // A switch left from long ago, its removal failed or its chat gone, starts nothing: it goes
-  if (at - stat.mtimeMs > RECORD_FRESH) return void (await $.process.run(['rm', '-f', on]).catch(() => undefined)), false
+  if (at - stat.mtimeMs > RECORD_FRESH) return void (await runOn($, ['rm', '-f', on]).catch(() => undefined)), false
   const chat = (await $.session.id().catch(() => '')).slice(0, 8) || 'chat'
   recording = { path: `${dir}/panel-record/${chat}-${new Date(at).toISOString().replace(/[:.]/g, '-')}.jsonl`, until: at + RECORD_FOR, lines: [], written: 0, started: at }
   typedCount = new Map()
   // The switch stays for the other chats to see for a few seconds, then goes, so a recording never runs on by itself
-  $.clock.after(6000, () => void $.process.run(['rm', '-f', on]).catch(() => undefined))
-  const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
+  $.clock.after(6000, () => void runOn($, ['rm', '-f', on]).catch(() => undefined))
+  const manifest = await readOr($, `${pluginRoot($)}/.claude-plugin/plugin.json`)
   const flushing = () => $.clock.after(2000, () => void (recording ? recordFlush($).then(() => (recording && ((void isRecording($)), flushing()))) : undefined))
   flushing()
-  await recordLine($, { ev: 'start', version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
+  await recordLine($, { ev: 'start', version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: pluginRoot($).split('/').slice(-3).join('/') })
   return true
 }
 // One event, with its time from the start

@@ -29,7 +29,7 @@ const ledgerTasks = (list: Todo[]) => {
 }
 // The chat's own process, which runs the mod's commands: a load in the same process is a reload of the mod, which ends nothing
 let enginePid = ''
-const pidOfEngine = async ($: EngineInterface) => ((await $.process.run(['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
+const pidOfEngine = async ($: EngineInterface) => ((await runOn($, ['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
 // Written only once this load has read what the last process left (noteClosed), so a load never writes over it before it is read
 let isLedgerRead = false
 let ledgerSign = ''
@@ -46,9 +46,9 @@ const saveLedger = async ($: EngineInterface) => {
   if (sign === ledgerSign) return
   const path = ledgerFile(id)
   const ledger: Ledger = { ...body, savedAt: await $.clock.now() }
-  if (ledgerMade !== id) (await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`]), (ledgerMade = id))
+  if (ledgerMade !== id) (await runOn($, ['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`]), (ledgerMade = id))
   await $.fs.write(`${path}.part`, JSON.stringify(ledger, null, 1))
-  const r = await $.process.run(['mv', '-f', `${path}.part`, path])
+  const r = await runOn($, ['mv', '-f', `${path}.part`, path])
   if (r.exitCode !== 0) throw new Error(`ledger not moved into place: ${r.stderr.slice(0, 200)}`)
   ledgerSign = sign
 }
@@ -136,7 +136,7 @@ const noteClosed = async ($: EngineInterface, id: string) => {
 const saveBrief = async ($: EngineInterface, task: string, prompt: string) => {
   const { id } = await read($, me)
   if (!dir || !SAFE_CHAT.test(id) || !isTaskId(task) || !prompt.trim()) return
-  await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`])
+  await runOn($, ['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`])
   await $.fs.write(ledgerPart(id, task, 'brief'), prompt)
 }
 // The worktree a task made, as its command made it: `git worktree add [-b <branch>] <path>`, the path as the command gives it or
@@ -215,7 +215,7 @@ const carryOn = async ($: EngineInterface, id: string, answer = '') => {
   const { id: chat } = await read($, me)
   if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat)) return
   const path = ledgerPart(chat, one.id, 'carry')
-  await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${chat}`])
+  await runOn($, ['mkdir', '-p', `${dir}/${LEDGER_DIR}/${chat}`])
   await $.fs.write(path, await carryText($, one, answer))
   const model = modelName(one.model ?? '')
   await log($, `carry on ${one.id}: the chat is asked to start a fresh task from ${path}`)
@@ -256,7 +256,7 @@ const ledgerOthers = async ($: EngineInterface, me: string, open: Set<string>, n
   // switched off, whose tasks still work
   const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort()
   if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
-    const r = pids.length ? await $.process.run(['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
+    const r = pids.length ? await runOn($, ['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
     pidsSeen.alive = new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)))
     pidsSeen.at = now
     pidsSeen.asked = pids.join(',')
@@ -284,15 +284,15 @@ const ledgerOthers = async ($: EngineInterface, me: string, open: Set<string>, n
 // Changed, it loads Claudopus again in every chat, as an update does
 const BEAT_EVERY = 3000
 const beatFile = (id: string) => `${dir}/keep/${id}.beat`
-const configDir = async ($: EngineInterface) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+const configDir = async ($: EngineInterface) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeFolder($)) ?? ''}/.claude`
 // The key this copy has in the settings: claudopus@<marketplace> for an installed one, whether Claude Code keeps it in its cache or
 // loads it from the marketplace's own folder (a marketplace of a folder on this Mac, as Claudopus's own checkout); claudopus@inline
 // for one loaded with --plugin-dir. On 16 Nov this Mac's chats ran from the checkout, and claudopus@inline would have changed nothing
 const ownKey = async ($: EngineInterface, configDir: string) => {
-  const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec($.plugin.root)?.[1]
+  const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec(pluginRoot($))?.[1]
   if (market && /^[\w.-]+$/.test(market)) return `claudopus@${market}`
   const known = parsedOr<Record<string, { installLocation?: string }>>(await readOr($, `${configDir}/plugins/known_marketplaces.json`), {})
-  const name = Object.entries(known).find(([, one]) => typeof one?.installLocation === 'string' && one.installLocation && ($.plugin.root === one.installLocation || $.plugin.root.startsWith(`${one.installLocation.replace(/\/$/, '')}/`)))?.[0]
+  const name = Object.entries(known).find(([, one]) => typeof one?.installLocation === 'string' && one.installLocation && (pluginRoot($) === one.installLocation || pluginRoot($).startsWith(`${one.installLocation.replace(/\/$/, '')}/`)))?.[0]
   return name && /^[\w.-]+$/.test(name) ? `claudopus@${name}` : 'claudopus@inline'
 }
 let beatLine = ''
@@ -306,7 +306,7 @@ const beat = async ($: EngineInterface, id: string) => {
   const proof = `${dir}/keep/${id}.hold-test`
   if (!isHoldTestDue && (await $.fs.exists(proof))) {
     const said = (await readOr($, proof)).trim()
-    await $.process.run(['rm', '-f', proof])
+    await runOn($, ['rm', '-f', proof])
     if (said !== enginePid) return void log($, "a hold-test file that did not name this chat's process was taken away")
     isHoldTestDue = true
     $.ui.invalidate('ui.render')
@@ -338,7 +338,7 @@ const startReviver = async ($: EngineInterface, id: string) => {
   everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
   // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs
   const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" >/dev/null 2>&1 </dev/null &`
-  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  const r = await runOn($, ['/bin/sh', '-c', script, 'sh', `${pluginRoot($)}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   if (r.exitCode !== 0) await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`)
 }
 // A chat that ends leaves no beat behind
@@ -346,7 +346,7 @@ const endBeat = async ($: EngineInterface, id: string) => {
   beatLine = ''
   // (the moment it ended, so a restart that follows says when, though the beat is gone)
   if (dir && SAFE_CHAT.test(id) && enginePid) await $.fs.write(`${dir}/keep/${id}.ended`, `${enginePid}\t${Math.round(await $.clock.now())}\n`).catch(() => undefined)
-  if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
+  if (dir && SAFE_CHAT.test(id)) await runOn($, ['rm', '-f', beatFile(id)]).catch(() => undefined)
 }
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
 
