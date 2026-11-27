@@ -259,7 +259,7 @@ const bandHooks = (on: On) => {
       const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
       if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
-    const cards = await read($, todos)
+    const cards = await drawnCards($)
     if (canBox !== barBoxes.has(e.surface)) {
       if (canBox) barBoxes.add(e.surface)
       else barBoxes.delete(e.surface)

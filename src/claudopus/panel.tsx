@@ -230,7 +230,7 @@ const panelHooks = (on: On) => {
     // this drawing, the first to show it, never before
     if (paneId === LIST) {
       const from = await $.clock.now()
-      for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)]) {
+      for (const one of [...(await read($, flows)), ...(await drawnCards($)).filter(card => !card.parentId)]) {
         const key = `${one.id}:${one.endedAt}`
         if (one.status !== 'working' && one.endedAt > listFreshAt && one.endedAt < listHeldAt && !lateFrom.has(key) && from - one.endedAt < RELOAD_GRACE * 2)
           (lateFrom.set(key, from), $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1))))
@@ -239,12 +239,12 @@ const panelHooks = (on: On) => {
     }
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
     // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
-    const all = (await read($, todos)).map(asPressed)
+    const all = (await drawnCards($)).map(asPressed)
     const own = all.filter(one => !one.parentId)
     // Each card's stage, which its colour, its line, its place and the header's counts all read (stageOf)
     const stage = (one: Todo) => stageOf(all, one)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
-    const otherChats = await read($, others)
+    const otherChats = await drawnOthers($)
     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
     for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (asksOf(one).some(ask => answeredHere.has(`${one.id}:${ask.at}`)) ? withAsks(one, asksOf(one).filter(ask => !answeredHere.has(`${one.id}:${ask.at}`))) : one))

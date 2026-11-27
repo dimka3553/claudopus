@@ -128,8 +128,8 @@ const draftDrawn = (key: string) => {
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
   const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
-  const own = await read($, todos)
-  const chats = await read($, others)
+  const own = await drawnCards($)
+  const chats = await drawnOthers($)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
@@ -143,7 +143,7 @@ const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
   return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await drawnCards($)).map(calmCard), (await drawnOthers($)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
 const holdTimes = ($: EngineInterface) => {
   if (!isTyping) recordEvent($, 'hold')
   const made = (typing += 1)
@@ -201,9 +201,9 @@ const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 // what work did (a card that finishes comes up green, one stopped leaves after its pause) shows as before
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
-  const chats = await read($, others)
+  const chats = await drawnOthers($)
   // (only the cards that ask or wait on a gate: a card that merely starts or ends waits)
-  const cards = await read($, todos)
+  const cards = await drawnCards($)
   const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
   // (and what the person's own presses change once their write lands: a card dismissed, a result's question answered or set aside,
   // a task their answer starts again. Without them, a drawing made between the press and its write was kept while they used the
@@ -216,7 +216,7 @@ const personSign = async ($: EngineInterface) => {
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
     [...pictureIn.keys()], isUpdating, loadMark,
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
-    [...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+    [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
 }
 // A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the

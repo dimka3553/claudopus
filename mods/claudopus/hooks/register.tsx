@@ -200,6 +200,8 @@ if (!isTimed) JSON.stringify(list, (_, v: unknown) => (v && typeof v === 'object
 cardsAt = Date.now()
 return (cardsKept = list)
 }
+const todosMark = atom({ plugin: 'claudopus', key: 'todosMark' } as const, 0, { shape: 'todos-mark-1' })
+const drawnCards = async ($: EngineInterface) => (await read($, todosMark), cardsKept ?? keepCards(await read($, todos)))
 const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? (await $.clock.now(), cardsKept ?? keepCards(await read($, todos))) : keepCards(await read($, todos)))
 const runDue = new Map<string, number | undefined>()
 const RUN_SOON = 400
@@ -221,6 +223,7 @@ const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list
 const next = hold(now)
 if (JSON.stringify(next) === before) return (settled(), now)
 const written = keepCards(await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list))))
+await update($, todosMark, n => n + 1)
 settled()
 saveLedgerSoon($)
 return written
@@ -7814,8 +7817,8 @@ return value
 const paneShape = async ($: EngineInterface, paneId: string) => {
 const at = await $.clock.now()
 const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
-const own = await read($, todos)
-const chats = await read($, others)
+const own = await drawnCards($)
+const chats = await drawnOthers($)
 const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
 const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
 const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
@@ -7825,7 +7828,7 @@ const calmCard = (one: Todo) => {
 const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
 return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await drawnCards($)).map(calmCard), (await drawnOthers($)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
 const holdTimes = ($: EngineInterface) => {
 if (!isTyping) recordEvent($, 'hold')
 const made = (typing += 1)
@@ -7861,8 +7864,8 @@ let engagedAt = 0
 const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
-const chats = await read($, others)
-const cards = await read($, todos)
+const chats = await drawnOthers($)
+const cards = await drawnCards($)
 const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
 const momentAt = await $.clock.now()
 const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
@@ -7870,7 +7873,7 @@ return JSON.stringify([
 presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
 [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
 [...pictureIn.keys()], isUpdating, loadMark,
-[...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+[...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
 ])
 }
 const PRESS_HOLD = 2000
@@ -8949,16 +8952,18 @@ if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) re
 } else if (calmOthers(next) !== calmOthers(was) || next.some(s => now - (was.find(w => w.host === s.host && w.chat === s.chat)?.at ?? 0) > STALE / 2)) {
 othersHeld = undefined
 othersKept = await update($, others, () => next)
+await update($, todosMark, n => n + 1)
 } else othersHeld = next
 }
 let othersHeld: Shared[] | undefined
 let othersKept: Shared[] | undefined
+const drawnOthers = async ($: EngineInterface) => (await read($, todosMark), othersKept ?? read($, others))
 const ownOthers = async ($: EngineInterface) => (othersKept ? (await $.clock.now(), othersKept) : read($, others))
 const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
 const writeHeldOthers = async ($: EngineInterface) => {
 const held = othersHeld
 othersHeld = undefined
-if (held) othersKept = await update($, others, () => held)
+if (held) ((othersKept = await update($, others, () => held)), await update($, todosMark, n => n + 1))
 }
 
 const appIds = new Set<string>()
@@ -15540,7 +15545,7 @@ if (kept && canBox && barBoxes.has(e.surface) && barOpen && kept.shape === barSh
 const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
 if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
 }
-const cards = await read($, todos)
+const cards = await drawnCards($)
 if (canBox !== barBoxes.has(e.surface)) {
 if (canBox) barBoxes.add(e.surface)
 else barBoxes.delete(e.surface)
@@ -15943,17 +15948,17 @@ $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)
 const { isFinishedOpen = false } = await read($, view)
 if (paneId === LIST) {
 const from = await $.clock.now()
-for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)]) {
+for (const one of [...(await read($, flows)), ...(await drawnCards($)).filter(card => !card.parentId)]) {
 const key = `${one.id}:${one.endedAt}`
 if (one.status !== 'working' && one.endedAt > listFreshAt && one.endedAt < listHeldAt && !lateFrom.has(key) && from - one.endedAt < RELOAD_GRACE * 2)
 (lateFrom.set(key, from), $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1))))
 }
 listFreshAt = from
 }
-const all = (await read($, todos)).map(asPressed)
+const all = (await drawnCards($)).map(asPressed)
 const own = all.filter(one => !one.parentId)
 const stage = (one: Todo) => stageOf(all, one)
-const otherChats = await read($, others)
+const otherChats = await drawnOthers($)
 for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
 const elsewhere = cardsOf(otherChats).map(one => (asksOf(one).some(ask => answeredHere.has(`${one.id}:${ask.at}`)) ? withAsks(one, asksOf(one).filter(ask => !answeredHere.has(`${one.id}:${ask.at}`))) : one))
 const helpersThere = helpersOf(otherChats)

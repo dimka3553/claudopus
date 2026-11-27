@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.310 · 28 November 2026
+- With several tasks and helpers at work, Claudopus uses less of the processor: the panel and the bar above the prompt no longer copy the whole list of tasks each time they are drawn, which happened about thirty times a second.
+
 ## 0.2.309 · 28 November 2026
 - Every value on a question or a result that you would paste somewhere else, such as an account or case number, an id, an email, a link, a path or a key's name, now has its own button under the text: one press copies it, and the button says Copied. The panel itself lets no text be selected.
 

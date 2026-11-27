@@ -245,6 +245,7 @@ const readOthers = async ($: EngineInterface) => {
   } else if (calmOthers(next) !== calmOthers(was) || next.some(s => now - (was.find(w => w.host === s.host && w.chat === s.chat)?.at ?? 0) > STALE / 2)) {
     othersHeld = undefined
     othersKept = await update($, others, () => next)
+    await update($, todosMark, n => n + 1)
   } else othersHeld = next
 }
 // Other chats' work as the panel shows it, but for what moves by itself as it runs (their beats, times, tokens and output): a change
@@ -254,12 +255,14 @@ let othersHeld: Shared[] | undefined
 // The list as this copy last wrote it, which only it writes: read from the engine it is copied whole between Claude's two threads
 // (ownCards), and the look each second read it several times
 let othersKept: Shared[] | undefined
+// (a drawing reads the mark alone, which each write of this list moves too: drawnCards)
+const drawnOthers = async ($: EngineInterface) => (await read($, todosMark), othersKept ?? read($, others))
 const ownOthers = async ($: EngineInterface) => (othersKept ? (await $.clock.now(), othersKept) : read($, others))
 const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
 const writeHeldOthers = async ($: EngineInterface) => {
   const held = othersHeld
   othersHeld = undefined
-  if (held) othersKept = await update($, others, () => held)
+  if (held) ((othersKept = await update($, others, () => held)), await update($, todosMark, n => n + 1))
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
