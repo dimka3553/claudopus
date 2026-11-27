@@ -256,6 +256,12 @@ const keepCards = (list: Todo[]) => {
 // (each read still goes to the engine and back once, with a call that carries nothing: code that follows a read kept its place
 // after what the engine was doing only by that, as a write that follows a message sent from a drawing's hook, refused while the
 // hook still draws)
+// A drawing reads only the list's mark from the engine, a number changeTodos moves with each write, and takes the list itself from
+// here: the mark's write is what draws it again. Read whole for each drawing, the list crossed between Claude's two threads about
+// thirty times a second with seven tasks at work (28 Nov: the panel asked for five times a second and the bar four, each with one
+// to four reads of it; the mod's thread at 30% of a core and the engine's own at 35%)
+const todosMark = atom({ plugin: 'claudopus', key: 'todosMark' } as const, 0, { shape: 'todos-mark-1' })
+const drawnCards = async ($: EngineInterface) => (await read($, todosMark), cardsKept ?? keepCards(await read($, todos)))
 const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? (await $.clock.now(), cardsKept ?? keepCards(await read($, todos))) : keepCards(await read($, todos)))
 // What a task's card says it is running, and when something new last came back to it, change as every call ends: they are
 // written with the next change to the list (the next call's start, most often), or by themselves RUN_SOON after, so a call's end
@@ -286,6 +292,7 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   const next = hold(now)
   if (JSON.stringify(next) === before) return (settled(), now)
   const written = keepCards(await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list))))
+  await update($, todosMark, n => n + 1)
   settled()
   // (and the ledger on disk with it, so a quit or a crash loses nothing: keep.tsx)
   saveLedgerSoon($)

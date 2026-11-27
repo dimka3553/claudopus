@@ -1,0 +1,1 @@
+- With several tasks and helpers at work, Claudopus uses less of the processor: the panel and the bar above the prompt no longer copy the whole list of tasks each time they are drawn, which happened about thirty times a second.
