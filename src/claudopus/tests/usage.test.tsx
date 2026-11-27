@@ -486,7 +486,7 @@ test("a disk nearly full says so at the top of the panel with Free up space and 
   df(12.2)
   await clock.advance(31_000)
   expect((await until(() => pane.find({ type: 'Text', text: /^Freed/ })))?.text).toBe('Freed 9 GB')
-  expect(String((await until(() => pane.find({ type: 'Markdown', text: /Big new files/ } as never)))?.props.text)).toContain('Big new files of yours, which only you can delete: “Screen Recording 2026-11-22 at 14.27.31.mov” on your Desktop, 113 GB; “photo.zip” in your Downloads folder, 17 GB.')
+  expect(String((await until(() => pane.find({ type: 'Markdown', text: /Your big new files/ } as never)))?.props.text)).toContain('Your big new files, which only you can delete: “Screen Recording 2026-11-22 at 14.27.31.mov” on your Desktop, 113 GB; “photo.zip” in your Downloads, 17 GB.')
   // With room again it goes, and nobody was told twice
   df(40)
   await clock.advance(31_000)

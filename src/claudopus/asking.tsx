@@ -219,10 +219,6 @@ const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 // Only while scrolled down: at the top what comes in comes below the header, as the person expects, and every behaviour that shows
 // what work did (a card that finishes comes up green, one stopped leaves after its pause) shows as before
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
-// (the update's steps are read from their file at most every two seconds: read at every drawing, the file was most of the 32 ms
-// this took)
-let stepsRead = ['', 0] as [string, number]
-const stepsNow = async ($: EngineInterface) => (isTimed && Date.now() - stepsRead[1] < 2000 ? stepsRead[0] : (stepsRead = [dir ? await readOr($, stepsPath()) : '', Date.now()])[0])
 const personSign = async ($: EngineInterface) => {
   const ranFrom = runFrom()
   try {
@@ -237,11 +233,11 @@ const personSign = async ($: EngineInterface) => {
   const momentAt = await $.clock.now()
   const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
   return JSON.stringify([
-    presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
+    presses, pressedAt, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
     [...pictureIn.keys()], isUpdating, loadMark,
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
-    [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, await stepsNow($),
+    [...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
   } finally {
     runTo('personSign', ranFrom)
@@ -321,7 +317,19 @@ const freshBegins = (key: string, at: number) => (freshUnderWay.set(key, { fresh
 // other again and again: in the real panel three quarters of the full redraws began the moment a drawing ended, in chains of up to
 // 27, with the panel and the bar drawn about seven times a second and the hover under the pointer going out at each (17 Nov)
 const madeAgain = new Map<string, { fresh: number; at: number }>()
+// A press on the desktop ends only once a drawing begun after it is made, or PRESS_SHOWN at the latest: the app spins the
+// pressed button until its press ends, and a press that ended at once left the button as it was, unspun, for the 0.3 to 1 s the
+// drawing that shows what it did took under load (28 Nov, the person: "the spinner should go all the way to the end")
+const PRESS_SHOWN = 1500
+let pressWaits: { since: number; done: () => void }[] = []
+const pressShown = ($: EngineInterface, since: number) =>
+  new Promise<void>(done => {
+    pressWaits.push({ since, done })
+    $.clock.after(PRESS_SHOWN, done)
+    void drawFresh($, true)
+  })
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
+  if (made) pressWaits = pressWaits.filter(wait => made.at < wait.since || (wait.done(), false))
   const going = freshUnderWay.get(key)
   freshUnderWay.delete(key)
   // (a drawing is as new as what it began with: what came while it was made is not in it, so it is never given as made, and the
@@ -1036,7 +1044,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
   const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
   // Set aside, the press every question has beside the task's own choices (progress.tsx), unless the task gave that choice itself
-  const isAside = !isReply && !ask.refused && !ask.rule && said === SET_ASIDE && !(ask.choices ?? []).includes(SET_ASIDE)
+  const isOurs = (label: string) => !isReply && !ask.refused && !ask.rule && said === label && !(ask.choices ?? []).includes(label)
+  const isAside = isOurs(SET_ASIDE)
   const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
   const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
   sentReplies.set(one.id, { ...sent, to: 'sending' })
@@ -1055,7 +1064,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
       : isAside
         ? SET_ASIDE_TOLD()
-        : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
+        : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isOurs(SKIP_ONE) ? `\n${SKIP_TOLD}` : ''}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
   // The answer goes into the queue of progress/: a press on Set aside marks the task's entries at once, and the indexer sets the
   // steps it covers aside; any other answer may tick or add next steps (progress.tsx)
   if (!ask.refused) {
@@ -1371,7 +1380,9 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   const one = (await read($, todos)).find(todo => todo.id === card)
   if (sent?.to !== 'work' || !one) return
   const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
-  await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
+  // (a press on Skip this one or Set aside task says what it means here too)
+  const isOurs = Boolean(sent.asked && !(sent.asked.choices ?? []).includes(sent.text))
+  await toEnded($, one, agentId, isOurs && sent.text === SET_ASIDE ? SET_ASIDE_TOLD() : `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isOurs && sent.text === SKIP_ONE ? `\n${SKIP_TOLD}` : ''}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
 }
 // An answer or a press given on the card in the last ANSWER_SHOWN: the card says it
 const heldAnswer = (one: Todo, now: number) => {

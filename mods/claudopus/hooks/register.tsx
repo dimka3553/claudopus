@@ -30,7 +30,7 @@ import { USAGE_CELLS, usageDrawn, usageSpacersDrawn, usageText } from './usage-b
 import { PACE_EVERY, PACE_LOOK, PACE_SET, PACE_THREADS, paceLookOf, paceNeedsThreads, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
-import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, SKIP_ONE, SKIP_TOLD, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
 import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
@@ -7916,8 +7916,6 @@ const ENGAGED = 15_000
 let engagedAt = 0
 const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
-let stepsRead = ['', 0] as [string, number]
-const stepsNow = async ($: EngineInterface) => (isTimed && Date.now() - stepsRead[1] < 2000 ? stepsRead[0] : (stepsRead = [dir ? await readOr($, stepsPath()) : '', Date.now()])[0])
 const personSign = async ($: EngineInterface) => {
 const ranFrom = runFrom()
 try {
@@ -7927,10 +7925,10 @@ const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => on
 const momentAt = await $.clock.now()
 const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
 return JSON.stringify([
-presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
+presses, pressedAt, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
 [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
 [...pictureIn.keys()], isUpdating, loadMark,
-[...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, await stepsNow($),
+[...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
 ])
 } finally {
 runTo('personSign', ranFrom)
@@ -7971,7 +7969,16 @@ return true
 const isPanelSlow = (at: number) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10_000)
 const freshBegins = (key: string, at: number) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false, since: at }), freshness)
 const madeAgain = new Map<string, { fresh: number; at: number }>()
+const PRESS_SHOWN = 1500
+let pressWaits: { since: number; done: () => void }[] = []
+const pressShown = ($: EngineInterface, since: number) =>
+new Promise<void>(done => {
+pressWaits.push({ since, done })
+$.clock.after(PRESS_SHOWN, done)
+void drawFresh($, true)
+})
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
+if (made) pressWaits = pressWaits.filter(wait => made.at < wait.since || (wait.done(), false))
 const going = freshUnderWay.get(key)
 freshUnderWay.delete(key)
 const fresh = going?.fresh ?? made?.fresh ?? freshness
@@ -8517,7 +8524,8 @@ replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
 const isRelease = !isReply && !ask.refused && Boolean(ask.release) && ask.choices?.[0] === said && (await allowRelease($, one.id, ask.release ?? '').catch(err => (void log($, `release not allowed by the press: ${String(err)}`), false)))
 const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
 const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
-const isAside = !isReply && !ask.refused && !ask.rule && said === SET_ASIDE && !(ask.choices ?? []).includes(SET_ASIDE)
+const isOurs = (label: string) => !isReply && !ask.refused && !ask.rule && said === label && !(ask.choices ?? []).includes(label)
+const isAside = isOurs(SET_ASIDE)
 const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
 const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
 sentReplies.set(one.id, { ...sent, to: 'sending' })
@@ -8535,7 +8543,7 @@ const to = ask.refused
 ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
 : isAside
 ? SET_ASIDE_TOLD()
-: `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
+: `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isOurs(SKIP_ONE) ? `\n${SKIP_TOLD}` : ''}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
 if (!ask.refused) {
 if (isAside) await markAside($, one.id).catch(err => log($, `task ${one.id} not marked set aside: ${String(err)}`))
 queueSoon($, { kind: isAside ? 'aside' : 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}${ask.details ? `\n${ask.details}` : ''}\nAnswer: ${said}` })
@@ -8769,7 +8777,8 @@ if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'wo
 const one = (await read($, todos)).find(todo => todo.id === card)
 if (sent?.to !== 'work' || !one) return
 const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
-await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
+const isOurs = Boolean(sent.asked && !(sent.asked.choices ?? []).includes(sent.text))
+await toEnded($, one, agentId, isOurs && sent.text === SET_ASIDE ? SET_ASIDE_TOLD() : `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isOurs && sent.text === SKIP_ONE ? `\n${SKIP_TOLD}` : ''}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
 }
 const heldAnswer = (one: Todo, now: number) => {
 const sent = one.chat ? undefined : sentReplies.get(one.id)
@@ -11586,7 +11595,7 @@ return {
 ...base,
 kind: 'question',
 buttons: [
-...(ask.rule ? (ask.choices ?? []) : withSetAside(ask.choices ?? [])).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
+...(ask.rule ? (ask.choices ?? []) : withSetAside(ask.choices ?? [])).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, ...(choice === SET_ASIDE && !ask.rule ? { isPlain: true } : {}), onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
 ...(inBar ? [isReplyOpen(card, ask) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
 ],
 ...(inBar
@@ -13189,8 +13198,7 @@ return m ? { at, total: Number(m[1]) * 1024, free: Number(m[3]) * 1024 } : undef
 const lastOf = (text: string) => {
 try {
 const j = JSON.parse(text) as { at?: unknown; freed?: unknown; big?: unknown }
-const big = (Array.isArray(j.big) ? j.big : []).filter((one): one is BigFile => typeof one?.path === 'string' && typeof one?.bytes === 'number')
-return typeof j.at === 'number' ? { at: j.at, freed: typeof j.freed === 'number' ? j.freed : 0, big } : undefined
+return typeof j.at === 'number' ? { at: j.at, freed: typeof j.freed === 'number' ? j.freed : 0, big: Array.isArray(j.big) ? (j.big as BigFile[]) : [] } : undefined
 } catch {
 return undefined
 }
@@ -13198,9 +13206,8 @@ return undefined
 const isDiskLow = (d: DiskKept | undefined) => Boolean(d && d.free < DISK_WARN)
 const bigLine = (one: BigFile) => {
 const parts = one.path.split(/[\\/]/)
-const at = parts.findIndex(part => /^(?:Desktop|Movies|Downloads)$/.test(part))
-const where = at < 0 ? '' : parts[at] === 'Desktop' ? ' on your Desktop' : ` in your ${parts[at]} folder`
-return `“${parts[parts.length - 1]}”${where}, ${gbText(one.bytes)} GB`
+const at = parts.find(part => /^(?:Desktop|Movies|Downloads)$/.test(part))
+return `“${parts.at(-1)}”${!at ? '' : at === 'Desktop' ? ' on your Desktop' : ` in your ${at}`}, ${gbText(one.bytes)} GB`
 }
 const isDiskFull = (d: DiskKept | undefined) => Boolean(d && d.free < DISK_STOP)
 
@@ -13267,8 +13274,8 @@ details: [
 isDiskFull(d) ? `Tasks' downloads, installs, builds, renders and browser commands wait until more than ${stop} GB is free.` : `Below ${stop} GB, tasks' downloads, installs, builds, renders and browser commands wait.`,
 isWindows
 ? "Free up space isn't on Windows yet. Remove what tasks left behind yourself: their scratch folders, browser profiles and code copies whose work is merged."
-: 'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, the packages of code copies left alone for 2 days, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
-...(tidyLast?.big.length ? [`Big new files of yours, which only you can delete: ${tidyLast.big.map(bigLine).join('; ')}.`] : []),
+: 'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, packages of code copies idle for 2 days, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
+...(tidyLast?.big.length ? [`Your big new files, which only you can delete: ${tidyLast.big.map(bigLine).join('; ')}.`] : []),
 ].join('\n\n'),
 buttons: isFreeing || isWindows ? [] : [{ key: `disk-free-${tidyPressedAt}-${presses}`, label: 'Free up space', onPress: () => void freeSpace($).catch(err => log($, `space not freed: ${String(err)}`)) }],
 ...(isFreeing ? { line: 'Freeing up space' } : isDone && tidyLast ? { line: `Freed ${gbText(tidyLast.freed)} GB` } : {}),
@@ -15694,7 +15701,7 @@ const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) =>
 const [first] = asking
 const ask = first?.ask
 if (first && ask) {
-const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 8))
+const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 7))
 const id = `${first.id}:${ask.at}`
 const picked = bandPick?.id === id ? bandPick.n : -1
 const press = (n: number, choice: string) => {
@@ -17722,6 +17729,7 @@ if (isTerminal) await tabMoves.finish(move => runTabMove($, move), ms => $.clock
 }
 if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
 if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
+if (isTimed && e.plugin === 'claudopus' && e.surface === 'desktop' && (e.requestId === LIST || e.component === 'AbovePrompt')) await pressShown($, pressedAt)
 return r
 })
 on('ui.input', async ($, e, next) => {

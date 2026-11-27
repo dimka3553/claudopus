@@ -88,8 +88,9 @@ test('the files read back whole whatever was written, the model is shown each ar
   expect(prompt).not.toMatch(/next step/i)
   expect(prompt).toContain('This task is already in: nose')
   expect(prompt).toContain('Answer: Yes')
-  expect(withSetAside(['Release it'])).toEqual(['Release it', 'Set aside'])
-  expect(withSetAside(['set aside'])).toEqual(['set aside'])
+  expect(withSetAside(['Release it'])).toEqual(['Release it', 'Skip this one', 'Set aside task'])
+  expect(withSetAside(['set aside'])).toEqual(['set aside', 'Skip this one'])
+  expect(withSetAside(['Skip this one', 'Set aside task'])).toEqual(['Skip this one', 'Set aside task'])
 })
 
 test('the picture is made only from the person\'s own messages, and a task is told only what was set aside in the area its words share', async () => {

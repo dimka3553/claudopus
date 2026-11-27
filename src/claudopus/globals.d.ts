@@ -390,6 +390,8 @@ declare global {
   export import progressPrompt = M17.progressPrompt
   export import progressThumb = M17.progressThumb
   export import SET_ASIDE = M17.SET_ASIDE
+  export import SKIP_ONE = M17.SKIP_ONE
+  export import SKIP_TOLD = M17.SKIP_TOLD
   export import setAsideTold = M17.setAsideTold
   export import topicState = M17.topicState
   export import withSetAside = M17.withSetAside
