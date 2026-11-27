@@ -1021,43 +1021,6 @@ const later = async (clock: { advance: (ms: number) => Promise<unknown> }, ms: n
 // (merge-base only reads)
 const changing = (ran: string[]) => ran.filter(one => /^(fetch|merge(?!-base)|reset|checkout|pull|update-ref|symbolic-ref HEAD)\b/.test(one) || one.includes('fetch --progress'))
 
-test('F-019 · the look only reads the version page: the panel says a newer version is out, with Update, and nothing is fetched, installed or reloaded, whatever config.json says', SLOW, async ($, on) => {
-  const { files, clock, gitRan } = world(on, { release: RELEASE })
-  const reloads = reloadsOf(on)
-  const fetches = pageOn(on, () => pageText())
-  // Keys an earlier version or a planted file might use to ask for installing by itself: none of them is read
-  ownSet(files, 'config.json', JSON.stringify({ updates: true, updateEvery: 1, autoInstall: true, autoUpdate: true, install: 'always' }))
-  await $.session.start(start)
-  await clock.advance(3 * 60_000)
-  expect(await until(async () => fetches() || undefined)).toBe(1)
-  const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'Claudopus v0.1.2 is out')
-  expect(await panel.find({ type: 'Text', text: '· 2 versions since v0.1.0' })).toBeDefined()
-  await shownIn(panel, 'The bar shows the battery · and 3 more changes')
-  expect((await keyed(panel, 'update-download'))?.props.label).toBe('Update')
-  expect(await keyed(panel, 'update-install')).toBeUndefined()
-  // (with no panel drawing each second of the half hour below)
-  await panel.unmount()
-  // Another look once the last is over an hour old, and through all of them nothing was fetched or moved, nothing installed or reloaded
-  const aged = async () => files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
-  // (once the first look has written its own time, which comes after its read of the page: on a slow runner it came after this
-  // test's older time and put it right back)
-  expect(await until(async () => files.get(`${MEMORY}/update-seen.json`))).toBeDefined()
-  await aged()
-  await later(clock, 16 * 60_000)
-  expect(await until(async () => (fetches() > 1 ? true : undefined))).toBe(true)
-  expect(changing(gitRan)).toEqual([])
-  expect(files.get('manifest')).toBeUndefined()
-  expect(reloads).toEqual([])
-  expect(files.get(`${MEMORY}/update-steps.json`)).toBeUndefined()
-  // Only when I ask: the look reads nothing more
-  ownSet(files, 'config.json', JSON.stringify({ updates: false }))
-  const before = fetches()
-  await aged()
-  await later(clock, 16 * 60_000)
-  expect(fetches()).toBe(before)
-})
-
 test('Update fetches the release and checks it against what the release published: one that does not match is thrown away and moves nothing', SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: { ...RELEASE, got: 'b'.repeat(40) } })
   const reloads = reloadsOf(on)
@@ -1290,4 +1253,41 @@ test('F-020 · a lock on the update dated ahead of this clock holds nothing: the
   // The version page names the one this chat runs: no notice
   const panel = await $.ui.mount(listAt())
   expect(await panel.find({ type: 'Text', text: /is out$/ })).toBeUndefined()
+})
+
+// Last in its file: this test rests on the timer of the look, which the mod asks for as it loads, and the first test of a file loads
+// while every file of the kit starts at once. On GitHub's Windows runner that start held the test's answer to the timer past the
+// 10 seconds the kit gives it, so the timer was refused and the second look never came
+test('F-019 · the look only reads the version page: the panel says a newer version is out, with Update, and nothing is fetched, installed or reloaded, whatever config.json says', SLOW, async ($, on) => {
+  const { files, clock, gitRan } = world(on, { release: RELEASE })
+  const reloads = reloadsOf(on)
+  const fetches = pageOn(on, () => pageText())
+  // Keys an earlier version or a planted file might use to ask for installing by itself: none of them is read
+  ownSet(files, 'config.json', JSON.stringify({ updates: true, updateEvery: 1, autoInstall: true, autoUpdate: true, install: 'always' }))
+  await $.session.start(start)
+  await clock.advance(3 * 60_000)
+  expect(await until(async () => fetches() || undefined)).toBe(1)
+  const panel = await $.ui.mount(listAt())
+  await shownIn(panel, 'Claudopus v0.1.2 is out')
+  expect(await panel.find({ type: 'Text', text: '· 2 versions since v0.1.0' })).toBeDefined()
+  await shownIn(panel, 'The bar shows the battery · and 3 more changes')
+  expect((await keyed(panel, 'update-download'))?.props.label).toBe('Update')
+  expect(await keyed(panel, 'update-install')).toBeUndefined()
+  // (with no panel drawing each second of the half hour below)
+  await panel.unmount()
+  // Another look once the last is over an hour old, and through all of them nothing was fetched or moved, nothing installed or reloaded
+  const aged = async () => files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
+  await aged()
+  await later(clock, 16 * 60_000)
+  expect(await until(async () => (fetches() > 1 ? true : undefined))).toBe(true)
+  expect(changing(gitRan)).toEqual([])
+  expect(files.get('manifest')).toBeUndefined()
+  expect(reloads).toEqual([])
+  expect(files.get(`${MEMORY}/update-steps.json`)).toBeUndefined()
+  // Only when I ask: the look reads nothing more
+  ownSet(files, 'config.json', JSON.stringify({ updates: false }))
+  const before = fetches()
+  await aged()
+  await later(clock, 16 * 60_000)
+  expect(fetches()).toBe(before)
 })
