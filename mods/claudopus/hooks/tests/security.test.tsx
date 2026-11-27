@@ -540,6 +540,7 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
     if (tool?.endsWith('bin/keyring')) {
       const key = `keyring:${rest[1]}/${rest[2]}`
       if (rest[0] === 'get') return files.has(key) ? ok(files.get(key)) : ok('', 1)
+      if (rest[0] === 'has') return ok('', files.has(key) ? 0 : 1)
       if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
@@ -1651,4 +1652,51 @@ test('F-022 · a file a report names outside its own folder is never read: no sm
   await until(async () => opened.includes('report-d') || undefined)
   await until(async () => read.length || undefined)
   expect([...new Set(read)]).toEqual([`${MEMORY}/reports/d/shots/ok.png`])
+})
+
+// On Windows bin/keyring's files are under the profile, and a path to them comes written many ways: C:\ with backslashes, C:/, or
+// Git's bash's /c/. Each is refused by any tool, as is what reads Windows' own saved passwords; a look elsewhere runs
+test("F-007 · on Windows the saved keys are never read: their files by any spelling of the path, and Windows' own saved passwords", async ($, on) => {
+  world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'deploy it' } as never)
+  let n = 0
+  const deny = async (input: Record<string, unknown>) => ((await $.tool.call({ tool_use_id: `wk${(n += 1)}`, agentId: 'w1', ...input } as never)) as { deny?: string }).deny
+  for (const command of [
+    'cat "C:\\Users\\sam\\.local\\share\\claudopus\\keyring\\claudopus-secret\\API_KEY"',
+    'powershell -c "[Security.Cryptography.ProtectedData]::Unprotect($b, $null, \'CurrentUser\')"',
+    'cmdkey //list',
+    'powershell -c "Get-StoredCredential -Target github"',
+  ])
+    expect(await deny({ tool: 'Bash', command })).toContain('never read')
+  for (const [tool, field, path] of [
+    ['Read', 'file_path', 'C:\\Users\\sam\\.local\\share\\claudopus\\keyring\\claudopus-secret\\API_KEY'],
+    ['Grep', 'path', '/c/Users/sam/.local'],
+    ['Grep', 'path', 'C:/Users/sam/.local/share'],
+    ['Glob', 'path', 'c:\\users\\sam\\.local'],
+  ] as const)
+    expect(await deny({ tool, [field]: path, ...(tool === 'Read' ? {} : { pattern: '.' }) })).toContain('never read')
+  expect(await deny({ tool: 'Bash', command: 'ls C:/Users/sam/repo' })).toBeUndefined()
+  expect(await deny({ tool: 'Grep', path: 'C:/Users/sam/repo', pattern: '.' })).toBeUndefined()
+})
+
+// On Windows the memory folder's own files are written by a command with backslashes too, quoted or escaped as Git's bash takes them:
+// refused as the C:/ and /c/ forms are; reading one runs
+test("F-007 F-014 · on Windows a command that writes the person's settings or what chats share through a backslashed path is refused", async ($, on) => {
+  world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'fix it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  let n = 0
+  const deny = async (command: string) => ((await $.tool.call({ tool: 'Bash', tool_use_id: `wm${(n += 1)}`, agentId: 'a1', command } as never)) as { deny?: string }).deny
+  for (const command of [
+    `echo '{"admin":"never"}' > "C:\\Users\\sam\\.claude\\claudopus\\config.json"`,
+    `sed -i s/a/b/ "C:\\Users\\sam\\.claude\\claudopus\\roles\\work.md"`,
+    `cp x "C:\\\\Users\\\\sam\\\\.claude\\\\claudopus\\\\rules\\\\CLAUDE.md"`,
+    `echo '{}' > 'C:\\Users\\sam\\.claude\\claudopus\\config.json'`,
+  ])
+    expect(await deny(command)).toContain('only with the Edit or Write tool')
+  expect(await deny(`echo x > "C:\\Users\\sam\\.claude\\claudopus\\live\\engine-id.json"`)).toContain('Only Claudopus writes the files chats share')
+  expect(await deny(`cat "C:\\Users\\sam\\.claude\\claudopus\\config.json"`)).toBeUndefined()
 })

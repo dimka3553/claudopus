@@ -42,8 +42,8 @@ const runnerFor = (one: Record<string, unknown>, at: number, now: number): { cal
   const kept = typeof one.id === 'string' ? boxAgents.get(one.id) : undefined
   if (kept) return { call: runner.call, command: runner.command, agent: kept }
   const live = [...runnerCalls].map(([call, other]) => ({ ...other, call })).filter(other => other.until >= now && other.at <= at + BOX_SKEW)
-  const isScript = (command: string) => !/\bbin\/(?:admin|secret)\b/.test(command)
-  const same = live.filter(other => isScript(other.command) || (one.kind === 'admin' ? /\bbin\/admin\b/.test(other.command) : /\bbin\/secret\b/.test(other.command) && (typeof one.name !== 'string' || other.command.includes(one.name))))
+  const isScript = (command: string) => !/\bbin[\\/](?:admin|secret)\b/.test(command)
+  const same = live.filter(other => isScript(other.command) || (one.kind === 'admin' ? /\bbin[\\/]admin\b/.test(other.command) : /\bbin[\\/]secret\b/.test(other.command) && (typeof one.name !== 'string' || other.command.includes(one.name))))
   const [only] = same
   if (same.length === 1 && only) {
     if (only.agent && typeof one.id === 'string') boxAgents.set(one.id, only.agent)
@@ -63,8 +63,12 @@ const boxKeys = new Map<string, string>()
 // What was typed, sealed to the runner's key (RSA-OAEP, SHA-256) by openssl, which only the runner that asked can open: the value
 // on openssl's stdin, the key on a pipe of its own, so neither is ever in a file or a command line but the key, which is public
 const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A'
+// On Windows, in Git's bash, openssl is Git's own Windows program, which cannot open the shell's pipe by its name: the public key is
+// a file in a folder of this run's own, removed as it ends, and base64 is perl's. The value still goes on openssl's stdin alone
+const SEAL_FOR_WINDOWS =
+  'PATH=/usr/bin:/bin:/mingw64/bin; d=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EXIT; printf %s "$1" | perl -MMIME::Base64 -0777 -ne \'print decode_base64($_)\' >"$d/key" && openssl pkeyutl -encrypt -pubin -keyform DER -inkey "$d/key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -out "$d/sealed" && perl -MMIME::Base64 -0777 -ne \'print encode_base64($_, "")\' "$d/sealed"'
 const sealedFor = async ($: EngineInterface, key: string, value: string) => {
-  const r = await runOn($, ['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
+  const r = await runOn($, ['/bin/bash', '-c', isWindows ? SEAL_FOR_WINDOWS : SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
   const out = r?.exitCode === 0 ? r.stdout.trim() : ''
   return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
 }
@@ -80,7 +84,7 @@ const boxWording = (one: Record<string, unknown>): Pick<Asked, 'kind' | 'name' |
   if (one.kind === 'admin') {
     // A password is sent only sealed to the key the runner made for this one request: a request with none is drawn nowhere
     if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key)) return undefined
-    const mac = one.host === 'here' ? "This Mac's password" : `The password of ${one.host}`
+    const mac = one.host === 'here' ? `T${thisMac().slice(1)}'s password` : `The password of ${one.host}`
     return { kind: 'password', host: one.host, text: `${again}${mac} is needed to run this as admin.`, details: 'It goes only to this command and is never saved.' }
   }
   if (one.kind === 'secret') {
@@ -200,7 +204,7 @@ const lookBoxes = async ($: EngineInterface) => {
 const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
   !(await hasKeychain($))
     ? { exitCode: -1 }
-    : isLinux
+    : isLinux || isWindows
     ? runOn($, [`${pluginRoot($)}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
     : what === 'delete'
       ? runOn($, ['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
@@ -232,13 +236,13 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   const escaped = sent.replace(/[\\"]/g, '\\$&')
   const r = !(await hasKeychain($))
     ? { exitCode: -1 }
-    : isLinux
+    : isLinux || isWindows
     ? await boxKeyring($, 'set', id, `${sent}\n`)
     : await $.process
         .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
         .catch(() => ({ exitCode: -1 }))
   // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
-  const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await runOn($, ['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+  const isKept = r.exitCode === 0 && (isLinux || isWindows ? await boxKeyring($, 'has', id) : await runOn($, ['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
   // and one whose runner stopped meanwhile is taken out again
   if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
@@ -292,7 +296,7 @@ const ownKeyDone = async ($: EngineInterface, one: Asked, text: string, label: s
   await changeTodos($, list => list.map(other => (other.id === card && keyAsksOf(other).some(ask => ownBoxId(card, ask.at) === one.id) ? withKeyAsks(other, keyAsksOf(other).filter(ask => ownBoxId(card, ask.at) !== one.id)) : other)))
   await toTask($, card, one.agent ?? card, text, label, one.text).catch(err => log($, `task not told of its key: ${String(err)}`))
 }
-const KEY_GIVEN = (root: string, name: string) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${root}/bin/secret ${name} here '<command using $${name}>'\`.`
+const KEY_GIVEN = (root: string, name: string) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${runnerAt(root, 'secret')} ${name} here '<command using $${name}>'\`.`
 const KEY_NOT_GIVEN = (name: string) => `{Name} pressed Don't give it on your question for ${name}, so it was not given.`
 const KEY_ANSWERED = (name: string, said: string) => `{Name} answered your question for ${name} in their own words instead of giving it: ${said}`
 // Don't allow, or Don't give it: the request goes, and the runner, finding it gone, ends as when a box is cancelled

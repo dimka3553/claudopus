@@ -540,6 +540,7 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
     if (tool?.endsWith('bin/keyring')) {
       const key = `keyring:${rest[1]}/${rest[2]}`
       if (rest[0] === 'get') return files.has(key) ? ok(files.get(key)) : ok('', 1)
+      if (rest[0] === 'has') return ok('', files.has(key) ? 0 : 1)
       if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))

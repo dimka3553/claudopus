@@ -101,7 +101,8 @@ const writtenBy = (command: string, home: string, from: string): string[] => {
   const { text, plain } = shellPieces(command)
   if (!plain) return []
   const at = commandFolder(command, home, from)
-  const vars = new Map<string, string>([['HOME', home]])
+  // (on Windows the profile is home by its own name too; a variable set in Git's bash keeps its case there, as in any bash)
+  const vars = new Map<string, string>([['HOME', home], ...(isWindows ? [['USERPROFILE', home] as [string, string]] : [])])
   const bare = (word: string) => word.replace(/^(["'])(.*)\1$/, '$2')
   for (const m of plain.matchAll(/(?:^|[\s;&|(])([A-Za-z_]\w*)=(\S*)/g)) {
     const start = (m.index ?? 0) + m[0].indexOf('=') + 1
@@ -118,7 +119,7 @@ const writtenBy = (command: string, home: string, from: string): string[] => {
   for (const m of plain.matchAll(/(?:^|[\s;&|(])tee\s+(?:-a\s+)?("[^"]*"|'[^']*'|[^\s;&|<>()]+)/g)) words.push(target(m))
   return words
     .map(expand)
-    .filter(word => word && !word.startsWith('&') && !word.startsWith('/dev/') && !word.includes('$') && !word.includes('`') && (word.startsWith('/') || word.startsWith('~') || Boolean(at)))
+    .filter(word => word && !word.startsWith('&') && !word.startsWith('/dev/') && !(isWindows && /^nul$/i.test(word)) && !word.includes('$') && !word.includes('`') && ((isWindows ? isAbsPath(word) : word.startsWith('/')) || word.startsWith('~') || Boolean(at)))
     .map(word => pathOf(word, home, at || from))
 }
 
@@ -136,27 +137,34 @@ const crossPaths = (e: { tool: string }) => {
 // The checkout a file is in, a main one or a worktree, by the nearest folder above it with a .git; '' outside git. Kept a while: a
 // folder found outside git a minute, as it may become a repo
 const rootCache = new Map<string, { root: string; at: number }>()
+// The folder a path is in: / above a folder at the top, and on Windows a drive's own top (C:/) above one there, above which is nothing
+const upOf = (path: string) => {
+  const drive = /^[A-Za-z]:/.exec(path)?.[0] ?? ''
+  const rest = path.slice(drive.length)
+  return drive && rest.lastIndexOf('/') <= 0 ? `${drive}/` : `${drive}${rest.slice(0, rest.lastIndexOf('/')) || '/'}`
+}
 const rootOf = async ($: EngineInterface, path: string, now: number) => {
-  const folder = path.slice(0, path.lastIndexOf('/')) || '/'
+  const folder = upOf(path)
   const kept = rootCache.get(folder)
   if (kept && now - kept.at < (kept.root ? CROSS_RECENT : 60_000)) return kept.root
   let at = folder
   let root = ''
-  for (let hops = 0; at.length > 1 && hops < 12; hops += 1) {
+  for (let hops = 0; at.length > 1 && !/^[A-Za-z]:\/$/.test(at) && hops < 12; hops += 1) {
     if (await $.fs.exists(`${at}/.git`).catch(() => false)) {
       root = at
       break
     }
-    at = at.slice(0, at.lastIndexOf('/')) || '/'
+    at = upOf(at)
   }
   for (const [one, was] of rootCache) if (now - was.at > CROSS_RECENT) rootCache.delete(one)
   rootCache.set(folder, { root, at: now })
   return root
 }
 
-// The chat's own scratchpad, and where a path is in it: <tmp>/claude-<uid>/<project>/<this chat's session>/scratchpad/<rest>
+// The chat's own scratchpad, and where a path is in it: <tmp>/claude-<uid>/<project>/<this chat's session>/scratchpad/<rest>. On
+// Windows <tmp> is C:/tmp (the engine's "/tmp" taken there as it is) and the uid always 0: C:/tmp/claude-0/C--Users-x-repo/<session>
 const scratchRest = (path: string, session: string) => {
-  const m = /^\/.*\/claude-\d+\/[^/]+\/([^/]+)\/scratchpad(?:\/(.*))?$/.exec(path)
+  const m = /^(?:[A-Za-z]:)?\/.*\/claude-\d+\/[^/]+\/([^/]+)\/scratchpad(?:\/(.*))?$/.exec(path)
   return m && m[1] === session ? (m[2] ?? '') : undefined
 }
 
@@ -255,7 +263,7 @@ const crossEnded = async ($: EngineInterface, e: { tool: string; agentId?: strin
   const lines = outputOf(result).split('\n')
   for (const [i, line] of lines.entries()) {
     if (!lines.slice(Math.max(0, i - 2), i + 3).some(near => ERROR_WORDS.test(near))) continue
-    for (const m of line.matchAll(/(?:^|[\s'"(`])((?:~|\.{1,2})?\/?[\w@.+-]+(?:\/[\w@.+-]+)+)(?::\d+)*/g)) {
+    for (const m of line.matchAll(isWindows ? /(?:^|[\s'"(`])((?:[A-Za-z]:|~|\.{1,2})?[\\/]?[\w@.+-]+(?:[\\/][\w@.+-]+)+)(?::\d+)*/g : /(?:^|[\s'"(`])((?:~|\.{1,2})?\/?[\w@.+-]+(?:\/[\w@.+-]+)+)(?::\d+)*/g)) {
       const path = pathOf(m[1] ?? '', home, at)
       const one = crossWrites.get(path)
       if (!one || one.top === top || !list.some(card => card.id === one.top && card.status === 'working')) continue

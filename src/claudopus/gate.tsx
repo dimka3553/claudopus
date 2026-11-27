@@ -70,6 +70,8 @@ const gateThing = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'Th
 const GATE_GONE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: the wait for {name} to allow it was interrupted. Run it again if it is still needed.`)
 const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} didn't answer in time. Run it again when it is needed, and Claudopus will ask {name} again.`)
 const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: Claudopus asks {name} first, on a card in its panel, and this chat has no panel open.`)
+const ADMIN_NOT_HERE = () =>
+  named("This admin command didn't run: Windows has no admin runner, so Claudopus can't run a command as admin on this PC. Ask {name} to run it in a terminal opened as administrator: give it whole in the `ask` tool's `command`, with the folder it runs in. An admin command on a Mac or Linux machine reached over SSH runs as before.")
 const GATE_UNSEALED = () => `This admin command did not run: Claudopus could not secure what was allowed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
   named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
@@ -78,21 +80,23 @@ const NO_GATE_TOUCH = () =>
 const gateAct = (gate: Gate) =>
   gate.isUndone ? `Make the change to ${gate.host} again` : gate.kind === 'release' ? `Release ${gate.host} to main` : gate.kind === 'file' ? `Change ${gate.host}` : `Run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
 const gateWhat = (gate: Gate) =>
-  gate.isUndone ? `Make the change to ${gate.host} again?` : gate.kind === 'release' ? `Release ${gate.branch || gate.host} to main?` : gate.kind === 'file' ? `Change ${gate.host}?` : `Run this as admin on ${gate.host === 'here' ? 'this Mac' : gate.host}?`
+  gate.isUndone ? `Make the change to ${gate.host} again?` : gate.kind === 'release' ? `Release ${gate.branch || gate.host} to main?` : gate.kind === 'file' ? `Change ${gate.host}?` : `Run this as admin on ${gate.host === 'here' ? thisMac() : gate.host}?`
 
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
 // written, so the grant names what was shown and bin/admin refuses what differs
 const isAdminPath = (word: string, root: string, name = 'admin') => {
+  // (on Windows by either separator, C:\x or Git's bash's /c/x alike, in any case)
+  const [said, own] = isWindows ? [windowsPath(word).toLowerCase(), windowsPath(root).toLowerCase()] : [word, root]
   const parts: string[] = []
-  for (const part of word.split('/')) {
+  for (const part of said.split('/')) {
     if (part === '..' && parts.length && parts.at(-1) !== '..' && parts.at(-1) !== '') parts.pop()
     else if (part !== '.' && (part !== '' || !parts.length)) parts.push(part)
   }
   const path = parts.join('/')
   // Reached from its own folder, by the mod's own path, or by a path that names the mod or is filled in by the shell: another
   // tool that happens to be called admin is none of this
-  return path === name || path === `bin/${name}` || (path.endsWith(`/bin/${name}`) && (path === `${root}/bin/${name}` || /claudopus/i.test(path) || path.includes('$')))
+  return path === name || path === `bin/${name}` || (path.endsWith(`/bin/${name}`) && (path === `${own}/bin/${name}` || /claudopus/i.test(path) || path.includes('$')))
 }
 const adminCalls = (command: string, root: string, depth = 0): AdminCall[] => {
   if (depth > 4) return []
@@ -100,12 +104,12 @@ const adminCalls = (command: string, root: string, depth = 0): AdminCall[] => {
     let i = 0
     for (;;) {
       while (i < words.length && /^\w+=/.test(words[i]!)) i++
-      const head = (words[i] ?? '').split('/').pop() ?? ''
+      const head = progName(words[i] ?? '')
       if (!['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'builtin', 'timeout', 'caffeinate', 'nice', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{'].includes(head)) break
       i++
       while (i < words.length && (words[i]!.startsWith('-') || (head === 'sudo' && words[i - 1] === '-u') || /^\d+[smhd]?$/.test(words[i]!) || (head === 'env' && /^\w+=/.test(words[i]!)))) i++
     }
-    const tool = (words[i] ?? '').split('/').pop() ?? ''
+    const tool = progName(words[i] ?? '')
     if (tool === 'eval') return adminCalls(words.slice(i + 1).join(' '), root, depth + 1)
     if (tool === 'bash' || tool === 'sh' || tool === 'zsh') {
       const c = words.findIndex((one, n) => n > i && /^-[a-z]*c$/.test(one))
@@ -133,7 +137,9 @@ if [ -x /usr/bin/security ]; then
   key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a "$acct" -w 2>/dev/null; }
   keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "%s" -l "Claudopus admin gate" -w "%s"\\n' "$acct" "$1" | /usr/bin/security -i >/dev/null 2>&1; }
 else
-  # Linux: where bin/keyring keeps it, a file only this user reads, under the home folder (never XDG_DATA_HOME)
+  # Linux and Windows: where bin/keyring keeps it, a file only this user reads, under the home folder (never XDG_DATA_HOME). On
+  # Windows, in Git's bash, that is the person's profile, as bin/keyring finds it
+  [ -x /usr/bin/cygpath ] && { p=$(/usr/bin/cygpath -F 40 2>/dev/null); HOME=$(/usr/bin/cygpath -u "\${p:-\${USERPROFILE:-}}" 2>/dev/null); [ -n "$HOME" ] || exit 1; }
   d=$HOME/.local/share
   f=$d/claudopus/keyring/${GATE_SERVICE}
   key() { [ -f "$f/$acct" ] && cat "$f/$acct" 2>/dev/null; }
@@ -154,7 +160,7 @@ done`
 const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
   if (!(await hasKeychain($))) return undefined
   const r = await runOn($, ['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
-  const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
+  const lines = r?.exitCode === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
 }
 
@@ -231,7 +237,7 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
 }
 // No admin password is kept: every one an earlier version kept leaves the keychain (on Linux, bin/keyring's folder) as the mod
 // loads, with the "Let macOS ask" mark kept beside the gate's key and config.json's adminPassword, which no longer choose anything
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else [ -x /usr/bin/cygpath ] && { p=$(/usr/bin/cygpath -F 40 2>/dev/null); HOME=$(/usr/bin/cygpath -u "${p:-${USERPROFILE:-}}" 2>/dev/null); [ -n "$HOME" ] || exit 0; }; d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
 let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
@@ -265,14 +271,14 @@ const unquoted = (command: string) => command.replace(/["'\\]/g, '')
 // The runners find their key, grants and settings under the home folder, and release asks for a press only inside Claude Code: a
 // command that names one and sets another home or data folder, or takes Claude Code's mark away, would have it read the caller's own
 // (its comment lines left out, so a test script that makes a home of its own and only names a runner in a comment is not refused)
-const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)(?![\w.-])/
+const RUNNER_NAMED = /\bbin[\\/](?:admin|secret|release|keyring)(?![\w.-])/
 const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\b[^;&|\n]*\s-i\b|\benv(?:\s+-\w+)*\s+-(?=\s|$)|\bexec\s+-\w*c/
 // The release runs as itself (#!/bin/bash -p: no startup file, no functions from the environment), so what its shell runs, the
 // GitHub checks' verdict among it, is its own: a command that names it and sets what a shell or git reads first (a startup file,
 // functions, options, the PATH, git's settings), sources a script first, or starts it through a shell of its own choosing, is refused
-const RELEASE_NAMED = /\bbin\/release(?![\w.-])/
+const RELEASE_NAMED = /\bbin[\\/]release(?![\w.-])/
 const RELEASE_MOVED =
-  /(?:^|[\s;&|(`'"])(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+|BASH_FUNC_\S+)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+)\b|\b(?:export|declare|typeset)\s+(?:-\w+\s+)*-\w*f|(?:^|[;&|(]\s*)(?:source|\.)\s|\b(?:ba|z|da|k|c|tc|fi)?sh\s+(?:-\S+\s+)*\S*bin\/release(?![\w.-])/
+  /(?:^|[\s;&|(`'"])(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+|BASH_FUNC_\S+)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+)\b|\b(?:export|declare|typeset)\s+(?:-\w+\s+)*-\w*f|(?:^|[;&|(]\s*)(?:source|\.)\s|\b(?:ba|z|da|k|c|tc|fi)?sh(?:\.exe)?\s+(?:-\S+\s+)*\S*bin[\\/]release(?![\w.-])/
 const movesRunner = (command: string) =>
   [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => (RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one)) || (RELEASE_NAMED.test(one) && RELEASE_MOVED.test(one)))
 const NO_RUNNER_MOVED =
@@ -280,10 +286,11 @@ const NO_RUNNER_MOVED =
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')
-    return [command, unquoted(command)].some(one => /claudopus\/admin-(?:allowed\.json|grants|known\.json)\b/.test(one) || (/\b(?:security|keyring)\b/.test(one) && /claudopus-admin\b/.test(one)))
+    return [command, unquoted(command)].some(one => /claudopus[\\/]admin-(?:allowed\.json|grants|known\.json)\b/.test(one) || (/\b(?:security|keyring)\b/.test(one) && /claudopus-admin\b/.test(one)))
   }
-  const path = String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? '')
-  return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool) && /\/claudopus\/admin-(?:allowed\.json$|known\.json$|grants(?:\/|$))/.test(path)
+  const said = String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? '')
+  const path = isWindows ? windowsPath(said) : said
+  return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool) && new RegExp(/\/claudopus\/admin-(?:allowed\.json$|known\.json$|grants(?:\/|$))/.source, isWindows ? 'i' : '').test(path)
 }
 
 const setGates = async ($: EngineInterface, top: string, fn: (list: Gate[]) => Gate[]) => {
@@ -439,6 +446,8 @@ const PERMIT_TALK_KEPT = 8
 const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
   const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), pluginRoot($))
   if (!calls.length || !dir) return { grants: [] }
+  // Windows has no sudo for the runner to hand a command to: one for this PC is refused before anyone is asked
+  if (isWindows && calls.some(one => one.host === 'here')) return { deny: ADMIN_NOT_HERE(), grants: [] }
   const gate = await gateOf($)
   if (gate.mode === 'never') return { grants: [] }
   const list = await read($, todos)
@@ -511,7 +520,7 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
       return cut > 0 && isAdminPath(word.slice(0, cut), root, 'release') ? [word.slice(0, cut), word.slice(cut)] : [word]
     })
     const i = commandAt(words)
-    const name = (words[i] ?? '').split('/').pop() ?? ''
+    const name = progName(words[i] ?? '')
     if ((name === 'cd' || name === 'pushd') && words[i + 1]) {
       folder = pathOf(words[i + 1]!, home, folder)
       continue
@@ -626,7 +635,7 @@ const ownFileOf = (path: string) => {
   if (lower === `${memory}/rules` || lower.startsWith(`${memory}/rules/`)) return `your rules (${full.slice(dir.length + 1)})`
   if (lower === `${memory}/roles` || lower.startsWith(`${memory}/roles/`)) return `your role file (${full.slice(dir.length + 1)})`
   // A repo's release.local, which its release runner reads as this Mac's own settings
-  if (/\/\.git\/release\.local$/.test(full)) return `this Mac's release settings (${full})`
+  if (/\/\.git\/release\.local$/i.test(full)) return `${thisMac()}'s release settings (${full})`
   return ''
 }
 const FILE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']

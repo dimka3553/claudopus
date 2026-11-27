@@ -4,8 +4,14 @@
 # kept passwords are never touched; no command is run as admin (each case stops at the gate, or at the password it does not have).
 #   bash mods/claudopus/bin/admin.test.sh
 set -u
-# On a Mac it runs under a keychain of its own; on Linux bin/keyring keeps its files under this test's own home
+# On a Mac it runs under a keychain of its own; on Linux bin/keyring keeps its files under this test's own home. Windows (Git's bash)
+# keeps them as Linux does, but has no admin runner for the computer itself: there the gate is tested on a host reached over SSH,
+# which no command gets past it to (the host is never reached), and what needs sudo, Python's terminal or jq is skipped, saying why
 [ "$(uname)" = Darwin ] && mac=1 || mac=
+case $(uname -s) in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows= ;; esac
+# The computer the gate cases run for, and what a command past the gate says: here, where it then asks for the password nobody types,
+# or on Windows a host that is never reached
+if [ -n "$windows" ]; then H=m4.invalid PAST_STATUS=5 PAST_SAID='could not be reached'; else H=here PAST_STATUS=3 PAST_SAID='No password was typed'; fi
 here=$(cd "$(dirname "$0")" && pwd)
 admin=$here/admin
 real_home=$HOME
@@ -43,6 +49,12 @@ hook_seal=$(node -e '
   const GATE_SERVICE = /const GATE_SERVICE = \x27([^\x27]+)\x27/.exec(text)[1]
   process.stdout.write(eval(/const SEAL = (`[\s\S]*?`)\n/.exec(text)[1]))
 ' "$src/claudopus/gate.tsx") && [ -n "$hook_seal" ] || { echo "admin.test.sh: the hook's seal script was not read from src/claudopus/gate.tsx"; exit 1; }
+# (on Windows it takes the person's profile as its home, as the runners do: here it takes this test's own instead)
+if [ -n "$windows" ]; then
+  was=$hook_seal
+  hook_seal=$(printf '%s\n' "$hook_seal" | grep -v '/usr/bin/cygpath')
+  [ "$hook_seal" != "$was" ] || { echo "admin.test.sh: the hook's seal script finds the profile some other way now"; exit 1; }
+fi
 seal() {
   if [ -n "${2:-}" ]; then printf '%s\n%s' "$2" "$1" | perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m, $k)'; else /bin/sh -c "$hook_seal" sh make "$1"; fi
 }
@@ -77,76 +89,83 @@ expect() {
   fi
 }
 REFUSED='was not allowed on its card'
-PAST='No password was typed'
+PAST=$PAST_SAID
 config '{}'
 
-expect 'no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
-printf '#!/bin/sh\nexec "%s" here "id -u"\n' "$admin" >"$tmp/wrapper.sh" && chmod +x "$tmp/wrapper.sh"
+expect 'no grant: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
+printf '#!/bin/sh\nexec "%s" "%s" "id -u"\n' "$admin" "$H" >"$tmp/wrapper.sh" && chmod +x "$tmp/wrapper.sh"
 expect 'through a wrapper script: refused' 6 "$REFUSED" -- "$tmp/wrapper.sh"
 ln -s "$admin" "$tmp/another-name"
-expect 'through a link under another name: refused' 6 "$REFUSED" -- "$tmp/another-name" here 'id -u'
-expect 'through another spelling of its path: refused' 6 "$REFUSED" -- "$here/../bin/./admin" here 'id -u'
-expect 'through a shell and a variable: refused' 6 "$REFUSED" -- /bin/sh -c 'a=adm; "$1/${a}in" here "id -u"' sh "$here"
-expect 'handed to bash as a script: refused' 6 "$REFUSED" -- /bin/bash "$admin" here 'id -u'
+expect 'through a link under another name: refused' 6 "$REFUSED" -- "$tmp/another-name" "$H" 'id -u'
+expect 'through another spelling of its path: refused' 6 "$REFUSED" -- "$here/../bin/./admin" "$H" 'id -u'
+expect 'through a shell and a variable: refused' 6 "$REFUSED" -- /bin/sh -c 'a=adm; "$1/${a}in" "$2" "id -u"' sh "$here" "$H"
+expect 'handed to bash as a script: refused' 6 "$REFUSED" -- /bin/bash "$admin" "$H" 'id -u'
 printf 'security() { echo abc; }\nperl() { echo "granted keep"; }\n' >"$tmp/env.sh"
-expect 'with BASH_ENV set to replace its tools: refused' 6 "$REFUSED" -- env BASH_ENV="$tmp/env.sh" "$admin" here 'id -u'
-expect 'handed to bash with BASH_ENV set: refused' 6 "$REFUSED" -- env BASH_ENV="$tmp/env.sh" /bin/bash "$admin" here 'id -u'
-expect 'with a perl option set to load other code: refused' 6 "$REFUSED" -- env PERL5OPT=-MNoSuchModuleAtAll "$admin" here 'id -u'
+expect 'with BASH_ENV set to replace its tools: refused' 6 "$REFUSED" -- env BASH_ENV="$tmp/env.sh" "$admin" "$H" 'id -u'
+expect 'handed to bash with BASH_ENV set: refused' 6 "$REFUSED" -- env BASH_ENV="$tmp/env.sh" /bin/bash "$admin" "$H" 'id -u'
+expect 'with a perl option set to load other code: refused' 6 "$REFUSED" -- env PERL5OPT=-MNoSuchModuleAtAll "$admin" "$H" 'id -u'
 
-grant forged here 'id -u' "$(now)" "$(seal x not-the-key)"
-expect 'a grant with a seal from another key: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
-grant unsealed here 'id -u' "$(now)" none
-expect 'a grant with a made-up seal: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+grant forged "$H" 'id -u' "$(now)" "$(seal x not-the-key)"
+expect 'a grant with a seal from another key: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
+grant unsealed "$H" 'id -u' "$(now)" none
+expect 'a grant with a made-up seal: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 rm -f "$memory"/admin-grants/*
-grant other here 'id -u'
-expect 'a grant for another command: refused' 6 "$REFUSED" -- "$admin" here 'id -u; rm -rf /tmp/x'
+grant other "$H" 'id -u'
+expect 'a grant for another command: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u; rm -rf /tmp/x'
 expect 'a grant for another Mac: refused' 6 "$REFUSED" -- "$admin" m4 'id -u'
 rm -f "$memory"/admin-grants/*
-grant old here 'id -u' "$(($(now) - 300000))"
-expect 'a grant from five minutes ago: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+grant old "$H" 'id -u' "$(($(now) - 300000))"
+expect 'a grant from five minutes ago: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 rm -f "$memory"/admin-grants/*
 
-grant good here 'id -u'
-expect 'a sealed grant for this Mac and this command: past the gate' 3 "$PAST" -- "$admin" here 'id -u'
+grant good "$H" 'id -u'
+expect 'a sealed grant for this Mac and this command: past the gate' "$PAST_STATUS" "$PAST" -- "$admin" "$H" 'id -u'
 [ ! -e "$memory/admin-grants/good.json" ] && echo "ok - the grant was taken" || { echo "NOT OK - the grant was left"; failed=1; }
-expect 'the same command again, its grant taken: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+expect 'the same command again, its grant taken: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 # What root runs has the system's own PATH, never the caller's: a program planted earlier on the caller's PATH is not the one run
 mkdir -p "$tmp/planted" && printf '#!/bin/sh\necho planted\n' >"$tmp/planted/id" && chmod +x "$tmp/planted/id"
 [ -n "$mac" ] && system_path=/usr/bin:/bin:/usr/sbin:/sbin || system_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-grant path here 'id -u'
-shown=$(PATH="$tmp/planted:$PATH" CLAUDOPUS_ADMIN_SHOW=1 "$admin" here 'id -u' 2>&1)
-n=$((n + 1))
-if [ "$shown" = "PATH=$system_path; export PATH; id -u" ]; then echo "ok $n - a caller's PATH does not reach what root runs"; else echo "NOT OK $n - root was handed: $shown"; failed=1; fi
+grant path "$H" 'id -u'
+if [ -n "$windows" ]; then
+  echo "ok - what root runs on this computer skipped: Windows has no admin runner for it"
+  rm -f "$memory"/admin-grants/*
+  # and an admin command for this PC is refused before the gate, saying how it is run instead
+  expect 'on Windows, an admin command for this PC: refused, run it in a terminal opened as administrator' 6 'Windows has no admin runner: run it yourself in a terminal opened as administrator' -- "$admin" here 'id -u'
+else
+  shown=$(PATH="$tmp/planted:$PATH" CLAUDOPUS_ADMIN_SHOW=1 "$admin" "$H" 'id -u' 2>&1)
+  n=$((n + 1))
+  if [ "$shown" = "PATH=$system_path; export PATH; id -u" ]; then echo "ok $n - a caller's PATH does not reach what root runs"; else echo "NOT OK $n - root was handed: $shown"; failed=1; fi
+fi
 
 config '{"admin":"never"}'
-expect '"never" with no seal: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+expect '"never" with no seal: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')" not-the-key)\"}"
-expect '"never" sealed by another key: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+expect '"never" sealed by another key: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nwork')")\"}"
-expect '"never" with the seal of "work": refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+expect '"never" with the seal of "work": refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 config "{\"admin\":\"work\",\"adminSealed\":\"$(seal "$(printf 'mode\nwork')")\"}"
-expect '"work" as Config sealed it, with no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+expect '"work" as Config sealed it, with no grant: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")\"}"
-expect '"never" as Config sealed it: past the gate with no grant' 3 "$PAST" -- "$admin" here 'id -u'
-expect '"never" as Config sealed it, through a wrapper as before: past the gate' 3 "$PAST" -- "$tmp/wrapper.sh"
+expect '"never" as Config sealed it: past the gate with no grant' "$PAST_STATUS" "$PAST" -- "$admin" "$H" 'id -u'
+expect '"never" as Config sealed it, through a wrapper as before: past the gate' "$PAST_STATUS" "$PAST" -- "$tmp/wrapper.sh"
 
 # adminPassword, which earlier versions read, chooses nothing: with no grant refused, with one the password is asked for
 config '{"adminPassword":"keep"}'
-expect 'adminPassword set, no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
-grant pw1 here 'id -u'
-expect 'adminPassword set, a grant: the password is asked for, as always' 3 "$PAST" -- "$admin" here 'id -u'
+expect 'adminPassword set, no grant: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
+grant pw1 "$H" 'id -u'
+expect 'adminPassword set, a grant: the password is asked for, as always' "$PAST_STATUS" "$PAST" -- "$admin" "$H" 'id -u'
 
 config '{}'
 # What takes something back makes a new key: a grant and a "never" sealed before it count for nothing
 at=$(now)
-old_grant=$(seal "$(printf 'grant\nkept\n%s\nhere\nid -u' "$at")")
+old_grant=$(seal "$(printf 'grant\nkept\n%s\n%s\nid -u' "$at" "$H")")
 old_never=$(seal "$(printf 'mode\nnever')")
 /bin/sh -c "$hook_seal" sh new >/dev/null || { echo "NOT OK - no new key was made"; failed=1; }
-grant kept here 'id -u' "$at" "$old_grant"
-expect 'a grant sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+grant kept "$H" 'id -u' "$at" "$old_grant"
+expect 'a grant sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 rm -f "$memory"/admin-grants/*
 config "{\"admin\":\"never\",\"adminSealed\":\"$old_never\"}"
-expect '"never" sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+expect '"never" sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" "$H" 'id -u'
 config '{}'
 # The secret runner reads only its own keys: a setting in its environment never points it at the kept admin passwords
 printf '%s\n' 'admin-pass-1' | "$here/keyring" set claudopus-admin m9 'Claudopus admin: m9'
@@ -157,19 +176,27 @@ if [ -z "$listed" ]; then echo "ok $n - the secret runner cannot be pointed at t
 # F-007 F-009: no admin password is kept or used. A "never" sealed with the gate's own key, as anything that reads the key could seal
 # it, with a password an earlier version kept: the runner neither uses that password nor runs anything; it asks for the password,
 # and the kept one is gone. Before this fix the kept password ran the command with no one asked
-printf '%s\n' 'kept-admin-pw' | "$here/keyring" set claudopus-admin here 'Claudopus admin: here'
+printf '%s\n' 'kept-admin-pw' | "$here/keyring" set claudopus-admin "$H" "Claudopus admin: $H"
 config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")\"}"
-expect 'a "never" sealed with the real key and a password kept: nothing runs, the password is asked for' 3 "$PAST" -- "$admin" here 'id -u'
+expect 'a "never" sealed with the real key and a password kept: nothing runs, the password is asked for' "$PAST_STATUS" "$PAST" -- "$admin" "$H" 'id -u'
 n=$((n + 1))
-if "$here/keyring" has claudopus-admin here; then echo "NOT OK $n - the kept admin password was left"; failed=1; else echo "ok $n - the kept admin password was forgotten, never used"; fi
+if "$here/keyring" has claudopus-admin "$H"; then echo "NOT OK $n - the kept admin password was left"; failed=1; else echo "ok $n - the kept admin password was forgotten, never used"; fi
 config '{}'
 # What the panel types is sealed by the hook's own openssl line (read out of src/claudopus/boxes.tsx) to a key made as the runner
 # makes it, and opened as the runner opens it: this machine's openssl takes every option both use
-seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(/const SEAL_FOR = (\x27[^\n]*\x27)\n/.exec(t)[1]))' "$src/claudopus/boxes.tsx")
+if [ -n "$windows" ]; then line=SEAL_FOR_WINDOWS; else line=SEAL_FOR; fi
+seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(new RegExp(`const ${process.argv[2]} =\\s+(\x27[^\\n]*\x27)\\n`).exec(t)[1]))' "$src/claudopus/boxes.tsx" "$line")
 private=$(openssl genrsa 2048 2>/dev/null)
 public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)
 sealed_value=$(printf '%s' 'pw "with" \quotes' | /bin/bash -c "$seal_for" sh "$public")
-opened=$(printf '%s' "$sealed_value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null)
+if [ -n "$windows" ]; then
+  # (Git's openssl, a Windows program, opens the key as the runner has it there: a file of its own for that moment)
+  printf '%s\n' "$private" >"$tmp/box.key"
+  opened=$(printf '%s' "$sealed_value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey "$tmp/box.key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 2>/dev/null)
+  rm -f "$tmp/box.key"
+else
+  opened=$(printf '%s' "$sealed_value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null)
+fi
 n=$((n + 1))
 if [ "$opened" = 'pw "with" \quotes' ] && ! printf '%s' "$sealed_value" | grep -qF '"with"' ; then echo "ok $n - a box's value goes sealed and is opened only with the runner's key"; else echo "NOT OK $n - sealed '$sealed_value' opened as '$opened'"; failed=1; fi
 grep -q 'pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256' "$admin" || { echo "NOT OK - the runner opens a box's value another way than tested here"; failed=1; }
@@ -233,7 +260,7 @@ release_grant rel4 release-grant three
 (cd "$r/work" && git checkout -q -b three 2>/dev/null; git commit -q --allow-empty -m forged)
 expect 'the shipped release, with a valid grant and key under another HOME: refused' 6 "$RELEASE_REFUSED" -- env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" bash -c 'cd "$1" && "$2" </dev/null' sh "$r/work" "$shipped/release"
 config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")\"}"
-expect 'the shipped admin, with a valid never-ask seal under another HOME: refused' 6 "$REFUSED" -- env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" "$shipped/admin" here 'id -u'
+expect 'the shipped admin, with a valid never-ask seal under another HOME: refused' 6 "$REFUSED" -- env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" "$shipped/admin" "$H" 'id -u'
 config '{}'
 rm -f "$memory"/admin-grants/*
 (cd "$r/work" && git checkout -q fix-it)
@@ -256,11 +283,21 @@ _, st = os.waitpid(pid, 0)
 sys.stdout.write(out.decode(errors="replace")); sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 1)
 ' "$r/work" "$here/release" "$1"
 }
-expect "a person's own release at a terminal, answered no: refused" 6 "$RELEASE_REFUSED" -- at_terminal n
-expect "a person's own release at a terminal, answered yes: released" 0 'released' -- at_terminal y
+if [ -z "$windows" ]; then
+  expect "a person's own release at a terminal, answered no: refused" 6 "$RELEASE_REFUSED" -- at_terminal n
+  expect "a person's own release at a terminal, answered yes: released" 0 'released' -- at_terminal y
+else
+  echo "ok - a person's own release at a terminal skipped: it takes Python's terminal, which Windows has not"
+  # (released by its grant instead, so what follows starts from the same main)
+  release_grant rel-own release-grant fix-it
+  expect "the person's release, by its grant" 0 'released' -- release
+fi
 n=$((n + 1))
 [ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ok - main's own checks and GitHub's skipped: this test's stand-in for gh answers through jq, which is not installed here"
+else
 # Main's own checks are read and run even where the .release names only some of the settings (15 Nov: a read that ended on a name
 # the file left out took none of them, so CHECK went unrun; GitHub's runner hid it, as it sets GITHUB_WORKFLOW itself)
 (cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK=false\n' >.release && git commit -q -am "checks fail" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b red-check && echo red >file && git commit -q -am red) || { echo "NOT OK - the repo for a failing check was not set up"; failed=1; }
@@ -339,7 +376,8 @@ touch "$r/local-slow"
 started=$SECONDS
 expect "GitHub red while this Mac's checks run: refused" 3 'check (macos-latest) (failure) u2' -- gh_release local-slow
 rm -f "$r/local-slow"
-n=$((n + 1)); [ $((SECONDS - started)) -lt 30 ] && ! pgrep -f 'sleep 47.25' >/dev/null && echo "ok $n - it did not wait for this Mac's checks, and stopped them" || { echo "NOT OK $n - after $((SECONDS - started)) s, still running: $(pgrep -fl 'sleep 47.25')"; failed=1; pkill -f 'sleep 47.25'; }
+command -v pgrep >/dev/null 2>&1 || echo "ok - whether this computer's checks are left running skipped: pgrep is not installed here"
+n=$((n + 1)); [ $((SECONDS - started)) -lt 30 ] && ! { command -v pgrep >/dev/null 2>&1 && pgrep -f 'sleep 47.25' >/dev/null; } && echo "ok $n - it did not wait for this Mac's checks, and stopped them" || { echo "NOT OK $n - after $((SECONDS - started)) s, still running: $(pgrep -fl 'sleep 47.25')"; failed=1; pkill -f 'sleep 47.25'; }
 for what in stray move; do
   checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\n'
   touch "$r/local-$what"
@@ -356,6 +394,7 @@ expect 'checks running, then green: released once they pass, after saying what i
 WAIT=
 n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$(cat "$r/asked")" ] && echo "ok $n - main is the very commit GitHub checked" || { echo "NOT OK $n - main is not the commit GitHub checked"; failed=1; }
 no_candidate 'a green release'
+fi
 unset CLAUDECODE
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here
@@ -365,7 +404,8 @@ if [ -n "$mac" ]; then
   [ "$(HOME=$real_home security default-keychain 2>/dev/null)" != "$(security default-keychain 2>/dev/null)" ] || { echo "NOT OK - the test ran on the person's own keychain"; failed=1; }
 else
   kept_key=$HOME/.local/share/claudopus/keyring/claudopus-admin-gate/seal
-  [ -f "$kept_key" ] && [ "$(stat -c %a "$kept_key")" = 600 ] && [ "$(stat -c %a "$HOME/.local/share/claudopus/keyring")" = 700 ] && echo "ok - the gate's key is a file only this user reads, under the test's own home" || { echo "NOT OK - the gate's key file is missing or others can read it"; failed=1; }
+  # (on Windows NTFS keeps no mode: the profile's own rights keep it the person's)
+  [ -f "$kept_key" ] && { [ -n "$windows" ] || { [ "$(stat -c %a "$kept_key")" = 600 ] && [ "$(stat -c %a "$HOME/.local/share/claudopus/keyring")" = 700 ]; }; } && echo "ok - the gate's key is a file only this user reads, under the test's own home" || { echo "NOT OK - the gate's key file is missing or others can read it"; failed=1; }
 fi
 [ "$failed" = 0 ] && echo "admin.test.sh: all passed" || echo "admin.test.sh: FAILED"
 exit "$failed"
