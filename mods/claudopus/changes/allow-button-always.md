@@ -1,0 +1,1 @@
+- A command Claude Code blocked now always shows Allow beside Don't allow on its card, also when the card comes up just as Claudopus updates. Before, such a card could show Don't allow alone.
