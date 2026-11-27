@@ -787,3 +787,42 @@ const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole 
   parts.push(text.slice(at))
   return parts.filter(part => part !== '')
 }
+
+// The values in a text a person pastes somewhere else, each once, in the order written: what is in backticks, web and email
+// addresses, file paths, ids mixing letters and digits (at least three digits and two letters, so no word or version is one, an
+// ARN, a hash, a ticket), keys' names, account and case numbers. The app lets nobody select a pane's text, so each gets a button
+// that copies it (pasteRow). The first kind to find a stretch keeps it, so a number in an address is not offered again. Each text
+// is looked at once and remembered (27 Nov: the person could not copy an account number, a case number or an email from a question)
+const PASTE_IN = [/`([^`\n]{2,300})`/g, URL_IN, /(?<![\w.%+-])[\w.%+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}/g, /(?<![\w/:.~-])[~.]{0,2}\/[\w.@%+~-]+(?:\/[\w.@%+~-]*)+|(?<!\w)[A-Za-z]:\\[^\s`'"<>|*]+/g, /(?<![\w./:@~-])[A-Za-z0-9][\w.:/-]{6,}[A-Za-z0-9](?![\w/@-])/g, /(?<![\w-])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![\w-])/g, /(?<![\w.:/-])\d{6,}(?!\w|[.,]\d|[:/-])/g]
+const pasteMemo = new Map<string, string[]>()
+const pasteValues = (text: string) => {
+  const known = pasteMemo.get(text)
+  if (known) return known
+  const kept: [number, number, string][] = []
+  PASTE_IN.forEach((find, kind) => {
+    for (const m of text.matchAll(find)) {
+      const from = m.index ?? 0
+      const to = from + m[0].length
+      const value = (m[1] ?? m[0]).replace(/[.,;:!?)\]]+$/, '')
+      if (kind === 4 && !(/(\D*\d){3}/.test(value) && /([^a-z]*[a-z]){2}/i.test(value))) continue
+      if (!kept.some(one => from < one[1] && to > one[0])) kept.push([from, to, value])
+    }
+  })
+  const values = [...new Set(kept.sort((a, b) => a[0] - b[0]).map(one => one[2]))]
+  if (pasteMemo.size > 400) pasteMemo.clear()
+  pasteMemo.set(text, values)
+  return values
+}
+// A row of buttons, one for each value of a text to paste elsewhere (at most `most`), each saying it, shortened in the middle to
+// what `room` holds; a press puts it on the clipboard and the button says so for two seconds. `known`: values with a Copy already
+const pasteRow = ($: EngineInterface, ui: Ui, key: string, text: string, known = '', room = 80, most = 6) => {
+  const values = pasteValues(text).filter(value => value !== known).slice(0, most)
+  const half = Math.max(8, Math.min(24, (room >> 1) - 4))
+  return values.length ? (
+    <ui.Box key={`${key}-paste`} flexDirection="row" flexWrap="wrap" gap={1}>
+      {values.map((value, n) => (
+        <ui.Button key={`paste-${key}-${n}-${presses}`} label={copiedKey === `${key}:${value}` ? '✓ Copied' : `⧉ ${value.length > half * 2 ? `${value.slice(0, half)}…${value.slice(-half)}` : value}`} plain dimColor onPress={press => copyAsk($, `${key}:${value}`, value, press.surface)} />
+      ))}
+    </ui.Box>
+  ) : null
+}

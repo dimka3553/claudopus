@@ -277,10 +277,14 @@ const blockRowsOf = (need: Need, room: number) => {
   const details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`) * BLOCK_LINE : 0
   const pictures = Math.ceil((need.card?.ask?.pictures?.length ?? 0) / 2) * (ASK_PIC_TALL + BLOCK_LINE + 8)
   const command = need.command ? lines(need.command) * BLOCK_LINE + 16 : 0
+  // (the row of values to copy, reckoned as two rows of buttons)
+  const pastes = pasteValues(needWords(need)).some(value => value !== need.command) ? 2 * BLOCK_BUTTONS : 0
   const buttons = need.buttons.length ? Math.ceil(need.buttons.reduce((n, button) => n + button.label.length + 6, 0) / (per * 1.4)) * BLOCK_BUTTONS : 0
-  const parts = [BLOCK_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * BLOCK_LINE, details, pictures, command, need.where ? lines(need.where) * BLOCK_LINE : 0, need.said ? lines(need.said) * BLOCK_LINE : 0, buttons, need.line ? BLOCK_LINE : 0].filter(Boolean)
+  const parts = [BLOCK_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * BLOCK_LINE, details, pictures, command, pastes, need.where ? lines(need.where) * BLOCK_LINE : 0, need.said ? lines(need.said) * BLOCK_LINE : 0, buttons, need.line ? BLOCK_LINE : 0].filter(Boolean)
   return Math.ceil((parts.reduce((n, part) => n + part, 0) + (parts.length - 1) * BLOCK_GAP + BLOCK_EDGE) / BLOCK_ROW)
 }
+// What a block says, where its values to copy are looked for: its question and what it is about
+const needWords = (need: Need) => (need.details ? `${need.text}\n${need.details}` : need.text)
 const BLOCK_LINE = 24
 const BLOCK_GAP = 12
 const BLOCK_BUTTONS = 44
@@ -328,6 +332,8 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
           ) : null}
         </ui.Box>
       ) : null}
+      {/* Each value in it to paste elsewhere (an account number, an id, an email, a link, a path) is copied with one press */}
+      {opts.isCompact ? null : pasteRow($, ui, need.id, needWords(need), need.command, room)}
       {need.where ? <ui.Text key={`${need.id}-where`} dimColor wrap="wrap">{need.where}</ui.Text> : null}
       {need.said ? <ui.Text key={`${need.id}-said`} color={NEEDS} wrap="wrap">{need.said}</ui.Text> : null}
       {need.extra?.(ui) ?? null}

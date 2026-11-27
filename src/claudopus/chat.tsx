@@ -308,7 +308,7 @@ const chatHooks = (on: On) => {
         properties: {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
           details: { type: 'string', description: 'What it is about, in full: what changes, what it costs, what is not done. Short plain lines and "- " lists with a blank line after, no tables or bold: the card is narrow and the chat shows plain text' },
-          copy: { type: 'string', description: 'Only text they must paste elsewhere, such as a one-time code or a link' },
+          copy: { type: 'string', description: 'The one value they must paste elsewhere, such as a one-time code, an account number, an id or a link, shown whole with a Copy button. Each such value written in `text` or `details` gets a copy button of its own too' },
           choices: { type: 'array', items: { type: 'string' }, description: 'The buttons to answer with, in your words for this question, such as Approve and Keep it: give them, as none are added. Every button is an answer that reaches you and carries you on: never Not now, Later, Skip or Cancel, which are left out, as {name} leaves a question open by not pressing. Answer in words is always there' },
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
           cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },

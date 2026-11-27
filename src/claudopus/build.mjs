@@ -69,7 +69,8 @@ const globalsOf = (lines, toPart) => {
 
 // The engine reads no hooks file over 1 MB (1,048,576 bytes), so the shipped file leaves out the parts' whole-line comments, which
 // stay in the parts: a line goes only when it starts with // in plain code, never inside a string, a template or a block comment.
-// A line that starts in plain code goes without its indent too, which no code reads; one inside a template keeps it whole.
+// So does a whole line that is one comment in JSX, {/* like this */}, an empty child. A line that starts in plain code goes
+// without its indent too, which no code reads; one inside a template keeps it whole.
 // Regular expressions are told from division by what comes before them, so a // inside one is never taken for a comment
 const HOOKS_MOST = 1_048_576
 const commentLinesOut = text => {
@@ -82,7 +83,7 @@ const commentLinesOut = text => {
   const lines = text.split('\n')
   for (const line of lines) {
     const isCode = !inBlock && !stack.length
-    if (isCode && /^\s*\/\/(\s|$)/.test(line)) continue
+    if (isCode && (/^\s*\/\/(\s|$)/.test(line) || /^\s*\{\/\*((?!\*\/).)*\*\/\}\s*$/.test(line))) continue
     out.push(isCode ? line.trimStart() : line)
     // Walk the line to carry the state to the next
     for (i = 0; i < line.length; i++) {

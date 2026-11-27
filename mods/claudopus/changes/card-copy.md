@@ -1,0 +1,1 @@
+- Every value on a question or a result that you would paste somewhere else, such as an account or case number, an id, an email, a link, a path or a key's name, now has its own button under the text: one press copies it, and the button says Copied. The panel itself lets no text be selected.

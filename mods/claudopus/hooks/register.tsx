@@ -2571,6 +2571,38 @@ parts.push(text.slice(at))
 return parts.filter(part => part !== '')
 }
 
+const PASTE_IN = [/`([^`\n]{2,300})`/g, URL_IN, /(?<![\w.%+-])[\w.%+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}/g, /(?<![\w/:.~-])[~.]{0,2}\/[\w.@%+~-]+(?:\/[\w.@%+~-]*)+|(?<!\w)[A-Za-z]:\\[^\s`'"<>|*]+/g, /(?<![\w./:@~-])[A-Za-z0-9][\w.:/-]{6,}[A-Za-z0-9](?![\w/@-])/g, /(?<![\w-])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![\w-])/g, /(?<![\w.:/-])\d{6,}(?!\w|[.,]\d|[:/-])/g]
+const pasteMemo = new Map<string, string[]>()
+const pasteValues = (text: string) => {
+const known = pasteMemo.get(text)
+if (known) return known
+const kept: [number, number, string][] = []
+PASTE_IN.forEach((find, kind) => {
+for (const m of text.matchAll(find)) {
+const from = m.index ?? 0
+const to = from + m[0].length
+const value = (m[1] ?? m[0]).replace(/[.,;:!?)\]]+$/, '')
+if (kind === 4 && !(/(\D*\d){3}/.test(value) && /([^a-z]*[a-z]){2}/i.test(value))) continue
+if (!kept.some(one => from < one[1] && to > one[0])) kept.push([from, to, value])
+}
+})
+const values = [...new Set(kept.sort((a, b) => a[0] - b[0]).map(one => one[2]))]
+if (pasteMemo.size > 400) pasteMemo.clear()
+pasteMemo.set(text, values)
+return values
+}
+const pasteRow = ($: EngineInterface, ui: Ui, key: string, text: string, known = '', room = 80, most = 6) => {
+const values = pasteValues(text).filter(value => value !== known).slice(0, most)
+const half = Math.max(8, Math.min(24, (room >> 1) - 4))
+return values.length ? (
+<ui.Box key={`${key}-paste`} flexDirection="row" flexWrap="wrap" gap={1}>
+{values.map((value, n) => (
+<ui.Button key={`paste-${key}-${n}-${presses}`} label={copiedKey === `${key}:${value}` ? '✓ Copied' : `⧉ ${value.length > half * 2 ? `${value.slice(0, half)}…${value.slice(-half)}` : value}`} plain dimColor onPress={press => copyAsk($, `${key}:${value}`, value, press.surface)} />
+))}
+</ui.Box>
+) : null
+}
+
 
 type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed' | 'interrupted'
 type Staged = Pick<Todo, 'status' | 'up' | 'closedAt' | 'why'> & Parameters<typeof needsPerson>[0]
@@ -3720,7 +3752,6 @@ const [recent, earlier] = [entries.slice(0, RECENT), entries.slice(RECENT)]
 const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, earlierMost, archivedMost, 'isTerminal' in ui, earlier.length, gone.length, ...[recent, isEarlierOpen ? earlier.slice(0, earlierMost) : [], isArchivedOpen ? gone.slice(0, archivedMost) : []].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
 const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
 <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
-{/* In the rows' title column */}
 <Box width={1} flexShrink={0} />
 <Button key={`${key}-${gen}`} label={`${isOpen ? '▾' : '▸'} ${label}`} plain dimColor onPress={() => void ((presses += 1), onPress(), redraw($))} />
 </Box>
@@ -3734,7 +3765,6 @@ const digit = 'isTerminal' in ui && rowNo <= 9 ? String(rowNo) : undefined
 return (
 <Box key={`entry-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
 <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-{/* In the column the folded rows' labels start in */}
 <Box width={1} flexShrink={0} />
 <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
 <Button key={`report-${r.id}-${gen}`} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={() => openReport($, r.id)} />
@@ -3817,7 +3847,6 @@ const hasTiles = !('isTerminal' in ui) && Boolean(table.Svg) && (files.made.leng
 const show = (to: number) => void ((presses += 1), hasTiles ? void showPicture($, pictures[to]?.path ?? '', pane, '') : (pictureAt.set(pane, to), redraw($)))
 return (
 <Box key={`report-${r.id}`} flexDirection="column" gap={1} flexGrow={1}>
-{/* Archive at the head's right: pressed, the tab closes; one archived says so, with Bring back */}
 <Box key="report-head" flexDirection="row" alignItems="flex-start" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
 <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
 <Text bold wrap="wrap">{r.title}</Text>
@@ -3825,9 +3854,7 @@ return (
 </Box>
 <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
 </Box>
-{/* What its task made, right under its title: tiles side by side, each a press that opens it */}
 {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`, r.id, undefined, `-${gen}`) ?? <Box />) : null}
-{/* A result kept from before that still lists questions: its lines, as text, with nothing to press */}
 {waitsOf(r).length
 ? band(
 ui,
@@ -3887,6 +3914,7 @@ ui,
 'report-text',
 'In full',
 '',
+<Box flexDirection="column" alignItems="flex-start" gap={1}>
 <Markdown
 key={`report-text-${r.id}`}
 text={text.length > REPORT_CHARS ? `${text.slice(0, REPORT_CHARS)}\n\n…` : text}
@@ -3894,7 +3922,9 @@ onLinkPress={link => {
 const to = pictures.findIndex(one => link.href.endsWith(`/${fileName(one.file)}`) || link.href === one.path)
 if (to >= 0) show(to)
 }}
-/>,
+/>
+{pasteRow($, ui, `report-${r.id}`, text, '', 80, 8)}
+</Box>,
 )}
 {band(
 ui,
@@ -3902,7 +3932,6 @@ ui,
 'Follow-up',
 '',
 <Box flexDirection="column" alignItems="flex-start" gap={1}>
-{/* Message opens the box above the chat; where that bar takes no box (the terminal), the one field is here */}
 {repliesInBar(surface) ? (
 <Button key={`report-carry-${gen}`} label={isBarOpen('continue', r.id) ? 'Close' : 'Message'} onPress={press => openBar($, isBarOpen('continue', r.id) ? undefined : { kind: 'continue', id: r.id }, press.surface)} />
 ) : 'Input' in ui ? (
@@ -4138,7 +4167,6 @@ return (
 {ids.map(id => {
 return (
 <Box key={`task-${id}`} flexDirection="row" columnGap={2}>
-{/* The dot outside the button, as the app draws a button's words in its own colour */}
 <Box key={`task-name-${id}`} flexDirection="row">
 <Text color={colourOfTask(id)}>● </Text>
 <Button key={`task-open-${id}-${presses}`} plain hover={{ scope: `task-open-${id}`, underline: true }} onPress={() => openWork($, id)}>
@@ -6202,13 +6230,11 @@ onPress={press => void ((presses += 1), thing.files.length > 1 ? onOpenWork() : 
 />
 </Box>
 ))}
-{/* (the rest are in its Details, which the press opens) */}
 {things.length > shown.length ? <Button key={`${key}-more-${presses}`} label={`${things.length - shown.length} more`} plain dimColor hover={{ underline: true }} onPress={() => void ((presses += 1), onOpenWork())} /> : null}
 {files.code ? (
 <Box key={`${key}-code`} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
 {icon('code', `${key}-code`)}
 <Button key={`${key}-code-open-${presses}`} label={countWord(files.code)} plain hover={{ underline: true }} onPress={() => void ((presses += 1), onOpenWork())} />
-{/* (the counts drawn at the button's size, as in Details) */}
 {table.Svg && !('isTerminal' in ui) ? (
 <table.Svg key={`${key}-code-counts`} source={chipCountsSvg(files.code)} alt={linesWord(files.code)} width={chipCountsW(files.code)} height={LIST_H} />
 ) : (
@@ -8211,7 +8237,6 @@ return (
 {attachedRow($, ui, one.id, key)}
 <ui.Box flexDirection="row" alignItems="center" flexWrap="wrap" gap={1}>
 {attachButtons($, ui, one.id, key)}
-{/* The sends keep together at the right, on the next line when the pane is narrow */}
 <ui.Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} justifyContent="flex-end">
 {isMidStep ? <ui.Button key={`${key}-stop-${presses}-${boxPresses}`} label="Stop" onPress={() => void ((presses += 1), stop($, one.id).catch(err => log($, `task ${one.id} not stopped: ${String(err)}`)))} /> : null}
 {isMidStep ? <ui.Button key={`${key}-now-${presses}-${boxPresses}`} label={SEND_NOW} onPress={() => sendMessageFrom($, one.id, typed(), true)} /> : null}
@@ -11639,10 +11664,12 @@ const lines = (text: string, each = per) => text.split('\n').reduce((n, line) =>
 const details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`) * BLOCK_LINE : 0
 const pictures = Math.ceil((need.card?.ask?.pictures?.length ?? 0) / 2) * (ASK_PIC_TALL + BLOCK_LINE + 8)
 const command = need.command ? lines(need.command) * BLOCK_LINE + 16 : 0
+const pastes = pasteValues(needWords(need)).some(value => value !== need.command) ? 2 * BLOCK_BUTTONS : 0
 const buttons = need.buttons.length ? Math.ceil(need.buttons.reduce((n, button) => n + button.label.length + 6, 0) / (per * 1.4)) * BLOCK_BUTTONS : 0
-const parts = [BLOCK_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * BLOCK_LINE, details, pictures, command, need.where ? lines(need.where) * BLOCK_LINE : 0, need.said ? lines(need.said) * BLOCK_LINE : 0, buttons, need.line ? BLOCK_LINE : 0].filter(Boolean)
+const parts = [BLOCK_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * BLOCK_LINE, details, pictures, command, pastes, need.where ? lines(need.where) * BLOCK_LINE : 0, need.said ? lines(need.said) * BLOCK_LINE : 0, buttons, need.line ? BLOCK_LINE : 0].filter(Boolean)
 return Math.ceil((parts.reduce((n, part) => n + part, 0) + (parts.length - 1) * BLOCK_GAP + BLOCK_EDGE) / BLOCK_ROW)
 }
+const needWords = (need: Need) => (need.details ? `${need.text}\n${need.details}` : need.text)
 const BLOCK_LINE = 24
 const BLOCK_GAP = 12
 const BLOCK_BUTTONS = 44
@@ -11659,9 +11686,7 @@ const terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.
 return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE : NEEDS, `need-outline-${need.id}`, (
 <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1, paddingY: 1 })}>
 <ui.Text dimColor wrap="truncate-end">{`${NEED_LABEL[need.kind]}${need.from ? ` · ${need.from}` : ''}`}</ui.Text>
-{/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
 <ui.Text wrap="wrap" color={need.isActing ? LIVE : NEEDS} bold>{withLinks(Link, isWhole ? need.text : cut(need.text, Math.round(room * 1.6)), `${need.id}-text`, need.text)}</ui.Text>
-{/* What it is about, under its question: whole in Details, and on the small card up to DETAILS_ON_CARD */}
 {need.details ? (
 <ui.Box key={`${need.id}-details`} flexDirection="column" minWidth={0}>
 <ui.Markdown text={isWhole || need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`} />
@@ -11674,10 +11699,8 @@ return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE :
 <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
 <ui.Text mono wrap="wrap">{withLinks(Link, need.command, `${need.id}-copy`)}</ui.Text>
 </ui.Box>
-{/* A question's code or command is copied with one press */}
 {copyButton && !terminalButton ? copyButton : null}
 </ui.Box>
-{/* A command to type also opens in Terminal, typed and not run: with it, the two are under the command, which keeps its width */}
 {terminalButton ? (
 <ui.Box flexDirection="row" gap={1}>
 {copyButton}
@@ -11686,10 +11709,10 @@ return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE :
 ) : null}
 </ui.Box>
 ) : null}
+{opts.isCompact ? null : pasteRow($, ui, need.id, needWords(need), need.command, room)}
 {need.where ? <ui.Text key={`${need.id}-where`} dimColor wrap="wrap">{need.where}</ui.Text> : null}
 {need.said ? <ui.Text key={`${need.id}-said`} color={NEEDS} wrap="wrap">{need.said}</ui.Text> : null}
 {need.extra?.(ui) ?? null}
-{/* The one field a block keeps where the bar above the chat draws none */}
 {need.field && 'Input' in ui ? (
 <ui.Box width="100%" flexDirection="column">
 <ui.Input
@@ -11725,9 +11748,7 @@ button.onPress(press)
 ))}
 </ui.Box>
 ) : null}
-{/* Under its buttons, so the one pressed stays where it is: a press held back as the block moved under the pointer */}
 {opts.isMoving && movedPresses.get(need.id) === need.at ? <ui.Text key={`${need.id}-moved`} color={NEEDS} wrap="wrap">{MOVED_SAID}</ui.Text> : null}
-{/* What was last pressed or typed for it, while it is still there: a reply that left it open, an answer that did not go */}
 {need.line ? <ui.Text key={`${need.id}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{isWhole ? (need.wholeLine ?? need.line) : need.line}</ui.Text> : null}
 </ui.Box>
 ))
@@ -12049,7 +12070,7 @@ type: 'object',
 properties: {
 text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
 details: { type: 'string', description: 'What it is about, in full: what changes, what it costs, what is not done. Short plain lines and "- " lists with a blank line after, no tables or bold: the card is narrow and the chat shows plain text' },
-copy: { type: 'string', description: 'Only text they must paste elsewhere, such as a one-time code or a link' },
+copy: { type: 'string', description: 'The one value they must paste elsewhere, such as a one-time code, an account number, an id or a link, shown whole with a Copy button. Each such value written in `text` or `details` gets a copy button of its own too' },
 choices: { type: 'array', items: { type: 'string' }, description: 'The buttons to answer with, in your words for this question, such as Approve and Keep it: give them, as none are added. Every button is an answer that reaches you and carries you on: never Not now, Later, Skip or Cancel, which are left out, as {name} leaves a question open by not pressing. Answer in words is always there' },
 command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
 cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
@@ -15415,7 +15436,6 @@ const typed = () => (box.draft ? (drafts.get(box.draft) ?? '') : box.secret ? (b
 const send = (value: string) => void ((value.trim() || (box.attachTo && attached.get(box.attachTo)?.length)) && box.send(value))
 return (
 <ui.Box key="band-box" flexDirection="column" flexShrink={0} width="100%">
-{/* With task colours on, the box takes its task's colour, the colour of its card and of its replies in the chat (colours.tsx) */}
 <ui.Box flexDirection="row" height={1} overflow="hidden">
 {box.task && taskColour(box.task) ? <ui.Text key="band-box-dot" color={taskColour(box.task)}>● </ui.Text> : null}
 <ui.Text color={(box.task && taskColour(box.task)) || NEEDS} bold wrap="truncate-end">{box.head}</ui.Text>
@@ -15617,13 +15637,11 @@ const row = (
 {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
 {spacers}
 {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
-{/* At the very right on the desktop, Open panel while the panel is closed and Close panel while it is open */}
 {e.surface !== 'terminal' ? (
 <Box key="band-panel" flexGrow={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
 <ui.Button key={`band-panel-${isListHere ? 'close' : 'open'}`} label={isListHere ? 'Close panel' : 'Open panel'} plain dimColor onPress={() => void (isListHere ? hidePanel($) : showPanel($)).catch(err => log($, `panel not ${isListHere ? 'closed' : 'opened'}: ${String(err)}`))} />
 </Box>
 ) : null}
-{/* The figures fill a phone's terminal: the hint shows until they come */}
 {isPanelAway && !figures ? (
 <Box flexShrink={0}>
 <Text dimColor>· /claudopus shows the panel</Text>
@@ -16119,7 +16137,6 @@ if (!asked.length) return null
 return (
 <Box key={key} flexDirection="column" paddingLeft={left}>
 <Text dimColor>{asked.length === 1 ? 'It asks' : `It asks ${asked.length} things`}</Text>
-{/* (in the list drawn with less in it, one row each, cut: whole in Details) */}
 {asked.map((text, n) => (
 <Box key={`${key}-${n}`} flexDirection="row" gap={1} alignItems="flex-start">
 {asked.length > 1 ? <Box flexShrink={0}><Text dimColor>{`${n + 1}.`}</Text></Box> : null}
@@ -16150,7 +16167,6 @@ return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined,
 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
 {/* With task colours on, the colour of the task's box in the chat leads its name (colours.tsx), outside the button,
                       as the app draws a button's words in its own colour */}
-{/* (moved in by the step a desktop pads a plain Button with, so the dot starts at the card's one left edge) */}
 {taskColour(one.id) ? <Box key={`dot-${one.id}`} paddingLeft={lead} flexShrink={0}><Text color={taskColour(one.id)}>● </Text></Box> : null}
 <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
 <Text bold wrap="truncate-end">{titleOf(one)}</Text>
@@ -16169,13 +16185,11 @@ return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined,
 <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
 </Box>
 ) : null}
-{/* Cut off by the app's close: a press carries it on, as a fresh task told all the ledger holds of it */}
 {!one.chat && !one.parentId && stage(one) === 'interrupted' ? (
 <Box flexShrink={0}>
 <Button key={`carry-small-${one.id}-${presses}`} label="Carry on" plain hover={{ scope: `carry-${one.id}`, underline: true }} onPress={() => ((presses += 1), void carryOn($, one.id))} />
 </Box>
 ) : null}
-{/* Another chat's task cut off by the app's close: a press opens that chat, where its card has Carry on */}
 {one.chat && stage(one) === 'interrupted'
 ? (() => {
 const there = otherChats.find(c => c.chat === one.chat?.id && c.host === one.chat?.host)
@@ -16186,7 +16200,6 @@ return there && pressOf(there) ? (
 ) : null
 })()
 : null}
-{/* Failed, or stopped by the person: only their press starts it again */}
 {!one.chat && (stage(one) === 'failed' || (stage(one) === 'stopped' && one.byYou)) ? (
 <Box flexShrink={0}>
 <Button key={`again-small-${one.id}-${presses}`} label="Start again" plain dimColor hover={{ scope: `again-${one.id}`, underline: true }} onPress={() => ((presses += 1), void startAgain($, one.id))} />
@@ -16209,7 +16222,6 @@ return there && pressOf(there) ? (
 {madeChips($, table, one, `made-${one.id}`, () => openWork($, one.id))}
 </Box>
 ) : null}
-{/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
 {stepLine(one, kept, done)}
 {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each a block, in
                 the order it came */}
@@ -16218,14 +16230,11 @@ return there && pressOf(there) ? (
 {needBlocks(one)}
 </Box>
 ) : null}
-{/* A command the person allowed, while it runs or its output is kept for the task's next step */}
 {(runsShownOn(one, at).length || isRetrying(one)) && !one.chat ? (
 <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
 {runBlock($, table, one, `runs-${one.id}`, at)}
 </Box>
 ) : null}
-{/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
-{/* What the person last pressed or answered here, in one grey line */}
 {answeredRow(one)}
 {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
                 one row: what it asks and its presses come right under it */}
@@ -16237,7 +16246,6 @@ return there && pressOf(there) ? (
                     it last said */}
 {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' || stage(one) === 'interrupted' ? (
 <Box flexDirection="row" minWidth={0}>
-{/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
 <Box flexShrink={stage(one) === 'failed' || (stage(one) === 'interrupted' && !noteOf(one)) ? 1 : 0} minWidth={0}>
 <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
 {stageLine(stage(one), one.why, Boolean(noteOf(one)))}
@@ -16251,7 +16259,6 @@ return there && pressOf(there) ? (
 </Box>
 </Box>
 )}
-{/* Its helpers, inside the card: its coloured edge runs down beside them */}
 {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column" paddingLeft={lead}>{tree}</Box> : null}
 {/* Delivered: what its result leaves open, numbered, with no press of their own, and at the card's bottom its only two
                 presses (19 Nov, the person: "buttons at the bottom to mark as done, provide feedback", "it makes the most sense
@@ -16280,7 +16287,6 @@ if (now !== 'working' || !count || e.surface === 'terminal') return <Box width={
 const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
 return count > EDGE_PARTS ? (
 <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
-{/* Too many to-dos for a part each: one bar in the same three shades, done, the one being done, and what is left */}
 {done ? <Box key="done" flexGrow={done} backgroundColor={LIVE} /> : null}
 {isDoing && count > done ? <Box key="doing" flexGrow={1} backgroundColor={`${LIVE}AD`} /> : null}
 {count - done - (isDoing ? 1 : 0) > 0 ? <Box key="left" flexGrow={count - done - (isDoing ? 1 : 0)} backgroundColor={`${LIVE}5C`} /> : null}
@@ -16450,7 +16456,6 @@ const head = (
 <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
 {jobLines(t, `twig-lines-${key}`, job)}
 <Box flexGrow={1} flexShrink={1} minWidth={0}>
-{/* A press opens its log in a tab of the panel */}
 {isMore(job) && owner ? (
 <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
 ) : canOpenJob(job) ? (
@@ -16478,7 +16483,6 @@ return (
 {head}
 <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
 {twigRails(t, `rails-${key}`)}
-{/* (on a desktop by the step a plain Button pads a run's name with, where its name is one, so the two start in one column) */}
 <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={canOpenJob(job) ? lead : 0}>
 {pctAt >= 0 && job.pct ? (
 <Box flexDirection="row" flexShrink={0}>
@@ -16729,7 +16733,6 @@ const isPassed = f.status === 'done' && flowPassed(f, rounds) === true
 const scope = `flow-${f.id}`
 return squareOutline(Box, isFlowMoment(f) && !isAbovePrompt ? DONE : undefined, `flow-${f.id}`, (
 <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-{/* Blue while it runs, green only when it finished and its last round did not fail */}
 {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
 <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
 <Box flexDirection="column">
@@ -17102,6 +17105,7 @@ return part(
 {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
 {copyButton(`result-${one.id}`, whole)}
 </Box>
+{pasteRow($, table, `result-${one.id}`, whole, '', room, 8)}
 </Box>,
 )
 }
@@ -17132,16 +17136,13 @@ return (
 {(one.status === 'working' && !one.chat) || left(one) || ((one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat) ? (
 <Box flexDirection="row" flexWrap="wrap" gap={1}>
 {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
-{/* Cut off by the app's close: carried on by a fresh task */}
 {isInterrupted(one) && !one.chat && !one.parentId ? <Button key={`carry-${one.id}-${presses}`} label="Carry on" onPress={() => ((presses += 1), void carryOn($, one.id))} /> : null}
-{/* Work the person stopped, or that failed, stays so until they start it again from here or ask in a message */}
 {((one.status === 'failed' && !isInterrupted(one)) || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
 {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
 </Box>
 ) : null}
 </Box>
 </Box>
-{/* What it made, right under its title, while it works and once it is done */}
 {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, one.id, e.surface, '', squeeze >= 2) ?? <Box />) : null}
 {needsFor(one).length ? (
 <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
@@ -17156,8 +17157,6 @@ return (
 {runBlock($, table, one, `runs-big-${one.id}`, at)}
 </Box>
 ) : null}
-{/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
-{/* (a message to the task is in its list under Message, never here as well) */}
 {isAnswerShown(one) && !isActingOnReply(one) && sentLine(one, at) && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
 <Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
 {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
@@ -17181,7 +17180,6 @@ return (
 {one.chat && !lines && (talks.has(one.id) || one.chat.host)
 ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
 : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
-{/* Every link the chat's replies about it gave, newest first, while links at the end are on (colours.tsx) */}
 {taskLinks($, one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks($, one.id))} />) : null}
 {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
@@ -17197,7 +17195,6 @@ const url = c ? pressOf(c) : ''
 const label = <Text bold dimColor wrap="truncate-end">{name}</Text>
 return (
 <Box key={`chat-head-${key}`} flexDirection="column" paddingTop={1} flexShrink={0}>
-{/* One line whatever the name's length: cut short, never wrapped */}
 <Box flexDirection="row" alignItems="flex-start" gap={2} paddingX={2} height={1} overflow="hidden">
 <Box flexGrow={1} flexShrink={1} minWidth={0} height={1} overflow="hidden">
 {c && url ? (
@@ -17473,8 +17470,6 @@ return (
                   panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
 {isInline ? null : updated && !own.some(one => isDoneMoment(one, at)) ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, waiting for you', happy: 'Claudopus, a task is done', working: 'Claudopus, Claude is working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
 <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-{/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
-{/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
 {updated ? (
 nameLine(ui, updated)
 ) : (
@@ -17482,13 +17477,11 @@ nameLine(ui, updated)
 <Box flexShrink={0}>
 <Text bold>Claudopus</Text>
 </Box>
-{/* The Mac has a newer copy than this chat runs: said beside the version, with what to type to switch to it */}
 {versions.version ? (
 <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} ready: /reload-plugins` : ''}`}</Text>
 ) : null}
 </Box>
 )}
-{/* (what waits is amber, what was delivered is its own blue, on the one line) */}
 <Box flexDirection="row" minWidth={0}>
 {headLine(head).length > deliveredSaid(head).length + interruptedSaid(head).length ? (
 <Box flexShrink={1} minWidth={0}>
@@ -17502,7 +17495,6 @@ nameLine(ui, updated)
 </Box>
 </Box>
 {outCard}
-{/* Wrapped rows keep the same gap as the buttons beside each other; a terminal's gap would be a whole blank line, so it has none */}
 <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={e.surface === 'terminal' ? 0 : 1}>
 {reportsButton($, ui, kept, isKeyed)}
 {progressButton($, ui, isKeyed)}
@@ -17522,7 +17514,6 @@ nameLine(ui, updated)
 </Box>
 ) : null}
 {!alone ? drawTop() : null}
-{/* What was pressed on a block that belonged to no task, in one grey line where it was */}
 {!alone ? loosePressedShown(at).map((one, n) => (
 <Box key={`pressed-loose-${n}`} paddingX={2} flexShrink={0}>
 <Text dimColor wrap="wrap">{one.text}</Text>
@@ -17541,7 +17532,6 @@ const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => Number(handedI
 return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []
 }),
 ]}
-{/* The Finished row sits at the pane's bottom edge, under everything else */}
 {!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
 {!alone ? finishedPart(isFinishedOpen) : null}
 </Box>

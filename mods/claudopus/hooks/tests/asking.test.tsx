@@ -1071,6 +1071,17 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: '' } as never)
   expect(await list.find({ type: 'Text', text: 'ABCD-1234' })).toBeUndefined()
   expect(await ears.find({ type: 'Text', text: 'Question' })).toBeUndefined()
+  // Each value in a question to paste elsewhere has a button of its own that copies it, on the card and in Details; a version,
+  // a date or a word is none
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1b', agentId: 'a2', text: 'Sign in to the console as `ops-admin`.', details: 'Reply on case 179575516500233 at https://console.aws.amazon.com, account 504727883079, as dima@faceiqlabs.com, with v0.2.307 of 2026-11-27.' } as never)
+  const pastes = async (pane: Drawn) => (await pane.findAll({ type: 'Button' })).filter(one => (one.key ?? '').startsWith('paste-ask-a2-'))
+  const values = ['⧉ ops-admin', '⧉ 179575516500233', '⧉ https://console.aws.amazon.com', '⧉ 504727883079', '⧉ dima@faceiqlabs.com']
+  expect(await until(async () => ((await pastes(list)).length ? (await pastes(list)).map(one => one.props.label) : undefined))).toEqual(values)
+  expect(await until(async () => ((await pastes(ears)).length ? (await pastes(ears)).map(one => one.props.label) : undefined))).toEqual(values)
+  await ears.press({ key: (await pastes(ears))[3]?.key ?? '' })
+  expect(clip.at(-1)).toBe('504727883079')
+  expect(await until(async () => ((await pastes(ears))[3]?.props.label === '✓ Copied' ? true : undefined))).toBe(true)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1c', agentId: 'a2', text: '' } as never)
 
   // An ask for a go-ahead carries the work's own buttons, each an answer. A choice that would only leave it open is left out,
   // and the work is told so; the one pressed goes back to the work and the block goes, one grey line saying what was pressed
