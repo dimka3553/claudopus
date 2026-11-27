@@ -197,6 +197,7 @@ const drainProgress = async ($: EngineInterface) => {
     await refreshPicture($).catch(err => indexLog($, `picture not written: ${String(err)}`))
     await tidyIndex($).catch(err => indexLog($, `topics not tidied: ${String(err)}`))
     await backfillProgress($).catch(err => indexLog($, `history not queued: ${String(err)}`))
+    await backfillChats($).catch(err => indexLog($, `old chats not queued: ${String(err)}`))
     while (!isLate) {
       const names = (await $.fs.list(queueDir()).catch(() => []))
         .filter(entry => entry.kind === 'file' && entry.name.endsWith('.json'))
@@ -247,8 +248,26 @@ const drainProgress = async ($: EngineInterface) => {
 // How far the sorting has got: the events still queued, and how many results the history read in, for the Progress tab
 const readSorting = async ($: EngineInterface) => {
   const left = (await $.fs.list(queueDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json')).length
-  const total = Number((await readOr($, `${progressDir()}/backfilled`)).split('\n')[1] ?? 0) || 0
+  const countIn = async (name: string) => Number((await readOr($, `${progressDir()}/${name}`)).split('\n')[1] ?? 0) || 0
+  const total = (await countIn('backfilled')) + (await countIn('chats-backfilled'))
   return { left, total }
+}
+
+// The chats from before Claudopus came in, read in once from their saved words, each as one piece of work in its area, oldest first
+const backfillChats = async ($: EngineInterface) => {
+  if (await $.fs.exists(`${progressDir()}/chats-backfilled`)) return
+  const before = await installedAt($)
+  const now = await $.clock.now()
+  const listed = (await $.fs.list(`${dir}/words`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md') && !entry.name.endsWith('.said.md'))
+  let n = 0
+  for (const entry of listed) {
+    const one = chatEventOf(entry.name.replace(/\.md$/, ''), await readOr($, `${dir}/words/${entry.name}`), before)
+    if (!one) continue
+    await $.fs.write(`${queueDir()}/${queueName(one.at)}`, `${JSON.stringify({ ...one, text: hideKeys(one.text) })}\n`)
+    n += 1
+  }
+  await $.fs.write(`${progressDir()}/chats-backfilled`, `${new Date(now).toISOString()}\n${n}\n`)
+  await indexLog($, `old chats queued: ${n}`)
 }
 
 // The history read in: every result of the past BACKFILL_DAYS, oldest first, when progress/ has no areas yet or progress/backfill

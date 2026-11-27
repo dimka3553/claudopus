@@ -42,9 +42,9 @@ export const dayOf = (ms: number, now: number) => {
 // ---- What the page reads ----
 export type ProgressGoal = { id: string; name: string; color: string }
 export type AreaFigures = { done: number; aside: number; next: number; month: number; days: number[]; live: boolean }
-// How many days back the chart can reach
-export const CHART_DAYS = 21
-export type ProgressData = { star: string; goals: ProgressGoal[]; areas: PageArea[]; entries: Map<string, PageEntry[]>; working: Set<string>; sorting?: { left: number; total: number } }
+// How many days back the chart can reach: half a year
+export const CHART_DAYS = 182
+export type ProgressData = { star: string; goals: ProgressGoal[]; areas: PageArea[]; entries: Map<string, PageEntry[]>; working: Set<string>; sorting?: { left: number; total: number }; since?: number }
 // While past results are still being sorted into areas, how far it has got; nothing once only a few new events wait
 export const sortingSaid = (sorting: { left: number; total: number } | undefined) => {
   if (!sorting || sorting.left < 3) return ''
@@ -97,9 +97,10 @@ export const wrapped = (text: string, most: number) => {
   }
   return lines
 }
-// The chart as one Svg, `width` wide: the north star on top, then for each goal a row of days, each day its tasks as squares stacked
-// from the row's line, from the first day with a task (at most CHART_DAYS back) to today, and the goal's steps done of all at the right
-export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[], width: number, now: number) => {
+// The chart as one Svg, `width` wide: the north star on top, then for each goal a row of days (or of weeks, past five weeks), each its
+// tasks as squares stacked from the row's line, from the first with a task (at most CHART_DAYS back) to today, and the goal's steps
+// done of all at the right. A square is one task, or more on a busy chart; `since`, when Claudopus came in, is a line across the rows
+export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[], width: number, now: number, since = 0) => {
   const used = [...goals, OTHER_GOAL].filter(goal => areas.some(area => area.goal === goal.id))
   const isWide = width >= 560
   const quoted = star.trim() ? `“${star.trim().replace(/^["“]+|["”]+$/g, '')}”` : ''
@@ -110,61 +111,85 @@ export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[],
   const splits = words.slice(1).map((_, i) => [words.slice(0, i + 1).join(' '), words.slice(i + 1).join(' ')])
   const even = splits.reduce((best, two) => (Math.max(...two.map(l => l.length)) < Math.max(...best.map(l => l.length)) ? two : best), [quoted, ''])
   const starLines = !quoted ? [] : quoted.length <= fits ? [quoted] : Math.max(...even.map(l => l.length)) <= fits ? even : wrapped(quoted, fits).slice(0, 2)
-  const rowsOf = used.map(goal => {
+  const perDay = used.map(goal => {
     const mine = areas.filter(area => area.goal === goal.id)
-    const days = Array.from({ length: CHART_DAYS }, (_, i) => mine.reduce((s, area) => s + (area.days[i] ?? 0), 0))
-    return { goal, days, done: mine.reduce((s, a) => s + a.done, 0), next: mine.reduce((s, a) => s + a.next, 0), live: mine.some(area => area.live) }
+    return Array.from({ length: CHART_DAYS }, (_, i) => mine.reduce((s, area) => s + (area.days[i] ?? 0), 0))
   })
-  const firstBusy = Math.min(...rowsOf.map(row => row.days.findIndex(n => n > 0)).filter(i => i >= 0), CHART_DAYS - 7)
+  const firstBusy = Math.min(...perDay.map(days => days.findIndex(n => n > 0)).filter(i => i >= 0), CHART_DAYS - 7)
   const from = Math.max(0, Math.min(firstBusy, CHART_DAYS - 7))
-  const shown = CHART_DAYS - from
+  const today = new Date(now)
+  const dayAt = (i: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - (CHART_DAYS - 1 - i))
+  // Days, or weeks from Monday once more than five weeks show: each cell its first day's index and its days
+  const isWeeks = CHART_DAYS - from > 35
+  const cells: { first: number; days: number[] }[] = []
+  for (let i = from; i < CHART_DAYS; i++) {
+    if (!isWeeks || !cells.length || dayAt(i).getDay() === 1) cells.push({ first: i, days: [i] })
+    else cells[cells.length - 1]?.days.push(i)
+  }
+  const rowsOf = used.map((goal, g) => {
+    const mine = areas.filter(area => area.goal === goal.id)
+    return { goal, counts: cells.map(cell => cell.days.reduce((s, i) => s + (perDay[g]?.[i] ?? 0), 0)), done: mine.reduce((s, a) => s + a.done, 0), next: mine.reduce((s, a) => s + a.next, 0), live: mine.some(area => area.live) }
+  })
   const left = isWide ? 160 : 8
   const right = isWide ? 56 : 44
-  const colW = (width - left - right) / shown
+  const colW = (width - left - right) / cells.length
   const sq = isWide ? 4 : 3
   const gap = isWide ? 1.2 : 0.9
   const step = sq + gap
-  const per = Math.max(1, Math.floor((colW - 3) / step))
-  // A very busy day is drawn up to this many rows of squares; the words for it still give the whole count
-  const most = per * 14
+  const per = Math.max(1, Math.floor((colW - 2) / step))
+  // A square stands for more tasks once the busiest cell would stand taller than this many rows of them
+  const tallest = Math.max(1, ...rowsOf.flatMap(row => row.counts))
+  const unit = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find(u => Math.ceil(tallest / u) <= per * 24) ?? 1000
+  const sinceCell = since > 0 ? cells.findIndex(cell => dayAt(cell.days.at(-1) ?? cell.first).getTime() + DAY_MS > since) : -1
+  const sinceX = sinceCell > 0 ? left + colW * sinceCell : 0
   const parts: string[] = []
-  const top = starLines.length ? starLines.length * starSize * 1.3 + 14 : 4
   starLines.forEach((line, i) => parts.push(`<text x="${n1(width / 2)}" y="${n1(starSize * 1.05 + i * starSize * 1.3)}" text-anchor="middle" ${P_FONT} font-size="${starSize}" font-style="italic" fill="currentColor">${xmlSafe(line)}</text>`))
+  const top = (starLines.length ? starLines.length * starSize * 1.3 + 14 : 4) + (sinceX ? 14 : 0)
   const nameSize = isWide ? 12.5 : 11
   const nameMost = Math.max(6, Math.floor((left - 14) / (nameSize * 0.55)))
   const said: string[] = []
   let y = top
   for (const row of rowsOf) {
-    const shownDays = row.days.slice(from)
-    const body = Math.max(isWide ? 22 : 10, Math.max(1, ...shownDays.map(n => Math.ceil(Math.min(n, most) / per))) * step)
-    const nameH = isWide ? 0 : 15
-    const base = y + nameH + body
+    const body = Math.max(isWide ? 22 : 10, Math.max(1, ...row.counts.map(n => Math.ceil(Math.ceil(n / unit) / per))) * step)
+    const base = y + (isWide ? 0 : 15) + body
     const mid = base - body / 2 + 4.5
     const name = xmlSafe(isWide ? cutTo(row.goal.name, nameMost) : row.goal.name)
     const look = row.live ? `fill="${LIVE}" font-weight="600"` : 'fill="currentColor"'
     parts.push(isWide ? `<text x="${left - 12}" y="${n1(mid)}" text-anchor="end" ${P_FONT} font-size="${nameSize}" ${look}>${name}</text>` : `<text x="${left}" y="${n1(y + 11)}" ${P_FONT} font-size="${nameSize}" ${look}>${name}</text>`)
     parts.push(`<path d="M${left} ${n1(base + 1)}H${n1(width - right)}" stroke="${P_RAIL}" stroke-opacity="0.7"/>`)
     const squares: string[] = []
-    shownDays.forEach((count, i) => {
+    row.counts.forEach((count, i) => {
       const x = left + colW * i + (colW - (per * step - gap)) / 2
-      for (let k = 0; k < Math.min(count, most); k++) squares.push(`M${n1(x + (k % per) * step)} ${n1(base - (Math.floor(k / per) + 1) * step + gap)}h${sq}v${sq}h-${sq}z`)
+      for (let k = 0; k < Math.ceil(count / unit); k++) squares.push(`M${n1(x + (k % per) * step)} ${n1(base - (Math.floor(k / per) + 1) * step + gap)}h${sq}v${sq}h-${sq}z`)
     })
     if (squares.length) parts.push(`<path d="${squares.join('')}" fill="${row.goal.color}"/>`)
     const all = row.done + row.next
     parts.push(all ? `<text x="${n1(width - right + 10)}" y="${n1(mid)}" ${P_FONT} font-size="${nameSize}" font-weight="600" fill="${P_GREEN}">${row.done}<tspan fill="${P_DIM}" font-weight="400">/${all}</tspan></text>` : `<text x="${n1(width - right + 10)}" y="${n1(mid)}" ${P_FONT} font-size="${nameSize}" fill="${P_DIM}">–</text>`)
-    const tasks = shownDays.reduce((s, n) => s + n, 0)
+    const tasks = row.counts.reduce((s, n) => s + n, 0)
     said.push(`${row.goal.name}: ${tasks === 1 ? '1 task' : `${tasks} tasks`}, ${row.done} of ${all} steps done${row.live ? ', working now' : ''}.`)
     y = base + (isWide ? 14 : 12)
   }
-  // The days under the rows: the first, each Monday clear of it and of today, and today
-  const H = Math.ceil(y + 16)
-  const dayX = (i: number) => left + colW * i + colW / 2
-  const today = new Date(now)
-  const dayAt = (i: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - (shown - 1 - i))
-  const labels = [0, ...Array.from({ length: shown }, (_, i) => i).filter(i => dayAt(i).getDay() === 1 && i * colW > 46 && (shown - 1 - i) * colW > 46)]
-  for (const i of labels) parts.push(`<text x="${n1(dayX(i))}" y="${H - 5}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="${P_DIM}">${dayOf(dayAt(i).getTime(), now)}</text>`)
-  parts.push(`<text x="${n1(Math.min(dayX(shown - 1), width - right))}" y="${H - 5}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="currentColor">today</text>`)
-  const alt = cutTo([quoted, `Tasks a day, the last ${shown} days.`, ...said, ...areas.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
+  // Where Claudopus came in: a line across the rows, named above them
+  if (sinceX) {
+    parts.push(`<path d="M${n1(sinceX)} ${n1(top - 4)}V${n1(y - 8)}" stroke="currentColor" stroke-opacity="0.45" stroke-dasharray="3 3"/>`)
+    parts.push(`<text x="${n1(Math.min(width - right - 30, Math.max(left + 30, sinceX)))}" y="${n1(top - 7)}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="${P_DIM}">Claudopus</text>`)
+  }
+  // Under the rows: the first day, then each Monday (or each month's first week) clear of the others, and today or this week
+  const keyH = unit > 1 ? 14 : 0
+  const H = Math.ceil(y + 16 + keyH)
+  const cellX = (i: number) => left + colW * i + colW / 2
+  const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const labels: { i: number; text: string }[] = [{ i: 0, text: dayOf(dayAt(cells[0]?.first ?? from).getTime(), now) }]
+  cells.forEach((cell, i) => {
+    const d = dayAt(cell.first)
+    const isMark = isWeeks ? d.getMonth() !== dayAt(cells[i - 1]?.first ?? cell.first).getMonth() : d.getDay() === 1
+    if (i && isMark && (cellX(i) - cellX(labels.at(-1)?.i ?? 0)) > 46 && (cells.length - 1 - i) * colW > 46) labels.push({ i, text: isWeeks ? (MONTH_NAMES[d.getMonth()] ?? '') : dayOf(d.getTime(), now) })
+  })
+  for (const one of labels) parts.push(`<text x="${n1(cellX(one.i))}" y="${H - 5 - keyH}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="${P_DIM}">${one.text}</text>`)
+  parts.push(`<text x="${n1(Math.min(cellX(cells.length - 1), width - right))}" y="${H - 5 - keyH}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="currentColor">${isWeeks ? 'this week' : 'today'}</text>`)
+  if (unit > 1) parts.push(`<rect x="${left}" y="${H - 11}" width="${sq + 1}" height="${sq + 1}" fill="${P_DIM}"/><text x="${left + sq + 6}" y="${H - 5}" ${P_FONT} font-size="10.5" fill="${P_DIM}">${unit} tasks</text>`)
+  const span = isWeeks ? `Tasks a week, the last ${cells.length} weeks.` : `Tasks a day, the last ${cells.length} days.`
+  const alt = cutTo([quoted, span, unit > 1 ? `Each square is ${unit} tasks.` : '', sinceX ? `Claudopus came in on ${dayOf(since, now)}.` : '', ...said, ...areas.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
   return { source: svgDoc(width, H, parts.join('')), width, height: H, alt }
 }
 
@@ -268,7 +293,7 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
       </Box>
     )
   const chartAreas: ChartArea[] = data.areas.map(area => ({ id: area.id, name: area.name, color: goalOf(data, area).color, goal: goalOf(data, area).id, ...(figures.get(area.id) as AreaFigures) }))
-  const chart = chartOf(data.star, data.goals, chartAreas, Math.floor(look.width), look.now)
+  const chart = chartOf(data.star, data.goals, chartAreas, Math.floor(look.width), look.now, data.since ?? 0)
   const groups = grouped(data)
   const tw = isWide ? 64 : 52
   const th = isWide ? 48 : 39

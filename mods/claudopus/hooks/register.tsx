@@ -28,7 +28,7 @@ import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
-import { answerJson, applyProgress, areasFrom, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressNext, ProgressPicture } from './progress'
@@ -1612,6 +1612,7 @@ try {
 await refreshPicture($).catch(err => indexLog($, `picture not written: ${String(err)}`))
 await tidyIndex($).catch(err => indexLog($, `topics not tidied: ${String(err)}`))
 await backfillProgress($).catch(err => indexLog($, `history not queued: ${String(err)}`))
+await backfillChats($).catch(err => indexLog($, `old chats not queued: ${String(err)}`))
 while (!isLate) {
 const names = (await $.fs.list(queueDir()).catch(() => []))
 .filter(entry => entry.kind === 'file' && entry.name.endsWith('.json'))
@@ -1660,8 +1661,25 @@ if (isLate) drainSoon($, PROGRESS_RETRY)
 
 const readSorting = async ($: EngineInterface) => {
 const left = (await $.fs.list(queueDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json')).length
-const total = Number((await readOr($, `${progressDir()}/backfilled`)).split('\n')[1] ?? 0) || 0
+const countIn = async (name: string) => Number((await readOr($, `${progressDir()}/${name}`)).split('\n')[1] ?? 0) || 0
+const total = (await countIn('backfilled')) + (await countIn('chats-backfilled'))
 return { left, total }
+}
+
+const backfillChats = async ($: EngineInterface) => {
+if (await $.fs.exists(`${progressDir()}/chats-backfilled`)) return
+const before = await installedAt($)
+const now = await $.clock.now()
+const listed = (await $.fs.list(`${dir}/words`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md') && !entry.name.endsWith('.said.md'))
+let n = 0
+for (const entry of listed) {
+const one = chatEventOf(entry.name.replace(/\.md$/, ''), await readOr($, `${dir}/words/${entry.name}`), before)
+if (!one) continue
+await $.fs.write(`${queueDir()}/${queueName(one.at)}`, `${JSON.stringify({ ...one, text: hideKeys(one.text) })}\n`)
+n += 1
+}
+await $.fs.write(`${progressDir()}/chats-backfilled`, `${new Date(now).toISOString()}\n${n}\n`)
+await indexLog($, `old chats queued: ${n}`)
 }
 
 const backfillProgress = async ($: EngineInterface) => {
@@ -14794,7 +14812,7 @@ return r && thumb ? [{ key: full, report: r, thumb }] : []
 })
 
 const progressRead = async ($: EngineInterface): Promise<ProgressRead> => {
-const [picture, areas, kept, cards, sorting] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos), readSorting($)])
+const [picture, areas, kept, cards, sorting, since] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos), readSorting($), installedAt($)])
 const entries = new Map(await Promise.all(areas.map(async area => [area.id, await readEntries($, area.id)] as const)))
 return {
 star: picture.star.text,
@@ -14804,6 +14822,7 @@ entries,
 working: new Set(cards.filter(card => !card.parentId && !card.chat && card.status === 'working').map(card => card.id)),
 reports: new Map(kept.map(r => [r.id, r])),
 sorting,
+since,
 }
 }
 const thumbsAsked = new Set<string>()

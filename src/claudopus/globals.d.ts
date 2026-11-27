@@ -356,6 +356,7 @@ declare global {
   export import answerJson = M15.answerJson
   export import applyProgress = M15.applyProgress
   export import areasFrom = M15.areasFrom
+  export import chatEventOf = M15.chatEventOf
   export import asideLines = M15.asideLines
   export import entriesFrom = M15.entriesFrom
   export import ENTRIES_MOST = M15.ENTRIES_MOST

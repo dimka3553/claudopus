@@ -54,3 +54,23 @@ test('the chart is a square for each task, a row for each goal from the first bu
   expect(chart.alt).toContain('3 of 9 steps done.')
   expect(chart.alt).toContain('Area 3: 3 done, 1 next, working now.')
 })
+
+test('past five weeks the chart counts tasks a week, a square stands for more tasks once a week would stand too tall, and a line shows where Claudopus came in', () => {
+  const weeks = (n: number): ChartArea[] =>
+    Array.from({ length: n }, (_, i) => ({ ...areasOf(n)[i], days: Array.from({ length: CHART_DAYS }, (_, d) => (d < CHART_DAYS - 100 ? 0 : i === 0 ? 60 : 1)) }) as ChartArea)
+  const since = now - 20 * 86_400_000
+  for (const width of [728, 398]) {
+    const chart = chartOf('Software people trust to grow their small shop', goals, weeks(3), width, now, since)
+    expect(chart.source.length).toBeLessThanOrEqual(131_072)
+    expect(chart.alt).toMatch(/Tasks a week, the last 1[45] weeks\./)
+    expect(chart.alt).toMatch(/Each square is \d+ tasks\./)
+    expect(chart.alt).toContain('Claudopus came in on 7 Nov.')
+    expect(chart.source).toContain('>Claudopus</text>')
+    expect(chart.source).toContain('>this week</text>')
+    expect(chart.source).toMatch(/> ?\d+ tasks<\/text>/)
+  }
+  // A short chart has no line when Claudopus came in before its first day, and a square is one task
+  const short = chartOf('Software people trust to grow their small shop', goals, areasOf(3), 728, now, now - 60 * 86_400_000)
+  expect(short.source).not.toContain('>Claudopus</text>')
+  expect(short.alt).not.toContain('Each square is')
+})
