@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.311 · 28 November 2026
+- A pointer resting on the disk's speed in the line above the prompt shows how much disk space is used, how much is left and the disk's size
+
 ## 0.2.310 · 28 November 2026
 - With several tasks and helpers at work, Claudopus uses less of the processor: the panel and the bar above the prompt no longer copy the whole list of tasks each time they are drawn, which happened about thirty times a second.
 
