@@ -368,6 +368,9 @@ const workHooks = (on: On) => {
       const fileSaid = await gateOwnFile($, e, raw as never)
       if (fileSaid) return (await dropGrants($, grants), { deny: fileSaid })
     }
+    // A file sent from outside the chat's folder would not open on the person's click: it is copied in, to send instead
+    const unopened = e.tool === 'SendUserFile' && dir && !isOff ? await sentOpenable($, e as never).catch(err => (void log($, `sent files not copied to open: ${String(err)}`), '')) : ''
+    if (unopened) return (await dropGrants($, grants), { deny: unopened })
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
     // A heavy command of a piece of work waits its turn while the Mac is busy: refused at once with why and what it waits for

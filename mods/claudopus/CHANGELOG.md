@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.299 · 27 November 2026
+- A file Claude sends you or a report names now opens when you click it, even when a task saved it outside the chat's folder. Claudopus puts a copy in the chat's folder, where the app can open it, instead of showing "This file is outside this session's folders".
+
 ## 0.2.298 · 27 November 2026
 - The moving rings on a card's helpers and commands keep turning smoothly as rows come and go around them, instead of turning a little and jumping back to their start.
 - A command's ring keeps turning for as long as the command runs, even when it has printed nothing for minutes; its row still says when it has gone quiet.
