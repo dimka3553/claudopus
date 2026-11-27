@@ -182,10 +182,11 @@ expect 'a "never" sealed with the real key and a password kept: nothing runs, th
 n=$((n + 1))
 if "$here/keyring" has claudopus-admin "$H"; then echo "NOT OK $n - the kept admin password was left"; failed=1; else echo "ok $n - the kept admin password was forgotten, never used"; fi
 config '{}'
-# What the panel types is sealed by the hook's own openssl line (read out of src/claudopus/boxes.tsx) to a key made as the runner
-# makes it, and opened as the runner opens it: this machine's openssl takes every option both use
-if [ -n "$windows" ]; then line=SEAL_FOR_WINDOWS; else line=SEAL_FOR; fi
-seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(new RegExp(`const ${process.argv[2]} =\\s+(\x27[^\\n]*\x27)\\n`).exec(t)[1]))' "$src/claudopus/boxes.tsx" "$line")
+# What the panel types is sealed by the hook's own openssl line (read out of src/claudopus/boxes.tsx, or on Windows the mod's
+# hooks/windows.ts) to a key made as the runner makes it, and opened as the runner opens it: this machine's openssl takes every
+# option both use
+if [ -n "$windows" ]; then line=SEAL_FOR_WINDOWS from="$here/../hooks/windows.ts"; else line=SEAL_FOR from="$src/claudopus/boxes.tsx"; fi
+seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(new RegExp(`const ${process.argv[2]} =\\s+(\x27[^\\n]*\x27)\\n`).exec(t)[1]))' "$from" "$line")
 private=$(openssl genrsa 2048 2>/dev/null)
 public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)
 sealed_value=$(printf '%s' 'pw "with" \quotes' | /bin/bash -c "$seal_for" sh "$public")
@@ -356,7 +357,9 @@ chmod +x "$r/gh/gh"
 # (main of this test's own repo is pushed past the guard the release put in, as the test runs with CLAUDECODE set)
 (cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK="test -s %s && test ! -e %s && { test ! -e %s || touch stray; } && { test ! -e %s || git commit -q --allow-empty -m moved; } && { test ! -e %s || sleep 47.25; }"\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' "$r/asked" "$r/local-red" "$r/local-stray" "$r/local-move" "$r/local-slow" >.release && git commit -q -am "checks on GitHub" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four) || { echo "NOT OK - the repo for GitHub's checks was not set up"; failed=1; }
 checks() { printf "$@" >"$r/checks"; rm -f "$r/checks.later" "$r/asks" "$r/asked" "$r/runs.extra"; }
-gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=${WAIT:-4} "$here/release"); }
+gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=${WAIT:-$gh_wait} "$here/release"); }
+# (on Windows every git and gh the release runs starts slowly, and its first look at the checks took more than 4 seconds)
+if [ -n "$windows" ]; then gh_wait=15; else gh_wait=4; fi
 main_was=$(git -C "$r/origin.git" rev-parse main)
 unmoved() { n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$main_was" ] && echo "ok $n - $1: main was not moved" || { echo "NOT OK $n - $1: main moved"; failed=1; }; }
 no_candidate() { n=$((n + 1)); [ -z "$(git -C "$r/origin.git" for-each-ref refs/release-check refs/heads/release-check)" ] && echo "ok $n - $1: the commit put up for GitHub to check is taken down" || { echo "NOT OK $n - $1: the commit put up for GitHub to check was left"; failed=1; }; }
