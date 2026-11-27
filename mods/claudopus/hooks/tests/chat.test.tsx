@@ -1223,9 +1223,10 @@ test("the work's rules name where the admin runner is, the one way work uses a M
   await $.prompt.submit({ text: 'clear the disk', wait: false, origin: composer })
 
   await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
-  expect(prompts[0]).toMatch(/an admin command runs through `\/\S*mods\/claudopus\/bin\/admin`/)
+  // (the plugin's folder, from a drive where the kit runs on Windows)
+  expect(prompts[0]).toMatch(/an admin command runs through `(?:[A-Za-z]:)?\/\S*mods\/claudopus\/bin\/admin`/)
   expect(prompts[0]).not.toContain('{admin}')
-  expect(prompts[0]).toMatch(/a file goes into a page through `\/\S*mods\/claudopus\/bin\/pane-file`/)
+  expect(prompts[0]).toMatch(/a file goes into a page through `(?:[A-Za-z]:)?\/\S*mods\/claudopus\/bin\/pane-file`/)
   expect(prompts[0]).not.toContain('{pane-file}')
 })
 
@@ -1357,7 +1358,7 @@ test("work reaches main only through the release runner: its rules name it, and 
   await $.session.start(start)
   await $.prompt.submit({ text: 'ship it', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
-  expect(prompts[0]).toMatch(/main is reached through `\/\S*mods\/claudopus\/bin\/release`/)
+  expect(prompts[0]).toMatch(/main is reached through `(?:[A-Za-z]:)?\/\S*mods\/claudopus\/bin\/release`/)
   expect(prompts[0]).not.toContain('{release}')
 
   const refused = [
