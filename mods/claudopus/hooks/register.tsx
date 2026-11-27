@@ -2862,7 +2862,15 @@ if (JSON.stringify(found) !== JSON.stringify(await read($, reports))) await upda
 return found
 }
 
-const namedPaths = (text: string) => [...new Set((text.match(/\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(path => path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
+const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g
+const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g
+const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm
+const namedPaths = (text: string) => {
+const found = [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN].flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), path: one[1] ?? one[0] })))
+found.sort((a, b) => a.at - b.at || b.path.length - a.path.length)
+return [...new Set(found.map(one => one.path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+}
 const gistOf = (text: string, title = '') => {
 const lead = /^(here is|here are|here's|as it came)\b|\b(is|are) back\b[^.]{0,30}\.?$/i
 const paragraphs = text.split(/\n\s*\n/).map(part =>
@@ -5351,7 +5359,7 @@ const LINK = /https?:\/\/[^\s`'"()<>[\]{}|,;*\\]+/g
 const LINKS_MOST = 30
 const linksOf = (text: string) => (text.match(LINK) ?? []).map(link => link.replace(/[.:!?]+$/, ''))
 const isPlainPage = (link: string) => !/\?|\/api\//.test(link.replace(/^https?:\/\/[^/]+/, ''))
-const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK.test(link) || (MADE_LINK_LINE.test(line) && isPlainPage(link)))))].slice(0, LINKS_MOST)
+const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK.test(link) || (MADE_LINK_LINE.test(line.replace(LINK, ' ')) && isPlainPage(link)))))].slice(0, LINKS_MOST)
 const ARTIFACT = /^https?:\/\/claude\.ai\/(public\/)?artifacts?\//i
 const isLink = (said: string) => /^https?:\/\//.test(said)
 const linkName = (link: string) => {
@@ -5409,7 +5417,7 @@ if (seen.has(path)) continue
 seen.add(path)
 const isNamed = named.includes(given)
 const stat = await $.fs.stat(path).catch(() => undefined)
-if (!stat || stat.kind !== 'file' || (isDated && stat.mtimeMs < since - 5000)) continue
+if (!stat || stat.kind !== 'file' || (isDated && !isNamed && stat.mtimeMs < since - 5000)) continue
 const kind = madeKind(path).kind
 const top = kind === 'file' || (TEXT_DOC.test(path) && !isNamed) ? await repoTop($, path.slice(0, path.lastIndexOf('/'))) : ''
 if (top && path.startsWith(`${top}/`)) {

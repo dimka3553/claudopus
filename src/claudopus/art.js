@@ -15,6 +15,8 @@ const LIVE_DOTS = dots(LIVE, LINE);
 const DONE = 'success';
 // A result handed in and not yet marked done by the person
 const DELIVERED = '#4C9AFF';
+// Cut off by the app's close: orange, apart from the amber of what waits and the red of what failed
+const CUT = '#F0703C';
 // The octopus: resting, working at its computers (drawn from 32 px up), and lifting its arms (for 16 to 24 px). Each is an SVG
 // file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
 // octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still

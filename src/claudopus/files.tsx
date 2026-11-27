@@ -91,7 +91,8 @@ const LINKS_MOST = 30
 const linksOf = (text: string) => (text.match(LINK) ?? []).map(link => link.replace(/[.:!?]+$/, ''))
 // (an address with a query or under /api/ is one to try, such as a flaw shown live, never a page put up)
 const isPlainPage = (link: string) => !/\?|\/api\//.test(link.replace(/^https?:\/\/[^/]+/, ''))
-const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK.test(link) || (MADE_LINK_LINE.test(line) && isPlainPage(link)))))].slice(0, LINKS_MOST)
+// (the line's words without its links say it: a cited page whose address has "releases" in it is still only cited)
+const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK.test(link) || (MADE_LINK_LINE.test(line.replace(LINK, ' ')) && isPlainPage(link)))))].slice(0, LINKS_MOST)
 // A Claude artifact, published from Claude Code: shown by its title, and opened in the app's own artifact pane
 const ARTIFACT = /^https?:\/\/claude\.ai\/(public\/)?artifacts?\//i
 const isLink = (said: string) => /^https?:\/\//.test(said)
@@ -146,8 +147,8 @@ const keepPutUp = async ($: EngineInterface, id: string, put: { links: string[];
   const titled = (one: Todo) => (Object.keys(put.titles).length ? { ...one, titles: { ...(one.titles ?? {}), ...put.titles } } : one)
   await changeTodos($, list => list.map(one => (one.id === id || one.id === topOf(list, id) ? titled(withSaid(one, put.links)) : one)))
 }
-// What a task made: the files its steps wrote or its commands named, and the files and links its results name (`said`, from every
-// one it gave, and `answer`), that are there and were made since it began. A picture, video, PDF, spreadsheet or document is a
+// What a task made: the files its steps wrote or its commands named that were made since it began, and the files and links its
+// results name (`said`, from every one it gave, and `answer`) that are there. A picture, video, PDF, spreadsheet or document is a
 // thing of its own, as is any file a result names; the other files it wrote inside a repo are its code, counted and never listed
 const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true, said: string[] = [], titles: Record<string, string> = {}): Promise<FilesMade> => {
   const named = [...new Set([...said.filter(one => !isLink(one)), ...namedPaths(answer)])]
@@ -164,7 +165,9 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
     seen.add(path)
     const isNamed = named.includes(given)
     const stat = await $.fs.stat(path).catch(() => undefined)
-    if (!stat || stat.kind !== 'file' || (isDated && stat.mtimeMs < since - 5000)) continue
+    // A file a result names is shown however old, as the result points the person to it (27 Nov: a board made by the task's first
+    // step and named again in its last was missing); one only a step wrote or a command named must be new since the task began
+    if (!stat || stat.kind !== 'file' || (isDated && !isNamed && stat.mtimeMs < since - 5000)) continue
     const kind = madeKind(path).kind
     // A file with no kind of its own (code) is counted in its repo, even one the result names; outside a repo, a named one is a thing
     const top = kind === 'file' || (TEXT_DOC.test(path) && !isNamed) ? await repoTop($, path.slice(0, path.lastIndexOf('/'))) : ''

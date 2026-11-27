@@ -1,37 +1,133 @@
 "use strict";
 // The mod's own tools: update, recall, todo, ask and note
+// What recall gives: at most this many lines, and this many from any one file
+const RECALL_LINES = 40;
+const RECALL_PER_FILE = 6;
+const recallRank = (file) => file.startsWith('progress/') ? (file.endsWith('.json') ? -2 : 3)
+    : file.startsWith('streams/') ? (/\.log(?:\.\d+)?\.md$/.test(file) ? 1 : 0)
+        : file.startsWith('reports/') ? 2
+            : file.startsWith('words/') || file.startsWith('asks/') ? 3
+                : file.startsWith('work/') ? 5
+                    : file.startsWith('notes/') ? 6
+                        : 4;
+// The files recall searches for one area or topic, as paths inside the memory folder (a folder's ends with /); none when nothing
+// is named so
+const recallWithin = async ($, named) => {
+    const key = slug(await topicNamed($, named));
+    const topic = (await readIndex($)).find(one => slug(one.name) === key);
+    const areas = (await readAreas($)).filter(one => one.id === key || slug(one.name) === key || one.topics?.some(name => slug(name) === key));
+    const topics = [...new Set([...(topic ? [topic.name] : []), ...areas.flatMap(one => one.topics ?? [])].map(slug))];
+    const reports = new Set();
+    for (const area of areas)
+        for (const entry of await readEntries($, area.id))
+            if (entry.report)
+                reports.add(entry.report);
+    return [...topics.flatMap(one => [`streams/${one}.md:`, `streams/${one}.log.`]), ...areas.flatMap(one => [`progress/areas/${one.id}.said.md:`, `progress/areas/${one.id}.json:`]), ...[...reports].map(id => `reports/${id}/`)];
+};
+// The entries of Progress that match, as lines of their area's file: first of all that recall gives
+const progressLines = async ($, within, holds) => {
+    const lines = [];
+    for (const area of await readAreas($)) {
+        const file = `${dir}/progress/areas/${area.id}.json`;
+        if (within && !within.includes(`progress/areas/${area.id}.json:`))
+            continue;
+        for (const [n, e] of (await readEntries($, area.id)).entries()) {
+            const line = `${file}:${n + 1}:${area.name} · ${e.at.slice(0, 10)} ${e.title}${e.outcome ? `: ${e.outcome}` : ''}${e.kind === 'aside' ? ` (set aside: ${e.reason})` : ''}${e.report ? ` · reports/${e.report}/report.md` : ''}`;
+            if (holds(line))
+                lines.push(line);
+        }
+    }
+    return lines;
+};
 const toolHooks = (on) => {
     on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
         const input = e;
         if (!input.name?.trim())
             return { result: 'A topic needs a name.' };
-        const saved = await saveStream($, input.name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary });
+        // (a topic the tidy renamed is found by its old name)
+        const name = await topicNamed($, input.name.trim());
+        // A test's or a scratch folder's topic is kept out of the index every chat is given
+        const known = (await readIndex($)).find(one => slug(one.name) === slug(name));
+        if (isScratchTopic(input.repo?.trim() || known?.repo || ''))
+            return { result: named(`Not recorded: ${input.repo?.trim() || known?.repo} is a test or scratch folder, and topics are for {name}'s own work.`) };
+        const brief = input.brief?.trim() ?? '';
+        const added = input.add?.trim() ?? '';
+        const isLong = withoutLatest(brief).length > PAGE_CHARS;
+        const saved = await saveStream($, name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary });
         // The subject a piece of work recorded names the subject of its report
         if (e.agentId !== undefined)
             await change($, e.agentId, one => ({ ...one, subject: saved.name }));
-        const path = `${dir}/streams/${slug(saved.name)}.md`;
-        if (input.brief?.trim())
-            await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`);
-        return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nNotes: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` };
+        const page = pageOf(saved.name);
+        if (added) {
+            const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId);
+            await addHistory($, saved.name, historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added));
+        }
+        if (brief && !isLong)
+            await writePage($, saved.name, hideKeys(brief));
+        // A page grown past its limit by hand is made short in the background, the whole of it kept in the history
+        void shortenPage($, saved.name).catch(err => log($, `page of ${saved.name} not made short: ${String(err)}`));
+        const said = [
+            added ? `History: ${historyOf(saved.name)} (added to)` : '',
+            `Page: ${page}${brief && !isLong ? ' (rewritten)' : ''}`,
+            isLong ? `The page was not rewritten: \`brief\` was ${brief.length} characters, over the ${PAGE_CHARS} a page holds. Keep the page to what a fresh task needs first (where things are, where each line of work stands, what is decided, what is open) and put the detail in \`add\`.` : '',
+        ].filter(Boolean);
+        return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\n${said.join('\n')}` };
     });
     on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
-        const query = e.query?.trim() ?? '';
+        const input = e;
+        const query = input.query?.trim() ?? '';
         if (!query)
             return { result: 'Nothing to search for.' };
-        const r = await $.process.run(['grep', '-rniF', '--include=*.md', '-e', query, dir]);
+        // Within one area or topic: its topic's page and histories, its entries' results and what the person said of it
+        const within = input.area?.trim() ? await recallWithin($, input.area.trim()) : undefined;
+        if (within && !within.length)
+            return { result: `No area or topic is named "${input.area}". The areas: ${(await readAreas($)).map(one => one.name).join(', ') || 'none yet'}.` };
+        const isWithin = (line) => !within || within.some(one => line.startsWith(`${dir}/${one}`));
+        const grep = async (phrase) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line));
+        // The phrase as given; when nothing holds it whole, the lines that hold each of its words in any order, by their stems
+        const words = recallStems(query);
+        const said = (line) => line.slice(line.indexOf(':', dir.length + 1));
+        let found = [...(await progressLines($, within, line => said(line).toLowerCase().includes(query.toLowerCase()))), ...(await grep(query))];
+        const isLoose = !found.length && (words.length > 1 || words[0] !== query.toLowerCase());
+        if (isLoose) {
+            const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? query;
+            found = [...(await progressLines($, within, line => holdsStems(said(line), words))), ...(await grep(longest)).filter(line => holdsStems(said(line), words))];
+        }
+        // A topic page's Latest block, the state as Claudopus keeps it, comes before the rest of the page
+        const latest = new Map();
+        for (const file of new Set(found.map(line => line.slice(dir.length + 1, line.indexOf(':', dir.length + 1))).filter(file => /^streams\/[^/]+\.md$/.test(file) && !file.includes('.log.')))) {
+            const page = await readOr($, `${dir}/${file}`);
+            const block = latestIn(page);
+            if (block)
+                latest.set(file, page.slice(0, page.indexOf(block) + block.length).split('\n').length);
+        }
+        const rank = (file, line) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file));
         // A result the person put away is still found, marked, so it is answered from only when they name it
         const archived = new Set((await loadReports($).catch(() => [])).filter(one => one.archived).map(one => one.id));
-        const lines = r.stdout
-            .split('\n')
-            .filter(Boolean)
+        const seen = new Set();
+        const perFile = new Map();
+        const lines = found
             .map(line => line.replace(`${dir}/`, ''))
-            .map(line => (archived.has(line.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
-            // What a chat's helpers and tools brought comes after the chats' own words, notes and results, so it never crowds them out
-            .sort((a, b) => Number(a.startsWith('work/')) - Number(b.startsWith('work/')));
+            .map(line => ({ line, file: line.slice(0, line.indexOf(':')) }))
+            // Topic pages first, then their histories, the results newest first, the chats' words, the rest; what a chat's helpers and
+            // tools brought and the notes come last, so they never crowd out the rest
+            .sort((a, b) => rank(a.file, a.line) - rank(b.file, b.line) || (a.file.startsWith('reports/') && b.file.startsWith('reports/') ? b.file.localeCompare(a.file) : 0))
+            // The same line in several files (a result handed in again, a message quoted back) is given once, from where it ranks first;
+            // and no file gives more than RECALL_PER_FILE lines, so one long file never fills the answer
+            .filter(({ line, file }) => {
+            const said = flat(line.slice(line.indexOf(':', file.length + 1) + 1));
+            if (seen.has(said))
+                return false;
+            seen.add(said);
+            perFile.set(file, (perFile.get(file) ?? 0) + 1);
+            return (perFile.get(file) ?? 0) <= RECALL_PER_FILE;
+        })
+            .map(({ line, file }) => (archived.has(file.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240));
         if (!lines.length)
-            return { result: `Nothing in ${dir} mentions "${query}".` };
-        const more = lines.length > 40 ? `\n(${lines.length - 40} more lines; narrow the phrase)` : '';
-        return { result: `Files are under ${dir}.\n${lines.slice(0, 40).join('\n')}${more}` };
+            return { result: `Nothing in ${dir}${within ? ` about ${input.area}` : ''} mentions "${query}"${words.length > 1 ? ', nor holds all its words on one line' : ''}.` };
+        const more = lines.length > RECALL_LINES ? `\n(${lines.length - RECALL_LINES} more lines; narrow the phrase)` : '';
+        const loose = isLoose ? `No line holds "${query}" as written; these hold each of its words.\n` : '';
+        return { result: `${loose}Files are under ${dir}.\n${lines.slice(0, RECALL_LINES).join('\n')}${more}` };
     });
     // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped. A helper's list is its own,
     // on its own row: never added to the list of the task that started it, whose count is of its own to-dos
@@ -68,6 +164,30 @@ const toolHooks = (on) => {
         const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n');
         const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole;
         // An ask that points at an explanation it does not carry is not shown: the person would see it before that explanation reaches them
+        // A question for a key is its key's box, with the question and where to get it, on the card at once: nothing to run or press first
+        // (21 Nov: the Sentry key was asked for three times, and the person never saw a place to paste it)
+        const keyName = typeof input.key === 'string' ? input.key.trim() : '';
+        if (keyName && asked) {
+            if (!isKeyName(keyName))
+                return { result: 'Not shown: `key` is the name the key is saved under: letters, digits and _, starting with a letter, such as SENTRY_READ_TOKEN.' };
+            const from = (typeof input.from === 'string' ? input.from : '').replace(/\r\n?/g, '\n').trim();
+            if (!from)
+                return { result: named('Not shown: say in `from` where {name} gets the key: the full link of the page and what to press there, so the box can tell them.') };
+            const saved = (await refreshKeys($).catch(() => keys)).entries.filter(one => one.store === 'claudopus' && one.isPresent);
+            const same = saved.find(one => one.name === keyName);
+            const like = same ? undefined : saved.find(one => sameKey(one.name, keyName));
+            const about = cut(keyAskDetails([text === asked ? '' : asked, given1].filter(Boolean).join('\n\n'), from, keyName, same, like), ASK_DETAILS);
+            const keyAt = await $.clock.now();
+            // (beside the task's other questions for keys: the same key asked again takes the place of its earlier question)
+            await change($, e.agentId, one => withKeyAsks(one, [...keyAsksOf(one).filter(other => other.name !== keyName), { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt }]));
+            const cards = await read($, todos);
+            const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''));
+            await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`));
+            if (card)
+                await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`));
+            await log($, `key ${keyName} asked for with its box on ${card?.id ?? e.agentId}`);
+            return { result: named(KEY_ASK_SHOWN($.plugin.root, keyName, Boolean(same), like?.name)) };
+        }
         if (!given1 && POINTS_AWAY.test(asked))
             return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` };
         const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000);
@@ -95,19 +215,34 @@ const toolHooks = (on) => {
         const at = await $.clock.now();
         const before = await read($, todos);
         const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask;
+        // A question with buttons is one picture, made once, when the person wants it and the task gave none: the question said again
+        // keeps the picture it had. One that can't be made leaves the question as text
+        const isSameAsk = Boolean(was && was.text === text && JSON.stringify(was.choices ?? []) === JSON.stringify(choices));
+        const wantsPicture = Boolean(text && choices.length) && (await wantsQuestionPictures($).catch(() => false));
+        let drawn = '';
+        if (wantsPicture && !pictures.length) {
+            if (isSameAsk && was?.pictures?.length)
+                pictures.push(...was.pictures);
+            else {
+                const top = before.find(one => one.id === topOf(before, e.agentId ?? ''));
+                drawn = await questionPicture($, top?.id ?? e.agentId, top ? titleOf(top) : 'Background task', asked, given1, choices, at);
+                if (drawn)
+                    pictures.push(drawn);
+            }
+        }
         // A go-ahead for a release: the worktree a press on its first choice allows one release run for (gate.tsx, allowRelease).
         // Only a task's own question with buttons, for a folder that is there
         // An answer to the person's words on a permission of its card, given with no buttons: shown inside that permission, under their
         // words, never as a question of its own, so Allow and Don't allow stay where they were (gate.tsx, wordsOnGate)
         const own = before.find(one => one.id === topOf(before, e.agentId ?? ''));
         const parked = own && !own.chat ? own.admins?.find(gate => gateParked.has(gate.id) && gate.talk?.at(-1)?.by === 'you') : undefined;
-        const refused = own?.ask?.refused && own.ask.replied ? own.ask : undefined;
+        const refused = own ? asksOf(own).findLast(ask => ask.refused && ask.replied) : undefined;
         if (own && text && !choices.length && (parked || refused)) {
             const answer = { by: 'task', text: cut([asked, given1].filter(Boolean).join('\n\n'), ASK_DETAILS) };
             if (parked)
                 await setGates($, own.id, list => list.map(gate => (gate.id === parked.id ? { ...gate, talk: [...(gate.talk ?? []), answer].slice(-PERMIT_TALK_KEPT) } : gate)));
-            else
-                await changeTodos($, list => list.map(one => (one.id === own.id && one.ask && one.ask.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)));
+            else if (refused)
+                await changeTodos($, list => list.map(one => (one.id === own.id ? mapAsk(one, refused, ask => ({ ...ask, talk: [...(ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined })) : one)));
             // The block is back with its buttons, so the grey line of what the person wrote goes: the block shows their words
             sentReplies.delete(own.id);
             redraw($);
@@ -116,17 +251,34 @@ const toolHooks = (on) => {
         }
         const releaseGiven = typeof input.release === 'string' ? input.release.trim() : '';
         const release = releaseGiven.startsWith('/') && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : '';
-        await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: e.agentId, ...(pictures.length ? { pictures } : {}), at } : undefined }));
+        // A new question goes beside every other one still open on the card, each answered on its own. Only the asker's own earlier
+        // question it now asks again takes its place: the same words, one the person replied to in words (asked again once acted on), or
+        // what its result asked. Empty text clears the asker's own questions, never a helper's or its task's
+        const asker = e.agentId;
+        const isOwnAsk = (one, ask) => (ask.from ?? one.id) === asker;
+        let cleared = [];
+        await change($, asker, one => {
+            if (!text)
+                return ((cleared = asksOf(one).filter(ask => isOwnAsk(one, ask))), withAsks(one, asksOf(one).filter(ask => !isOwnAsk(one, ask))));
+            const kept = asksOf(one).filter(ask => !ask.isResult && !(isOwnAsk(one, ask) && (ask.text === text || (ask.replied && !ask.refused))));
+            return withAsks(one, [...kept, { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: asker, ...(pictures.length ? { pictures } : {}), at }]);
+        });
         const list = await read($, todos);
-        const card = list.find(one => one.id === topOf(list, e.agentId ?? ''));
+        const card = list.find(one => one.id === topOf(list, asker));
         if (!text) {
-            if (card && was)
-                await askGone($, card);
-            return { result: 'Cleared: your card no longer has a question.' };
+            if (card && keyAsksOf(card).some(ask => ask.from === asker))
+                await changeTodos($, all => all.map(one => (one.id === card.id ? withKeyAsks(one, keyAsksOf(one).filter(ask => ask.from !== asker)) : one)));
+            if (card)
+                for (const ask of cleared)
+                    await askGone($, card, undefined, ask);
+            return { result: cleared.length > 1 ? `Cleared: your card no longer has your ${cleared.length} questions.` : 'Cleared: your card no longer has a question.' };
         }
         // The same ask said again is not told again
         if (card && was?.text !== text)
             await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`));
+        // Its picture opens on the person's screen as the question comes, once
+        if (wantsPicture && !isSameAsk && pictures[0])
+            await openQuestionPicture($, pictures[0]);
         if (card)
             await askInChat($, card);
         // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
@@ -140,15 +292,19 @@ const toolHooks = (on) => {
         // No buttons: said back, as nothing of Claudopus's is added to answer it with
         const plain = choices.length ? '' : ` It has no buttons, so ${who()} can only answer in words: give \`choices\` when a press would answer it.`;
         const leftOut = (Array.isArray(input.choices) ? input.choices : []).some(one => typeof one === 'string' && LEAVES_OPEN.test(plainWords(one))) ? ' A choice that only leaves the question open (Not now, Later, Skip, Cancel) was left out: not pressing does that, and every button is an answer.' : '';
-        const released = release ? ` A press on ${choices[0]} also allows your next run of the release runner for ${release}, once, with no second question: run it then, in your background.` : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : '';
+        const released = release ? ` A press on ${choices[0]} also allows your runs of the release runner for ${release} until one has gone out, with no second question: run it then, in your background.` : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : '';
         const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : '';
-        const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : '';
+        const seen = drawn ? ` Claudopus drew your question and its buttons as one picture, opened it on ${who()}'s screen, and shows it with the question on your card and in the chat: make no picture of it yourself.` : pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : '';
+        // Questions asked before it and still open stay beside it: said back, so the task neither asks them again nor thinks them gone
+        const open = card ? asksOf(card).length : 1;
+        const beside = open > 1 ? ` Your card now holds ${open} open questions, this one with the ${open - 1 === 1 ? 'one' : `${open - 1}`} asked before it, each with its own answer, which comes to you naming its question. Put what belongs together into one question, and don't ask again one that is still open.` : '';
         const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : '';
-        return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare}${plain}${leftOut}${released} It stays until ${who()} answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` };
+        return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare}${plain}${leftOut}${released}${beside} It stays until ${who()} answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` };
     });
     // A task hands the person a part of its result that is finished while it goes on with the rest (20 Nov: "allow subagents to have
-    // multiple reports and then also to report without finishing a task"): kept as a result of its own, and given to the chat to show
-    // as its reply, from the next hook that may send it. Nothing on the card ends: its to-dos, helpers and commands go on
+    // multiple reports and then also to report without finishing a task"): kept as a result of its own, and given to the chat with the
+    // message the task sends it (PART_TAKEN), or with any message or notice that comes first. Claudopus submits nothing for it, as
+    // Claude Code draws a plugin's message as the person's own (21 Nov: "This still gets sent as me"). Nothing on the card ends
     on('tool.call', { tool: 'mcp__claudopus__report' }, async ($, e) => {
         const text = String(e.message ?? '').trim();
         if (e.agentId === undefined)
@@ -164,9 +320,8 @@ const toolHooks = (on) => {
             return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' };
         await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, partsForChat: [...(one.partsForChat ?? []), text].slice(-PARTS_KEPT) } : one)));
         await saveReport($, card, text, true).catch(err => log($, `part of ${card.id}'s result not kept: ${String(err)}`));
-        submitLater($, named(PART_NOTICE(titleOf(card))));
         await log($, `part of ${card.id}'s result taken, for the chat to give now`);
-        return { result: named(PART_TAKEN) };
+        return { result: named(PART_TAKEN(PART_SENT(titleOf(card)))) };
     });
     // The work writes its own log, on purpose, in plain words: what it starts and what it decides
     on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {

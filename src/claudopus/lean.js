@@ -323,6 +323,9 @@ const reportsFor = async ($, ids) => {
         return [];
     await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)));
     await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`);
+    // (each kept, so the chat's reply that passes it on is drawn in its task's box: colours.tsx)
+    for (const one of given)
+        resultGiven(one.id, one.reportForChat ?? '');
     return given.map(one => named(REPORT_FOR_CHAT(titleOf(one), one.id, one.reportForChat ?? '')));
 };
 // The parts of their results tasks handed in while at work that the chat has not been given, each once, the oldest first
@@ -332,6 +335,9 @@ const partsFor = async ($) => {
         return [];
     await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)));
     await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`);
+    for (const one of given)
+        for (const part of one.partsForChat ?? [])
+            resultGiven(one.id, part);
     return given.flatMap(one => (one.partsForChat ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))));
 };
 // `atWork`: the chat's tasks whose cards are at work, which paused by ending a step and are not finished; `given`: the tasks whose
