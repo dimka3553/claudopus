@@ -158,6 +158,8 @@ export type Todo = {
   branch?: string
   // Cut off by the app's close and carried on by a fresh task: that task's id. Its card is under Finished from then
   carriedTo?: string
+  // Brought over from the chat this one is a rewind of: that chat's id, whose folder holds its transcript
+  chatWas?: string
   // Stopped with no Stop of the person's or the chat's, as when the app quits and stops every task: one that stopped so as its
   // chat's process ended is taken for cut off by the next process, never for stopped
   stoppedUnasked?: true

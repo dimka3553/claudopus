@@ -212,6 +212,8 @@ const chatHooks = (on: On) => {
     await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     // What was at work when this chat's process last ended is read before this load writes its own: it ended with that process
     await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
+    // and a chat the app's rewind started as a copy takes over what its first chat left (keep.tsx)
+    await lookRewound($, id).catch(err => log($, `rewind not looked for: ${String(err)}`))
     // A result kept from before that still lists what it asks is that question on its card, as one handed in now
     // and one at work again that still shows it has had its answer
     const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)

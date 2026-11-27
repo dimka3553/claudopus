@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.300 · 27 November 2026
+- Rewinding a chat in the Claude app no longer empties its panel: the rewound chat shows every card it had before, just as after a restart. Finished and delivered tasks stay as they ended, a task that was still working shows as Interrupted with Carry on, and the tasks it starts keep your earlier messages in the chat.
+
 ## 0.2.299 · 27 November 2026
 - A file Claude sends you or a report names now opens when you click it, even when a task saved it outside the chat's folder. Claudopus puts a copy in the chat's folder, where the app can open it, instead of showing "This file is outside this session's folders".
 
