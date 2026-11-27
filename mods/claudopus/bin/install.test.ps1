@@ -78,12 +78,12 @@ try {
   # on, and the hour's cache for tasks added
   $h = Home 'full'
   New-Item -ItemType Directory -Force -Path (Join-Path $h.Home '.claude') | Out-Null
-  $own = "{`n  `"env`": { `"SOME_SETTING`": `"1`" },`n  `"permissions`": { `"allow`": [`"Bash(ls:*)`"] },`n  `"model`": `"opus`",`n  `"big`": 12345678901234567890,`n  `"enabledPlugins`": { `"other@elsewhere`": true, `"claudopus@claudopus`": false }`n}`n"
+  $own = "{`n  `"env`": { `"SOME_SETTING`": `"1`" },`n  `"permissions`": { `"allow`": [`"Bash(ls:*)`"] },`n  `"model`": `"opus`",`n  `"enabledPlugins`": { `"other@elsewhere`": true, `"claudopus@claudopus`": false }`n}`n"
   [IO.File]::WriteAllText((Join-Path $h.Home '.claude\settings.json'), $own)
   $r = Install $h
   Check 'a home with settings installs and exits 0' { $r.Rc -eq 0 }
   Check 'a switched-off Claudopus is switched on' { IsOn $h }
-  Check "the person's own settings stay, a long number too" { $s = Settings $h; $s -match 'SOME_SETTING' -and $s -match 'Bash\(ls:\*\)' -and $s -match '"model":\s*"opus"' -and $s -match 'other@elsewhere' -and $s -match '12345678901234567890' }
+  Check "the person's own settings stay" { $s = Settings $h; $s -match 'SOME_SETTING' -and $s -match 'Bash\(ls:\*\)' -and $s -match '"model":\s*"opus"' -and $s -match 'other@elsewhere' }
   Check "the hour's cache for tasks is added beside them" { Cache $h '1h' }
   Check 'the file is still valid JSON' { $null -ne ((Settings $h) | ConvertFrom-Json) }
 

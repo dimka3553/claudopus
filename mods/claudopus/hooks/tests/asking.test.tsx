@@ -12,7 +12,8 @@ const HOME = '/home/sam'
 const WINDOWS_HOME = 'C:\\Users\\sam'
 const GIT_BASH = 'C:/Program Files/Git/bin/bash.exe'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
-const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
+// (on Windows a file URL's path is /D:/..., which names D:/...)
+const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '').replace(/^\/(?=[A-Za-z]:\/)/, '')
 // Every test may take three minutes, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's
 // runner (two to three times as slow as a Mac) the longest scenarios passed or failed by the machine's load, not by the mod. Those
 // that run the clock through hours fire the mod's timers each second of it, as in a chat: 10 to 20 seconds alone on a Mac, 30 to 60
