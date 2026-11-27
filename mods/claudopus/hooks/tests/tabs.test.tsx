@@ -1083,6 +1083,13 @@ test('the Progress tab opens from its button beside Results: a square for each t
   for (const name of ['A calm company', 'Other']) expect(source).toContain(`>${name}</text>`)
   expect(source).toMatch(/fill="#8A63F0" font-weight="600">More gardens</)
   expect(String(chart?.props.alt)).toContain('Seed shop: 2 done, 2 aside, 1 next, working now.')
+  // The chart is this month's; an earlier month is a press away, with its own results, and this month a press back
+  expect(await texts()).toContain('November 2023')
+  await pressed(tab, 'progress-month-earlier')
+  expect(await until(async () => ((await texts()).includes('October 2023') ? true : undefined))).toBe(true)
+  expect(String((await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds'))?.props.alt)).toContain('Results a day in October 2023')
+  await pressed(tab, 'progress-month-later')
+  expect(await until(async () => ((await texts()).includes('November 2023') ? true : undefined))).toBe(true)
   // Under it each goal's areas, and those under no goal folded as Other
   for (const text of ['More gardens', 'A calm company', 'Other', 'Working', 'Seed photos on every page', 'October books closed', '1 area']) expect(await texts()).toContain(text)
   // Above the chart, how far the sorting has got: the 4 past results left, the one to count again and the start of the task above
