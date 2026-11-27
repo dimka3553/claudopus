@@ -1,0 +1,2 @@
+- Each month of the Progress chart now shows what you worked on that month, not today's goals: its rows are that month's own areas, the one with the most results first. The list under an earlier month's chart is that month's too.
+- A month nothing is kept from says so.

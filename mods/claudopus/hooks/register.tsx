@@ -26,7 +26,7 @@ import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
-import { daysOf, fewerProgress, goalsOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
+import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
@@ -14864,7 +14864,9 @@ void makeThumbs($, r)
 const picturesWanted = (data: ProgressRead, now: number) => {
 const first = (list: ProgressEntry[]) => list.map(one => progressPictures(data, one)[0]).filter((ref): ref is ProgressRef => Boolean(ref))
 const area = data.areas.find(one => one.id === progressView.area)
-if (!area) return { small: data.areas.flatMap(one => first(data.entries.get(one.id) ?? []).slice(0, 1)), large: [] }
+const month = monthOf(now, progressView.month)
+const shown = (list: ProgressEntry[]) => (progressView.month ? list.filter(one => Date.parse(one.at) >= month.first.getTime() && Date.parse(one.at) < month.next.getTime()) : list)
+if (!area) return { small: data.areas.flatMap(one => first(shown(data.entries.get(one.id) ?? [])).slice(0, 1)), large: [] }
 const entries = data.entries.get(area.id) ?? []
 const days = daysOf(entries, data.working, now).slice(0, progressView.daysShown)
 return { small: progressView.drawer === 'pictures' ? entries.flatMap(one => progressPictures(data, one)).slice(0, 24) : [], large: first(days.flatMap(d => [...d.asides, ...d.milestones])).slice(0, progressView.pictures) }

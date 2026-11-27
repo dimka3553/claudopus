@@ -196,14 +196,22 @@ test('the Progress tab opens from its button beside Results: a square for each t
   const chart = await until(async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds')))
   const source = String(chart?.props.source)
   expect(source.length).toBeLessThanOrEqual(131_072)
-  for (const name of ['A calm company', 'Other']) expect(source).toContain(`>${name}</text>`)
-  expect(source).toMatch(/fill="#8A63F0" font-weight="600">More gardens</)
+  // Its rows are the areas worked on this month, the one at work in purple; the menu, last touched in October, is not among them
+  expect(source).toContain('>Bookkeeping</text>')
+  expect(source).not.toContain('>Cafe menu</text>')
+  expect(source).toMatch(/fill="#8A63F0" font-weight="600">Seed shop</)
   expect(String(chart?.props.alt)).toContain('Seed shop: 2 done, 2 aside, 1 next, working now.')
   // The chart is this month's; an earlier month is a press away, with its own results, and this month a press back
   expect(await texts()).toContain('November 2023')
   await pressed(tab, 'progress-month-earlier')
   expect(await until(async () => ((await texts()).includes('October 2023') ? true : undefined))).toBe(true)
-  expect(String((await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds'))?.props.alt)).toContain('Results a day in October 2023')
+  const october = (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds'))
+  expect(String(october?.props.alt)).toContain('Results a day in October 2023')
+  // October has its own rows and its own list: only the menu was worked on then
+  expect(String(october?.props.source)).toContain('>Cafe menu</text>')
+  expect(String(october?.props.source)).not.toContain('>Seed shop</text>')
+  for (const text of ['Cafe menu', 'Menu printed', '1 result']) expect(await texts()).toContain(text)
+  for (const text of ['Seed shop', 'More gardens', 'Other']) expect(await texts()).not.toContain(text)
   await pressed(tab, 'progress-month-later')
   expect(await until(async () => ((await texts()).includes('November 2023') ? true : undefined))).toBe(true)
   // Under it each goal's areas, and those under no goal folded as Other
