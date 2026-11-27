@@ -10,12 +10,14 @@
 # A group number is acted on only while its first process is the run started for that output file, so a number reused by another
 # process of the person's is never stopped
 # On Windows, in Git for Windows' bash, there are no process groups a Windows program joins: the number is the run's own process,
-# its command line read from /proc, and a stop ends it with every Windows process under it (taskkill), node and browsers too
+# its command line read from /proc, and a stop ends it and every process of Git's under it (each by its parent in /proc, as Windows
+# links none of them to the one that started it), each with every Windows process under it (taskkill), node and browsers too
 here=$(cd "$(dirname "$0")" && pwd)
 self="$here/$(basename "$0")"
 win=; case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN*) win=1 ;; esac
 isRun() {
-  if [ -n "$win" ]; then tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | grep -qF -- "$2"; return; fi
+  # (a run that ended has no /proc entry: the redirect's own complaint goes too)
+  if [ -n "$win" ]; then { tr '\0' ' ' < "/proc/$1/cmdline"; } 2>/dev/null | grep -qF -- "$2"; return; fi
   ps -o args= -p "$1" 2>/dev/null | grep -qF -- "$2"
 }
 case "$1" in
@@ -61,9 +63,19 @@ stop)
   # Ended on its own meanwhile: its own end stands
   tail -n 1 "$3" 2> /dev/null | grep -q '^claudopus-exit' && exit 0
   if [ -n "$win" ]; then
-    w=$(cat "/proc/$2/winpid" 2> /dev/null)
-    [ -n "$w" ] && taskkill //T //F //PID "$w" > /dev/null 2>&1
-    kill -KILL "$2" 2> /dev/null
+    # The run and every process under it, held still first so none starts another, then looked for again, then ended: Git's own
+    # by kill, the Windows ones (and theirs) by taskkill of each one's Windows process
+    under() {
+      for d in /proc/[0-9]*; do printf '%s %s\n' "${d#/proc/}" "$(cat "$d/ppid" 2> /dev/null)"; done |
+        awk -v top="$1" '{ up[$1] = $2 } END { n = split(top, todo, " "); for (i = 1; i <= n; i++) { print todo[i]; for (p in up) if (up[p] == todo[i] && !(p in seen)) { seen[p] = 1; todo[++n] = p } } }'
+    }
+    all=$(under "$2"); kill -STOP $all 2> /dev/null
+    all=$(under "$2"); kill -STOP $all 2> /dev/null
+    for p in $all; do
+      w=$(cat "/proc/$p/winpid" 2> /dev/null)
+      [ -n "$w" ] && taskkill //T //F //PID "$w" > /dev/null 2>&1
+    done
+    kill -KILL $all 2> /dev/null
     echo "claudopus-exit 143 stopped" >> "$3"
     exit 0
   fi

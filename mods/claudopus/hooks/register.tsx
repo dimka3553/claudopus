@@ -13057,7 +13057,7 @@ const startOnWindows = async ($: EngineInterface, script: string, words: string[
 if (!gitBash) return { exitCode: 1, stderr: "Git for Windows' bash was not found" }
 const line = `unset IFS; set +f; set -- ${words.map(zshQuoted).join(' ')}; ${script}`
 const start = "Start-Process -WindowStyle Hidden -FilePath $env:CLAUDOPUS_BASH -ArgumentList ('-c ' + [char]34 + 'set -f; IFS=; eval $CLAUDOPUS_RUN' + [char]34)"
-return runOn($, [...POWERSHELL, start], { timeoutMs: 30_000, env: { CLAUDOPUS_BASH: gitBash, CLAUDOPUS_RUN: line } }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+return runOn($, [...POWERSHELL, start], { timeoutMs: 30_000, ...(windowsHome ? { cwd: windowsHome } : {}), env: { CLAUDOPUS_BASH: gitBash, CLAUDOPUS_RUN: line } }).catch(err => ({ exitCode: -1, stderr: String(err) }))
 }
 let isLedgerRead = false
 let ledgerSign = ''

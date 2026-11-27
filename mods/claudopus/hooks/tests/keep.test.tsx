@@ -826,22 +826,22 @@ const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
 // runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
 // handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
 // no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
-type WindowsRun = { argv: string[]; env: Record<string, string> }
+type WindowsRun = { argv: string[]; env: Record<string, string>; cwd: string }
 const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
   const runs: WindowsRun[] = []
   const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   const wrapped = new Proxy(on, {
     apply: (to, self, args: unknown[]) => {
-      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => unknown]
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string>; cwd?: string } }) => unknown]
       if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
-      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => {
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string>; cwd?: string } }) => {
         const argv = [...e.argv]
         const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
         const tool = String(inBash ? argv[3] : argv[0])
         if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
         if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
         if (!inBash) {
-          const one = { argv, env: { ...(e.init?.env ?? {}) } }
+          const one = { argv, env: { ...(e.init?.env ?? {}) }, cwd: e.init?.cwd ?? '' }
           runs.push(one)
           const out = answer(one)
           if (out !== undefined) return said(out)
@@ -1193,6 +1193,8 @@ test('on a Windows PC the beat names the engine by its Windows process, and the 
   expect(started?.env.CLAUDOPUS_BASH).toBe('C:/Program Files/Git/bin/bash.exe')
   expect(started?.env.CLAUDOPUS_RUN).toBe(`unset IFS; set +f; set -- '${PLUGIN}/bin/revive' '${WINDOWS_MEMORY}'; exec "$1" "$2" >/dev/null 2>&1 </dev/null`)
   expect(started?.argv.join(' ')).not.toContain('"')
+  // in the profile, so the chat's folder is never one it holds and keeps from being removed
+  expect(started?.cwd).toBe('C:\\Users\\sam')
   expect(windowsRuns.filter(argv => argv.join(' ').includes('POSIX::setsid'))).toEqual([])
   expect(files.get(`${WINDOWS_MEMORY}/log.md`)).not.toContain('was not started')
 })

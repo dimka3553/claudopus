@@ -14,6 +14,10 @@ case $(uname -s 2>/dev/null) in MINGW* | MSYS* | CYGWIN*) on_windows=1 ;; *) on_
 if command -v magick >/dev/null 2>&1; then convert=(magick) identify=(magick identify)
 elif [ "$on_windows" = 0 ] && command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; then convert=(convert) identify=(identify)
 else echo "sips: ImageMagick is not installed, so no small copy of a picture is made" >&2; exit 127; fi
+# ImageMagick on Windows is a Windows program: a path is given to it as Windows names it (Git's bash would leave one in format:path
+# or path[0] as it is, which Windows cannot find), and nothing else of its words is changed on the way
+native() { if [ "$on_windows" = 1 ]; then cygpath -m -- "$1"; else printf '%s' "$1"; fi; }
+[ "$on_windows" = 1 ] && export MSYS2_ARG_CONV_EXCL='*'
 
 gets=() size='' width='' pad=() crop=() offset=() format='' quality='' out='' files=()
 while [ $# -gt 0 ]; do
@@ -34,7 +38,7 @@ in=${files[0]}
 [ -f "$in" ] || { echo "sips: $in is not there" >&2; exit 1; }
 
 if [ "${#gets[@]}" -gt 0 ]; then
-  said=$("${identify[@]}" -format '%w %h %A\n' "$in[0]" 2>/dev/null | head -1) || exit 1
+  said=$("${identify[@]}" -format '%w %h %A\n' "$(native "$in")[0]" 2>/dev/null | head -1) || exit 1
   read -r w h alpha <<<"$said"
   [ -n "${w:-}" ] || exit 1
   printf '%s\n' "$in"
@@ -62,4 +66,4 @@ case $format in
   png) prefix='png:' ;;
 esac
 tmp="$target.sips-$$"
-"${convert[@]}" "$in[0]" -auto-orient "${ops[@]}" "$prefix$tmp" 2>/dev/null && mv -f "$tmp" "$target" || { rm -f "$tmp"; exit 1; }
+"${convert[@]}" "$(native "$in")[0]" -auto-orient "${ops[@]}" "$prefix$(native "$tmp")" 2>/dev/null && mv -f "$tmp" "$target" || { rm -f "$tmp"; exit 1; }

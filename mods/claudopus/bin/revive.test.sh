@@ -23,10 +23,11 @@ while [ -e "$0.run" ]; do sleep 0.2; done
 EOF
 chmod +x "$tmp/chat"
 touch "$tmp/chat.run"
-# A chat's process as its beat names it: on Windows the Windows process of Git's, as a chat's engine is one there
+# A chat's process as its beat names it: on Windows the Windows process of Git's, as a chat's engine is one there (and the shell's
+# own number is kept, the one it waits on)
 wpid() { cat "/proc/$1/winpid" 2>/dev/null || echo "$1"; }
-"$tmp/chat" & chat=$!
-sleep 0.5; chat=$(wpid "$chat")
+"$tmp/chat" & chatjob=$!
+sleep 0.5; chat=$(wpid "$chatjob")
 settings=$tmp/settings.json
 printf '{\n  "theme": "dark",\n  "enabledPlugins": {\n    "claudopus@claudopus": true,\n    "claudopus@other": true,\n    "other@else": true\n  },\n  "hooks": {}\n}\n' > "$settings"
 revived() { grep -c '"revived"' "$1" 2>/dev/null | tr -d ' '; }
@@ -112,14 +113,14 @@ sleep 4
 rm -f "$mem/keep/s4.beat" "$mem/keep/s5.beat"
 
 # A chat whose process ended is forgotten and nothing changed for it
-rm -f "$tmp/chat.run"; wait "$chat" 2>/dev/null
+rm -f "$tmp/chat.run"; wait "$chatjob" 2>/dev/null
 beat "$chat" claudopus@claudopus "$settings" s6; stale s6
 before=$(revived "$settings")
 within '[ ! -e "$mem/keep/s6.beat" ]' 5 && [ "$(revived "$settings")" = "$before" ] && ! grep -q "chat s6" "$mem/keep/revive.log" && ok "a chat whose process ended is forgotten" || no "a chat whose process ended is forgotten"
 
 # Turned off in the settings: nothing is changed
-touch "$tmp/chat.run"; "$tmp/chat" & chat=$!
-sleep 0.5; chat=$(wpid "$chat")
+touch "$tmp/chat.run"; "$tmp/chat" & chatjob=$!
+sleep 0.5; chat=$(wpid "$chatjob")
 printf '{ "enabledPlugins": { "claudopus@claudopus": false } }\n' > "$tmp/off.json"
 beat "$chat" claudopus@claudopus "$tmp/off.json" s7; stale s7
 within 'grep -q "chat s7: quiet .* turned off" "$mem/keep/revive.log"' 8 && [ "$(revived "$tmp/off.json")" = 0 ] && ok "Claudopus turned off is left off" || no "Claudopus turned off is left off"

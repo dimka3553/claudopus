@@ -70,13 +70,19 @@ ok 'a response instead of a key ends 4 and runs nothing' '[ "$said" = 4 ] && [ !
 ok 'and its words reach the caller, with nothing kept' 'grep -q "in their own words: it is in the other repo" "$tmp/err" && grep -q "NEW_KEY was not given" "$tmp/err" && ! "$k" has claudopus-secret NEW_KEY'
 ok 'and leaves nothing beside the requests' '[ -z "$(ls -A "$asked")" ]'
 
-# bin/notify with no desktop: 3, and its status says so
-ok 'notify with no desktop ends 3' '"$here/notify" --title T --text X; [ $? = 3 ]'
-ok 'notify --status says unavailable' '[ "$("$here/notify" --status)" = unavailable ]'
+# bin/notify with no desktop: 3, and its status says so. On Windows it is Windows PowerShell's toast, there on every Windows: its
+# status says on, and one sent is shown (0), or ends 3 where Windows shows none, as on a server with no one signed in
+if [ -z "$windows" ]; then
+  ok 'notify with no desktop ends 3' '"$here/notify" --title T --text X; [ $? = 3 ]'
+  ok 'notify --status says unavailable' '[ "$("$here/notify" --status)" = unavailable ]'
+else
+  ok "notify by Windows' toast ends 0, or 3 where none is shown, whatever its words hold" '"$here/notify" --title "T \"q\" <a> & '"'"'s" --text "X \$HOME %PATH%"; r=$?; [ $r = 0 ] || [ $r = 3 ]'
+  ok 'notify --status says on' '[ "$("$here/notify" --status)" = on ]'
+fi
 
 # bin/sips: the calls the mod makes, answered with ImageMagick where it is installed
-# (convert alone is no ImageMagick: Windows has a convert of its own, for disks)
-if command -v magick >/dev/null 2>&1 || { command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; }; then
+# (convert alone is no ImageMagick: Windows has a convert of its own, for disks, so there it is magick only, as bin/sips takes it)
+if command -v magick >/dev/null 2>&1 || { [ -z "$windows" ] && command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; }; then
   im=$(command -v magick || command -v convert)
   "$im" -size 300x120 xc:red "$tmp/wide.png"
   "$im" -size 40x40 xc:none -fill blue -draw "circle 20,20 20,5" "$tmp/clear.png"

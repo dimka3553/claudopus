@@ -47,12 +47,13 @@ const windowsAlive = async ($: EngineInterface) => {
 // A command started on its own, to outlive the chat: on Windows by PowerShell's Start-Process, as Git's bash in a hidden window,
 // which no pipe of the engine's reaches, so the start returns at once and nothing waits for it. The shell line comes in an
 // environment value, with its words quoted in it, so nothing of it passes through Windows' quoting of a command line; the line
-// Start-Process is given holds no double quote of the caller's
+// Start-Process is given holds no double quote of the caller's. It starts in the profile, not the chat's folder: Windows lets no
+// folder a process works in be removed, and the watcher outlives the chat by minutes, which would keep a worktree from going
 const startOnWindows = async ($: EngineInterface, script: string, words: string[]) => {
   if (!gitBash) return { exitCode: 1, stderr: "Git for Windows' bash was not found" }
   const line = `unset IFS; set +f; set -- ${words.map(zshQuoted).join(' ')}; ${script}`
   const start = "Start-Process -WindowStyle Hidden -FilePath $env:CLAUDOPUS_BASH -ArgumentList ('-c ' + [char]34 + 'set -f; IFS=; eval $CLAUDOPUS_RUN' + [char]34)"
-  return runOn($, [...POWERSHELL, start], { timeoutMs: 30_000, env: { CLAUDOPUS_BASH: gitBash, CLAUDOPUS_RUN: line } }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  return runOn($, [...POWERSHELL, start], { timeoutMs: 30_000, ...(windowsHome ? { cwd: windowsHome } : {}), env: { CLAUDOPUS_BASH: gitBash, CLAUDOPUS_RUN: line } }).catch(err => ({ exitCode: -1, stderr: String(err) }))
 }
 // Written only once this load has read what the last process left (noteClosed), so a load never writes over it before it is read
 let isLedgerRead = false

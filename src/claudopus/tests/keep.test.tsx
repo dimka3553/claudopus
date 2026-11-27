@@ -206,6 +206,8 @@ test('on a Windows PC the beat names the engine by its Windows process, and the 
   expect(started?.env.CLAUDOPUS_BASH).toBe('C:/Program Files/Git/bin/bash.exe')
   expect(started?.env.CLAUDOPUS_RUN).toBe(`unset IFS; set +f; set -- '${PLUGIN}/bin/revive' '${WINDOWS_MEMORY}'; exec "$1" "$2" >/dev/null 2>&1 </dev/null`)
   expect(started?.argv.join(' ')).not.toContain('"')
+  // in the profile, so the chat's folder is never one it holds and keeps from being removed
+  expect(started?.cwd).toBe('C:\\Users\\sam')
   expect(windowsRuns.filter(argv => argv.join(' ').includes('POSIX::setsid'))).toEqual([])
   expect(files.get(`${WINDOWS_MEMORY}/log.md`)).not.toContain('was not started')
 })

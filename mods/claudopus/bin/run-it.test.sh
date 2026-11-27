@@ -4,7 +4,17 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-run-it-test.XXXXXX") && tmp=$(cd "$tmp" && pwd) || exit 1
-trap 'pkill -f "$tmp/" 2>/dev/null; rm -rf "$tmp"' EXIT
+# On Windows a folder a process still works in cannot be removed: Git's processes working in it are ended first, and the removal
+# is tried for a few seconds, then left to Windows' own temp clean-up, quietly
+gone() {
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      for d in /proc/[0-9]*; do case "$(readlink "$d/cwd" 2>/dev/null)" in "$tmp" | "$tmp"/*) [ "${d#/proc/}" = $$ ] || kill -KILL "${d#/proc/}" 2>/dev/null ;; esac; done
+      for _ in 1 2 3 4 5 6 7 8 9 10; do rm -rf "$tmp" 2>/dev/null && return; sleep 0.5; done; return 0 ;;
+  esac
+  rm -rf "$tmp"
+}
+trap 'pkill -f "$tmp/" 2>/dev/null; gone' EXIT
 run=$here/run-it
 fails=0
 ok() { printf 'ok   %s\n' "$1"; }
@@ -66,8 +76,8 @@ case "$(uname -s)" in
     out=$tmp/w.log
     g=$("$run" start "echo started; ping -n 60 127.0.0.1 > /dev/null & echo \$! > '$tmp/folder/ping.pid'; wait" "$out" "$tmp/folder")
     within '[ -s "$tmp/folder/ping.pid" ]' 10
-    w=$(cat "/proc/$(cat "$tmp/folder/ping.pid")/winpid" 2> /dev/null)
-    tasklist //FI "PID eq $w" //NH 2> /dev/null | grep -qi ping && ok "a Windows program the run started runs" || no "a Windows program the run started runs (pid $w)"
+    # (its Windows number is Git's fork of the shell until ping itself has started in it)
+    within 'w=$(cat "/proc/$(cat "$tmp/folder/ping.pid")/winpid" 2> /dev/null) && tasklist //FI "PID eq $w" //NH 2> /dev/null | grep -qi ping' 10 && ok "a Windows program the run started runs" || no "a Windows program the run started runs (pid $w)"
     "$run" stop "$g" "$out"
     within '! tasklist //FI "PID eq $w" //NH 2> /dev/null | grep -qi ping' 10 && ok "stop ends the Windows programs the run started" || no "stop ends the Windows programs the run started"
     ;;

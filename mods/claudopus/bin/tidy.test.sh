@@ -86,8 +86,8 @@ old "$W"
 run
 cp "$tmp/out" "$tmp/out1"
 out=$(cat "$tmp/out")
-# Git names worktrees by their resolved paths
-Wr=$(cd "$W" && pwd -P)
+# Git names worktrees by their resolved paths (on Windows as Windows names them, C:/Users/...)
+Wr=$(cd "$W" && { pwd -W 2>/dev/null || pwd -P; })
 check "an old Playwright profile, an old Chrome download and an old copy of Chrome are removed" '[ ! -e "$T/playwright_chromiumdev_profile-old1" ] && [ ! -e "$T/.com.google.Chrome.Ab3dEf" ] && [ ! -e "$clones/code_sign_clone.old" ] && [[ "$out" == *"removed browser $clones/code_sign_clone.old"* ]]'
 check "a profile a running Chrome names, a fresh one and the copy of a running Chrome are kept" '[ -d "$T/puppeteer_dev_chrome_profile-busy" ] && [ -d "$T/playwright-artifacts-new" ] && [ -d "$clones/code_sign_clone.mine" ] && [[ "$out" == *"kept $T/puppeteer_dev_chrome_profile-busy: a running command names it"* && "$out" == *"kept $clones/code_sign_clone.mine: it is the copy of a Chrome that is running"* ]]'
 check "an old catch-up scratch folder is removed" '[ ! -e "$T/claudopus-catch-up.Q1w2E3" ] && [[ "$out" == *"removed temp $T/claudopus-catch-up.Q1w2E3"* ]]'

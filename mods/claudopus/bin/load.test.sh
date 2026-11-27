@@ -10,7 +10,17 @@ mod=$(cd "$here/.." && pwd)
 ENGINE=${ENGINE:-${CLAUDE_CODE_EXECPATH:-$(command -v claude 2>/dev/null)}}
 [ -n "$ENGINE" ] && [ -e "$ENGINE" ] || { echo "ok   skipped: no Claude Code here to load it with"; exit 0; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-load-test.XXXXXX") || exit 1
-trap 'rm -rf "$tmp"' EXIT
+# On Windows a folder a process still works in cannot be removed: Git's processes working in it are ended first, and the removal
+# is tried for a few seconds, then left to Windows' own temp clean-up, quietly
+gone() {
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      for d in /proc/[0-9]*; do case "$(readlink "$d/cwd" 2>/dev/null)" in "$tmp" | "$tmp"/*) [ "${d#/proc/}" = $$ ] || kill -KILL "${d#/proc/}" 2>/dev/null ;; esac; done
+      for _ in 1 2 3 4 5 6 7 8 9 10; do rm -rf "$tmp" 2>/dev/null && return; sleep 0.5; done; return 0 ;;
+  esac
+  rm -rf "$tmp"
+}
+trap gone EXIT
 fails=0
 check() { if eval "$2"; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s\n' "$1"; fails=$((fails + 1)); fi; }
 mkdir -p "$tmp/home" "$tmp/work"
