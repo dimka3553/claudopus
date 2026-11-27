@@ -1,0 +1,2 @@
+- The moving rings on a card's helpers and commands keep turning smoothly as rows come and go around them, instead of turning a little and jumping back to their start.
+- A command's ring keeps turning for as long as the command runs, even when it has printed nothing for minutes; its row still says when it has gone quiet.

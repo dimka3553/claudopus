@@ -881,6 +881,44 @@ const appDraws = (tree: unknown) => {
   walk(sent, 0)
   return { parts, deepest, chars: JSON.stringify(sent).length, isDrawn: parts <= 2000 && deepest <= 32 && JSON.stringify(sent).length <= 262_144 }
 }
+// The desktop draws each moving picture (an Svg with isInteractive) in a frame of its own, and when a pane is drawn again keeps a
+// frame it drew before, its animation going on, only as its engine surface matches them (Uc, in the app's own code): in the new
+// drawing's order, each takes the first frame of the drawing before, at or after the last one taken, that is the same picture with
+// the same words and size, whose elements from the pane's top down are as many and of the same kinds, and none of them taken for
+// another place. Any other is made anew and its animation starts again (27 Nov: rings that turned a little and jumped back). Each
+// moving picture of the new drawing, by its words, and whether the app keeps it
+const appKeeps = (before: unknown, after: unknown) => {
+  type El = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const TAGS: Record<string, string> = { Box: 'div', Text: 'span', div: 'div', span: 'span', b: 'b' }
+  type Frame = { path: object[]; tags: string[]; leaf: string; alt: string; isMoving: boolean }
+  const framesOf = (root: unknown) => {
+    const out: Frame[] = []
+    const walk = (n: unknown, path: object[], tags: string[]): void => {
+      if (!n || typeof n !== 'object') return
+      if (Array.isArray(n)) return n.forEach(one => walk(one, path, tags))
+      const el = n as El
+      const p = el.props ?? {}
+      if (el.type === 'Svg') {
+        if (p.isInteractive) out.push({ path: [...path, el], tags: [...tags, 'iframe'], leaf: JSON.stringify([p.source, p.alt, p.width, p.height]), alt: String(p.alt), isMoving: String(p.source).includes('<animate') })
+        return
+      }
+      // A part that is no element of the app's own puts its children in its parent's place
+      const tag = el.type ? TAGS[el.type] : undefined
+      for (const child of el.children ?? []) tag ? walk(child, [...path, el], [...tags, tag]) : walk(child, path, tags)
+    }
+    walk(root, [], [])
+    return out
+  }
+  const old = framesOf(before)
+  const map = new Map<object, object>()
+  const used = new Set<object>()
+  let from = 0
+  return framesOf(after).flatMap(f => {
+    const i = old.findIndex((o, n) => n >= from && o.path.length === f.path.length && o.leaf === f.leaf && f.path.every((el, k) => (map.has(el) ? map.get(el) === o.path[k] : !used.has(o.path[k]!) && o.tags[k] === f.tags[k])))
+    if (i !== -1) ((from = i + 1), f.path.forEach((el, k) => (map.set(el, old[i]!.path[k]!), used.add(old[i]!.path[k]!))))
+    return f.isMoving ? [{ alt: f.alt, isKept: i !== -1 }] : []
+  })
+}
 
 // Cards: work becoming a card, its to-dos, its own chat, steers, context and model, Details, stops, its pause, work the engine reports
 
@@ -3090,4 +3128,43 @@ test("a run's second line starts under its name, with the tree's lines carried d
   // and one under a helper, with less room, keeps its count
   expect(tight.some(text => text.includes('10/40'))).toBe(true)
   await narrow.unmount()
+})
+
+test("a moving mark keeps turning for as long as what it stands for goes on: the app keeps it as the panel is drawn again only while it and the boxes it sits in stay the same, so nothing around it may change it (27 Nov: marks turned a quarter and jumped back; a quiet command's ring stopped while its row stayed)", SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const { clock } = world(on, { jobs: { output: () => '', wroteAt: () => now - 2_000 } })
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fit and upload', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fit and upload', prompt: 'go' } as never)
+  const helper = (description: string) => $.agent.spawn({ subagentType: 'general-purpose', background: true, description, prompt: 'go', parentAgentId: 'a1' } as never)
+  const sent = (agentId: string, id: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && python ${id}.py`, description, run_in_background: true } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const moving = (tree: unknown) => appKeeps(undefined, tree).length
+  let was = await pane.drawn()
+  // Each moving mark of the panel drawn again after a change, by its words, and whether the app keeps it turning or starts it anew
+  const after = async (change: () => Promise<unknown>, count: number) => {
+    await change()
+    await advance(1_000)
+    const drawn = await until(async () => {
+      const tree = await pane.drawn()
+      return moving(tree) === count ? tree : undefined
+    })
+    const seen = appKeeps(was, drawn).map(one => `${one.alt}${one.isKept ? '' : ' (anew)'}`)
+    was = drawn
+    return seen
+  }
+  // The card's dots, and a helper that starts beside them
+  expect(await after(() => helper('Draw the pictures'), 2)).toEqual(['Working now', 'Working (anew)'])
+  // The helper says what it does: a line comes under its row
+  expect(await after(() => $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 't', agentId: 'a2', text: 'I am drawing the front views.' } as never), 2)).toEqual(['Working now', 'Working'])
+  // A second helper under it: the first is no longer the last row
+  expect(await after(() => helper('Check the drawing'), 3)).toEqual(['Working now', 'Working', 'Working (anew)'])
+  // The first helper starts a command of its own, which hangs from its dot
+  expect(await after(() => sent('a2', 'n1', 'Run the drawing of every picture'), 4)).toEqual(['Working now', 'Working', 'Command running (anew)', 'Working'])
+  // The card's own command, above its helpers
+  expect(await after(() => sent('a1', 'n2', 'Run the fit of every head'), 5)).toEqual(['Working now', 'Command running (anew)', 'Working', 'Command running', 'Working'])
+  // Minutes with nothing printed: the commands still run, so their rings still turn
+  expect(await after(() => advance(4 * 60_000), 5)).toEqual(['Working now', 'Command running', 'Working', 'Command running', 'Working'])
+  await pane.unmount()
 })
