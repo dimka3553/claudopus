@@ -1014,6 +1014,29 @@ test('a look that gives nothing waits as long as one that works, so a broken loo
   expect(asked[2]?.includes('top -l')).toBe(false)
 })
 
+// On battery the computer is looked at every 15 seconds, not 5, and top once in five minutes, as the disk's look every half minute,
+// which every chat makes, tells
+test('on battery the computer is looked at a third as often, and top once in five minutes, as each look costs the processor', async ($, on) => {
+  const asked: string[] = []
+  const { clock, files } = world(on, { usage: script => (asked.push(script), lookAt(asked.length)) })
+  files.set('df', "/dev/disk3s1s1 971350180 900000000 70000000 93% /System/Volumes/Data\n@@POWER@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t85%; discharging; 4:12 remaining present: true\n")
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  // (the disk is looked at a few seconds after the load: from the next look on, the battery is known)
+  for (let s = 0; s < 7; s++) await clock.advance(1000)
+  expect(asked.length).toBeGreaterThan(0)
+  const before = asked.length
+  for (let s = 0; s < 20 && asked.length === before; s++) await clock.advance(1000)
+  const first = asked.length
+  expect(first).toBe(before + 1)
+  for (let s = 0; s < 13; s++) await clock.advance(1000)
+  expect(asked.length - first).toBe(0)
+  for (let s = 0; s < 3; s++) await clock.advance(1000)
+  expect(asked.length - first).toBe(1)
+  for (let s = 0; s < 4; s++) await clock.advance(60_000)
+  expect(asked.filter(script => script.includes('top -l')).length).toBe(1)
+})
+
 // What the Mac's own commands print for the graphics processor and the battery, in each case the bar must tell apart
 const gpuAt = (pct: number) => `@@GPU@@\n"Device Utilization %"=${pct}`
 const batt = (line: string) => `@@BATT@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`

@@ -1,0 +1,4 @@
+- On battery, Claude's commands get only a few fast cores at once, and the rest move to the Mac's slow, low-power cores. Test runs that start a Claude of their own for each test file were never slowed before, and about thirty at once drew 50 to 60 W.
+- On battery, Claudopus looks at the computer a third as often for the line above the prompt, and takes its costliest look once in five minutes instead of every minute.
+- Claudopus reads your results list again only where something changed, not all of them every 20 seconds, and its watcher that brings it back after Claude switches it off starts far fewer processes.
+- Tasks are told to run big test suites and builds on GitHub or in the cloud while the Mac is on battery, or here only a few at a time.

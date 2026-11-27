@@ -23,7 +23,7 @@ import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, namingPrompt } from './naming'
 import type { Naming, NamingAsk } from './naming'
-import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import { batteryShown, batterySvg, chartSvg, FOOTPRINT_BATTERY_EVERY, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isOnBatteryLook, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_BATTERY_EVERY, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
@@ -518,6 +518,7 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 
 let isLinux = false
 let hasDesktop = true
+let isOnBattery = false
 let keyringRoot = ''
 let keyringOldRoot = ''
 const knowSystem = async ($: EngineInterface) => {
@@ -2857,15 +2858,43 @@ const waitsOf = (r: Report): { text: string }[] => r.waiting ?? (r.question ? [{
 const gists = new Map<string, string>()
 const isInside = (file: unknown): file is string =>
 typeof file === 'string' && Boolean(file) && !file.startsWith('/') && !file.startsWith('~') && !file.includes('\0') && file.split('/').every(part => part !== '..' && part !== '')
-const loadReports = async ($: EngineInterface) => {
+const reportsRead = new Map<string, { mtime: number; one: Report }>()
+const REPORTS_WHOLE = 60_000
+const REPORTS_WHOLE_BATTERY = 180_000
+const CHANGED_KEPT = 100
+let reportsWholeAt = -Infinity
+let changedSeen = ''
+const changedPath = () => `${reportsDir()}/_changed.json`
+const reportChanged = async ($: EngineInterface, id: string) => {
+reportsRead.delete(id)
+const was = parsedOr<{ at: number; id: string }[]>(await readOr($, changedPath()), [])
+await $.fs.write(changedPath(), JSON.stringify([...(Array.isArray(was) ? was : []).slice(-(CHANGED_KEPT - 1)), { at: await $.clock.now(), id }])).catch(() => undefined)
+}
+const loadReports = async ($: EngineInterface, isWhole = false) => {
 const found: Report[] = []
+const now = await $.clock.now()
+if (isWhole || now < reportsWholeAt || now - reportsWholeAt >= (isOnBattery ? REPORTS_WHOLE_BATTERY : REPORTS_WHOLE)) (reportsRead.clear(), (reportsWholeAt = now))
+const changed = await readOr($, changedPath())
+if (changed !== changedSeen) {
+const list = parsedOr<{ id?: unknown }[]>(changed, [])
+for (const one of Array.isArray(list) ? list : []) if (typeof one?.id === 'string') reportsRead.delete(one.id)
+changedSeen = changed
+}
 for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
 if (entry.kind !== 'dir' || entry.name.startsWith('_')) continue
+const mtime = (entry as { mtimeMs?: number }).mtimeMs ?? 0
+const was = reportsRead.get(entry.name)
+if (was && was.mtime === mtime) {
+found.push(was.one)
+continue
+}
 try {
 const one = JSON.parse(await readOr($, `${reportsDir()}/${entry.name}/meta.json`)) as Report
 if (one.id !== entry.name || !one.title) continue
 if (one.agent && !gists.has(one.id)) gists.set(one.id, gistOf(await readOr($, `${reportsDir()}/${entry.name}/report.md`), one.title) || one.gist)
-found.push({ ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] })
+const shown = { ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] }
+reportsRead.set(entry.name, { mtime, one: shown })
+found.push(shown)
 } catch {
 }
 }
@@ -2960,6 +2989,7 @@ mark: marked,
 ...(one.from ? { from: one.from } : {}),
 }
 await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
+await reportChanged($, id)
 await loadReports($)
 queueSoon($, { kind: 'result', task: one.id, report: id, title, topic: one.subject ?? '', files: files.filter(file => PICTURE.test(file)), text })
 }
@@ -3006,6 +3036,7 @@ const markReport = ($: EngineInterface, r: Report, patch: Partial<Report> | ((st
 const run = marking.then(async () => {
 const stored = { ...r, ...(JSON.parse((await readOr($, `${reportPath(r)}/meta.json`)) || '{}') as Partial<Report>) }
 await $.fs.write(`${dir}/reports/${r.id}/meta.json`, `${JSON.stringify({ ...stored, ...(typeof patch === 'function' ? patch(stored) : patch) }, null, 2)}\n`)
+await reportChanged($, r.id)
 await loadReports($)
 })
 marking = run.catch(() => undefined)
@@ -8726,7 +8757,7 @@ if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitC
 const kept = isSame ? (target.archived ?? 0) : wasArchived
 if (kept) archived[id] = kept
 }
-if (changed) await loadReports($)
+if (changed) await loadReports($, true)
 const tried: Record<string, number> = {}
 for (const id of [...missingHere, ...missingThere]) if (was.tried?.[id]) tried[id] = was.tried[id]
 for (const id of [...wanted, ...handed]) tried[id] = now
@@ -11515,7 +11546,7 @@ await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)
 await lookBar($).catch(err => log($, `bar not looked at: ${String(err)}`))
 if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
 if (seconds % 60 === 30) await remindAsks($).catch(err => log($, `questions not reminded of: ${String(err)}`))
-if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
+if (seconds % (isOnBattery ? 6 : 2) === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
 if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
 await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
 if (!isBehind()) await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
@@ -12031,7 +12062,7 @@ for (const one of list) for (const b of one.bg ?? []) if (b.isWatch && b.expires
 let isChanged = false
 const moved = new Set<string>()
 if (files.length) {
-const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
+const mtime = isLinux ? 'm=$(stat -c %Y "$f" 2>/dev/null || echo 0)' : 'm=$(stat -f %m "$f" 2>/dev/null || echo 0)'
 const script = `for f; do ${mtime}; printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done`
 const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
 if (!r) return
@@ -12447,7 +12478,8 @@ const r = await $.process.run(['/bin/sh', '-c', TIDY_START, 'sh', dir, `${$.plug
 if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
 
-const DISK_LOOK = '# disk left\ndf -Pk "$HOME" 2>/dev/null | tail -n 1'
+const DISK_LOOK =
+"# disk left\ndf -Pk \"$HOME\" 2>/dev/null | tail -n 1; echo @@POWER@@; if [ -d /sys/class/power_supply ]; then grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; else pmset -g batt 2>/dev/null; fi; true"
 const diskOf = (text: string, at: number): DiskKept | undefined => {
 const m = /(\d+)\s+(\d+)\s+(\d+)\s+\d+%/.exec(text)
 return m ? { at, total: Number(m[1]) * 1024, free: Number(m[3]) * 1024 } : undefined
@@ -12470,7 +12502,9 @@ diskTriedAt = now
 const r = await $.process.run(['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
 const was = diskKept
 const wasLast = tidyLast
-diskKept = diskOf(r?.stdout ?? '', now) ?? diskKept
+const [disk = '', power] = (r?.stdout ?? '').split('@@POWER@@')
+diskKept = diskOf(disk, now) ?? diskKept
+if (power !== undefined) isOnBattery = isOnBatteryLook(power, isLinux)
 if (dir) tidyLast = lastOf(await $.fs.read(`${dir}/tidy/last.json`).catch(() => '')) ?? tidyLast
 if (!isDiskLow(diskKept)) diskLowSince = 0
 else if (!diskLowSince) diskLowSince = now
@@ -12605,7 +12639,7 @@ seen.lookups = 0
 const one = work.length === 1 ? work[0] : undefined
 const command = one?.tool === 'Bash' ? String((one.input as { command?: unknown })?.command ?? '') : ''
 const kind = one && command && one.tookMs >= LONG_RUN && !isLookup(one.tool, one.input) ? kindOf(command) : ''
-if (kind && seen.lastRun === kind) say('serial', SERIAL_RUNS(kind))
+if (kind && seen.lastRun === kind && !isOnBattery) say('serial', SERIAL_RUNS(kind))
 seen.lastRun = kind || (one ? undefined : seen.lastRun)
 if (isTop && lean.second !== 'asked' && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
 return lines
@@ -14318,7 +14352,7 @@ const block = latestIn(page)
 if (block) latest.set(file, page.slice(0, page.indexOf(block) + block.length).split('\n').length)
 }
 const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
-const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
+const archived = new Set((await loadReports($, true).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
 const seen = new Set<string>()
 const perFile = new Map<string, number>()
 const lines = found
@@ -14510,9 +14544,11 @@ usageFile = tmp ? `${tmp}/claudopus-usage.json` : `${home}/.cache/claudopus-usag
 return usageFile
 }
 
+const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
 const lookUsage = async ($: EngineInterface) => {
 const now = await $.clock.now()
-const isFresh = (at: number) => now >= at && now - at < USAGE_EVERY - 500
+const every = usageEvery()
+const isFresh = (at: number) => now >= at && now - at < every - 500
 if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
 usageBusy = true
 usageTriedAt = now
@@ -14521,11 +14557,11 @@ const path = await usagePathOf($)
 const shared = keptOf(await $.fs.read(path).catch(() => ''))
 if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
 const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
-if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
+if (taking && now >= taking && now - taking < every / 2) return
 await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
 const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
 const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
-const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= (isOnBattery ? FOOTPRINT_BATTERY_EVERY : FOOTPRINT_EVERY))
 if (isTop) usageTopTriedAt = now
 const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
 const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
@@ -14541,7 +14577,7 @@ const isNew = kept.at !== usageKept?.at
 usageKept = kept
 if (isNew) await update($, figuresAt, () => kept.at)
 }
-const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
+const usageNow = (now: number) => (usageKept && now - usageKept.at < usageEvery() * 6 ? usageKept.figures : undefined)
 const usageHistory = () => ({ points: usageKept?.history ?? [], at: usageKept?.at ?? 0 })
 
 const CLAUDE_ALL = 'Claude and what it started'
@@ -14816,7 +14852,7 @@ await $.fs.write(path, JSON.stringify({ ...last, at: now })).catch(() => undefin
 const looked = await $.process.run(['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
 const look = paceLookOf(looked?.stdout ?? '')
 if (!look.procs.length || !look.cores) return
-const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined)
+const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined, isOnBattery)
 if (paced.lower.length || paced.lift.length) await $.process.run(['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
 await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, others: paced.others })).catch(() => undefined)
 if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)

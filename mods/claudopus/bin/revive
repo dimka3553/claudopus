@@ -36,8 +36,9 @@ IDLE=${CLAUDOPUS_REVIVE_IDLE:-600}
 # (in UTC, as Claudopus's own log.md, so the two are read side by side)
 log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$dir/revive.log"; }
 now() { date +%s; }
-# (GNU stat first: its -f reads the file system and succeeds, so the BSD form would give nonsense on Linux)
-mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+# (GNU stat where it is there: its -f reads the file system and succeeds, so the BSD form would give nonsense on Linux). Which one is
+# found once, so a look at a beat on a Mac starts one process, not a failed one first
+if stat -c %Y / >/dev/null 2>&1; then mtime() { stat -c %Y "$1" 2>/dev/null; }; else mtime() { stat -f %m "$1" 2>/dev/null; }; fi
 me="$0"
 
 # One at a time, the newest copy's: one already running from this same file, unchanged since it started, is left to run; one from
@@ -54,7 +55,7 @@ if [ -n "$was" ] && [ "$was" != "$$" ] && kill -0 "$was" 2>/dev/null; then
   esac
 fi
 printf '%s\n%s\n' "$$" "$file" > "$dir/revive.pid"
-mine() { [ "$(head -n 1 "$dir/revive.pid" 2>/dev/null)" = "$$" ]; }
+mine() { local p=; { read -r p < "$dir/revive.pid"; } 2>/dev/null; [ "$p" = "$$" ]; }
 
 # One key's "revived" option set in one settings file with the system's own JSON (JavaScript on macOS, Python on Linux), every other
 # key as it was. A key of an installed copy is changed only while enabledPlugins turns it on; one loaded from a folder
@@ -108,16 +109,19 @@ log "watching the chats' beats (pid $$)"
 # The last change, kept on disk: a watcher that takes over keeps to GAP after its predecessor's change
 changed=$(cat "$dir/revive.lastchange" 2>/dev/null); case "$changed" in ''|*[!0-9]*) changed=0 ;; esac
 last=$(now) idle=$(now) woke=0
+# Each look starts as few processes as it can, as it runs every few seconds for days, on battery too: the time from the shell's own
+# count of seconds (by the wall clock, so a Mac that slept still shows the gap), files read and names cut by the shell itself
+base=$(( $(now) - SECONDS ))
 while mine; do
   sleep "$STEP"
-  t=$(now)
+  t=$((base + SECONDS))
   # A Mac that slept leaves every beat quiet when it wakes: the chats get longer to write theirs again
   [ $((t - last)) -gt $((STEP * 3 + 5)) ] && woke=$t
   last=$t
   any=0
   for beat in "$dir"/*.beat; do
     [ -f "$beat" ] || continue
-    sid=$(basename "$beat" .beat)
+    sid=${beat##*/}; sid=${sid%.beat}
     # (the load on a line of its own: a watcher of an older version, still running, reads the first line as before). A beat with
     # no load line (half written, or from an older version) says nothing of its load, and the slow mark is left as it is
     load=''
@@ -134,7 +138,7 @@ while mine; do
     # A newer load: the slow one is gone
     [ -n "$slow" ] && [ -n "$load" ] && [ "$slow" != "$load" ] && { rm -f "$dir/$sid.slow"; slow=''; }
     if [ "$quiet" -lt "$QUIET" ]; then
-      was=$(cat "$dir/$sid.changed" 2>/dev/null)
+      was=''; [ -f "$dir/$sid.changed" ] && read -r was < "$dir/$sid.changed" 2>/dev/null
       if [ -n "$load" ] && [ "$was" = "$load" ]; then
         # Beating again from the load that beat before the change: it was never off, and the change only reloaded the other chats
         log "chat $sid: beats again from the same load, so Claudopus was not off: its process was slow; it is left alone until it loads anew, goes $SLOW_KEEP s without a stall or stays quiet $SLOW_QUIET s"
@@ -143,7 +147,7 @@ while mine; do
         rm -f "$dir/$sid.slow"; log "chat $sid: no stall for $SLOW_KEEP s; treated as any other"
       fi
       # Beating: a chat that came back starts its tries afresh
-      rm -f "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed"
+      if [ -e "$dir/$sid.revived" ] || [ -e "$dir/$sid.gaveup" ] || [ -e "$dir/$sid.changed" ]; then rm -f "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed"; fi
       continue
     fi
     if [ -n "$slow" ]; then

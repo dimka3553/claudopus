@@ -373,7 +373,8 @@ const chatHooks = (on: On) => {
       if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
       // A question nobody has answered is said again now and then (remindAsks)
       if (seconds % 60 === 30) await remindAsks($).catch(err => log($, `questions not reminded of: ${String(err)}`))
-      if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
+      // (a list of every process: on battery every six seconds)
+      if (seconds % (isOnBattery ? 6 : 2) === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
         if (!isBehind()) await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))

@@ -96,7 +96,7 @@ const toolHooks = (on: On) => {
     }
     const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
     // A result the person put away is still found, marked, so it is answered from only when they name it
-    const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
+    const archived = new Set((await loadReports($, true).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
     const seen = new Set<string>()
     const perFile = new Map<string, number>()
     const lines = found
