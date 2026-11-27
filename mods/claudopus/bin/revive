@@ -29,6 +29,10 @@ QUIET=${CLAUDOPUS_REVIVE_QUIET:-10}
 WOKE_QUIET=${CLAUDOPUS_REVIVE_WOKE_QUIET:-60}
 GAP=${CLAUDOPUS_REVIVE_GAP:-60}
 TRIES=${CLAUDOPUS_REVIVE_TRIES:-3}
+# How long a chat's fresh load has to write its first beat before it is tried again: a busy Mac starts a load slowly, and a change
+# made while it starts only loads it once more and cuts off the chat's turn again (27 Nov: three changes in three minutes, while
+# the chat's Claudopus was running all along)
+RELOAD_WAIT=${CLAUDOPUS_REVIVE_RELOAD_WAIT:-300}
 SLOW_QUIET=${CLAUDOPUS_REVIVE_SLOW_QUIET:-300}
 SLOW_KEEP=${CLAUDOPUS_REVIVE_SLOW_KEEP:-1800}
 # With no chat beating for this long, it ends
@@ -158,6 +162,9 @@ while mine; do
     case "${key:-}" in claudopus@*) ;; *) continue ;; esac
     [ -f "${settings:-}" ] || continue
     tries=0; [ -f "$dir/$sid.revived" ] && tries=$(wc -l < "$dir/$sid.revived" | tr -d ' ')
+    # Changed lately: its fresh load is given RELOAD_WAIT to beat before another try
+    tried=$(tail -n 1 "$dir/$sid.revived" 2>/dev/null | cut -d ' ' -f 1); case "$tried" in ''|*[!0-9]*) tried=0 ;; esac
+    [ $((t - tried)) -lt "$RELOAD_WAIT" ] && continue
     if [ "${tries:-0}" -ge "$TRIES" ]; then
       log "chat $sid: Claudopus did not come back after $tries tries; left as it is until it beats again"
       : > "$dir/$sid.gaveup"

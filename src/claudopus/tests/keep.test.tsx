@@ -30,12 +30,18 @@ test("every task is written to the chat's ledger as it changes, with the chat's 
   expect([...files.keys()].filter(path => /\/keep\/engine-id\.(state|handover)$/.test(path))).toEqual([])
 })
 
-test('each chat beats for the watcher that brings Claudopus back, naming its process, the key its copy has in the settings, the settings file and its load, and starts the watcher', async ($, on) => {
+test('each chat beats for the watcher that brings Claudopus back from the start of its load, naming its process, the key its copy has in the settings, the settings file and its load, and starts the watcher', async ($, on) => {
   const { files, clock } = world(on)
   // This copy is loaded from a marketplace that is a folder on this Mac, as Claudopus's own checkout: its key is that marketplace's
   files.set(`${HOME}/.claude/plugins/known_marketplaces.json`, JSON.stringify({ other: { installLocation: '/elsewhere' }, mine: { installLocation: PLUGIN.replace(/\/mods\/claudopus$/, '') } }))
-  await $.session.start(start)
   const beat = `${MEMORY}/keep/engine-id.beat`
+  // The beat is written before the rest of the start (here, the index a first start writes): a busy Mac took over a minute to reach
+  // the end of a start, and the watcher took each fresh load for one switched off and loaded it again (27 Nov)
+  files.delete(`${MEMORY}/index.md`)
+  await $.session.start(start)
+  const order = [...files.keys()]
+  expect(order.indexOf(beat)).toBeGreaterThan(-1)
+  expect(order.indexOf(beat)).toBeLessThan(order.indexOf(`${MEMORY}/index.md`))
   // (the load, so the watcher tells a load that beats again after its change, never off, from one that came back)
   // (on a line of its own, so a watcher of an older version still reads the first as before)
   const [first, load, ...rest] = (files.get(beat) ?? '').split('\n')

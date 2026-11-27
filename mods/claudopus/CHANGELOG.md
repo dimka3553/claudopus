@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.303 · 27 November 2026
+- When your Mac is busy, Claudopus no longer reloads itself again and again in a chat whose Claudopus is still running, which cut off the chat's turn and hid its task kinds for a while.
+- A task can no longer change the files of the Claudopus copy your chats run from; it works in a copy of its own.
+
 ## 0.2.302 · 27 November 2026
 - The grey quote over a coloured reply is now the message it answers wherever you sent it: a task's Message box, its answer box, Reply on a reply, or the chat.
 - A chat message you sent while Claude was working is quoted only over replies about the task it went to, never over another task's.

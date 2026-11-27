@@ -206,6 +206,11 @@ const chatHooks = (on: On) => {
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
     heldChat = id
+    // Every chat has a watcher that brings Claudopus back should Claude switch it off. Its beat starts as soon as the chat is known,
+    // before the rest of the start: on 27 Nov a Mac busy with tests took over a minute to reach it at the end, so the watcher took
+    // each fresh load for one switched off and loaded Claudopus again twice, cutting off the chat's turn each time
+    isEnded = false
+    await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
@@ -413,9 +418,7 @@ const chatHooks = (on: On) => {
     await unshare($, true).catch(() => undefined)
     if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
-    // Every chat has a watcher that brings Claudopus back should Claude switch it off
-    await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
-    // and its tasks keep their prompt cache an hour, as the chat does, unless the person's settings say otherwise
+    // Its tasks keep their prompt cache an hour, as the chat does, unless the person's settings say otherwise
     await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
