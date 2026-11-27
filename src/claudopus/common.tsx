@@ -270,6 +270,9 @@ const runTo = (name: string, from: number) => {
 // here: the mark's write is what draws it again. Read whole for each drawing, the list crossed between Claude's two threads about
 // thirty times a second with seven tasks at work (28 Nov: the panel asked for five times a second and the bar four, each with one
 // to four reads of it; the mod's thread at 30% of a core and the engine's own at 35%)
+let keptText: [Todo[], string] | undefined
+let markSign = ''
+const drawnSign = (list: Todo[]) => calmText(list, () => list.map(calmCard)) + JSON.stringify([list.map(one => [one.running ? 1 : 0, one.bg?.length ?? 0]), [...lastCall].map(([agent, call]) => [agent, call.what])])
 const todosMark = atom({ plugin: 'claudopus', key: 'todosMark' } as const, 0, { shape: 'todos-mark-1' })
 const drawnCards = async ($: EngineInterface) => (await read($, todosMark), cardsKept ?? keepCards(await read($, todos)))
 const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? (await $.clock.now(), cardsKept ?? keepCards(await read($, todos))) : keepCards(await read($, todos)))
@@ -291,9 +294,10 @@ const runSoon = ($: EngineInterface, agent: string, newAt?: number) => {
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
   const ranFrom = runFrom()
   try {
-  // (a change reads the list from the engine itself, as it writes there)
-  const now = keepCards(await read($, todos))
-  const before = JSON.stringify(now)
+  // (from the list at hand, as the write below is made on the engine's own list, and made again on it should that differ: read
+  // whole from the engine first, and put into text once more, each change cost 45 ms with seven tasks at work, 28 Nov)
+  const now = await ownCards($)
+  const before = keptText?.[0] === now ? keptText[1] : JSON.stringify(now)
   const due = [...runDue]
   const ran = (list: Todo[]) => due.reduce((all, [agent, newAt]) => withRunning(all, agent, newAt), list)
   const settled = () => due.forEach(([agent, newAt]) => runDue.get(agent) === newAt && runDue.delete(agent))
@@ -302,9 +306,16 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   // (and each of the chat's own cards has its colour from the moment it is made: withColours, colours.tsx)
   const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, ran(fn(list))))))
   const next = hold(now)
-  if (JSON.stringify(next) === before) return (settled(), now)
-  const written = keepCards(await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list))))
-  await update($, todosMark, n => n + 1)
+  const nextText = JSON.stringify(next)
+  if (nextText === before) return (settled(), now)
+  let isNext = false
+  const written = keepCards(await update($, todos, list => ((isNext = JSON.stringify(list) === before) ? next : hold(list))))
+  keptText = isNext ? [written, nextText] : undefined
+  // The mark moves only when what a drawing shows of the list did: a change in a card's tokens or steps alone asks for no
+  // drawing (it shows with the running times, calmLook), where each of about five writes for every call of a task asked for
+  // the panel and the bar again
+  const sign = drawnSign(written)
+  if (sign !== markSign) ((markSign = sign), await update($, todosMark, n => n + 1))
   settled()
   // (and the ledger on disk with it, so a quit or a crash loses nothing: keep.tsx)
   saveLedgerSoon($)

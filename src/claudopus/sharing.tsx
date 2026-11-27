@@ -365,7 +365,7 @@ const takeOpens = async ($: EngineInterface) => {
     for (const mac of macs) {
       const now = await $.clock.now()
       const stamp = `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.opens`
-      if (now - (Number(await readOr($, stamp)) || 0) < OPEN_EVERY - 250) continue
+      if (now - (Number(await readOr($, stamp)) || 0) < OPEN_EVERY * (isOnBattery ? 3 : 1) - 250) continue
       // A Mac that has not answered a trip for STALE, asleep or gone, is not asked every few seconds
       const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
       if (now - (f.fetchedAt ?? 0) > STALE) continue

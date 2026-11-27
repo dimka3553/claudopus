@@ -207,6 +207,9 @@ if (!from) return
 const one = runTimes.get(name) ?? [0, 0]
 runTimes.set(name, [one[0] + 1, one[1] + performance.now() - from])
 }
+let keptText: [Todo[], string] | undefined
+let markSign = ''
+const drawnSign = (list: Todo[]) => calmText(list, () => list.map(calmCard)) + JSON.stringify([list.map(one => [one.running ? 1 : 0, one.bg?.length ?? 0]), [...lastCall].map(([agent, call]) => [agent, call.what])])
 const todosMark = atom({ plugin: 'claudopus', key: 'todosMark' } as const, 0, { shape: 'todos-mark-1' })
 const drawnCards = async ($: EngineInterface) => (await read($, todosMark), cardsKept ?? keepCards(await read($, todos)))
 const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? (await $.clock.now(), cardsKept ?? keepCards(await read($, todos))) : keepCards(await read($, todos)))
@@ -223,16 +226,20 @@ $.clock.after(RUN_SOON, () => void ((isRunSet = false), changeTodos($, list => l
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
 const ranFrom = runFrom()
 try {
-const now = keepCards(await read($, todos))
-const before = JSON.stringify(now)
+const now = await ownCards($)
+const before = keptText?.[0] === now ? keptText[1] : JSON.stringify(now)
 const due = [...runDue]
 const ran = (list: Todo[]) => due.reduce((all, [agent, newAt]) => withRunning(all, agent, newAt), list)
 const settled = () => due.forEach(([agent, newAt]) => runDue.get(agent) === newAt && runDue.delete(agent))
 const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, ran(fn(list))))))
 const next = hold(now)
-if (JSON.stringify(next) === before) return (settled(), now)
-const written = keepCards(await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list))))
-await update($, todosMark, n => n + 1)
+const nextText = JSON.stringify(next)
+if (nextText === before) return (settled(), now)
+let isNext = false
+const written = keepCards(await update($, todos, list => ((isNext = JSON.stringify(list) === before) ? next : hold(list))))
+keptText = isNext ? [written, nextText] : undefined
+const sign = drawnSign(written)
+if (sign !== markSign) ((markSign = sign), await update($, todosMark, n => n + 1))
 settled()
 saveLedgerSoon($)
 return written
@@ -7845,11 +7852,13 @@ const value = drafts.get(key) ?? ''
 drawnDrafts.set(key, value)
 return value
 }
+const jobCounts = new WeakMap<Todo, number>()
+const jobCount = (one: Todo) => jobCounts.get(one) ?? (jobCounts.set(one, jobsOf(one).length), jobCounts.get(one) ?? 0)
 const paneShape = async ($: EngineInterface, paneId: string) => {
 const ranFrom = runFrom()
 try {
 const at = await $.clock.now()
-const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
+const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobCount(one)]
 const own = await drawnCards($)
 const chats = await drawnOthers($)
 const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -7907,6 +7916,8 @@ const ENGAGED = 15_000
 let engagedAt = 0
 const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
+let stepsRead = ['', 0] as [string, number]
+const stepsNow = async ($: EngineInterface) => (isTimed && Date.now() - stepsRead[1] < 2000 ? stepsRead[0] : (stepsRead = [dir ? await readOr($, stepsPath()) : '', Date.now()])[0])
 const personSign = async ($: EngineInterface) => {
 const ranFrom = runFrom()
 try {
@@ -7919,7 +7930,7 @@ return JSON.stringify([
 presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
 [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
 [...pictureIn.keys()], isUpdating, loadMark,
-[...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+[...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, await stepsNow($),
 ])
 } finally {
 runTo('personSign', ranFrom)
@@ -9103,7 +9114,7 @@ const from = await knowLocalName($)
 for (const mac of macs) {
 const now = await $.clock.now()
 const stamp = `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.opens`
-if (now - (Number(await readOr($, stamp)) || 0) < OPEN_EVERY - 250) continue
+if (now - (Number(await readOr($, stamp)) || 0) < OPEN_EVERY * (isOnBattery ? 3 : 1) - 250) continue
 const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
 if (now - (f.fetchedAt ?? 0) > STALE) continue
 await $.fs.write(stamp, String(now))
@@ -13439,7 +13450,7 @@ ledgerSign = sign
 runTo('saveLedger', ranFrom)
 }
 }
-const LEDGER_GAP = 2000
+const LEDGER_GAP = 5000
 let isLedgerBusy = false
 let isLedgerDue = false
 let ledgerAt = 0
