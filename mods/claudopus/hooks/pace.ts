@@ -14,6 +14,10 @@
 export const PACE_EVERY = 5_000
 // The cores kept free beyond what the person's apps and the system use now: two on a Mac of eight cores or more, else one
 export const paceReserve = (cores: number) => (cores >= 8 ? 2 : 1)
+// On battery, the most threads of Claude's commands that run at full speed at once, oldest first; the rest wait in the background
+// mode, which on a Mac runs them on its efficiency cores. On 27 Nov two tasks' test runs, about 28 processes at once, had the Mac
+// draw 50 to 60 W on its battery
+export const paceBatteryRoom = (cores: number) => Math.max(2, Math.floor(cores / 4))
 // Every process with its parent, group, age, priority and program; every thread ready to run, with its priority (only those: all
 // of a Mac's threads are thousands of lines); the cores; and the chat's own engine
 export const PACE_LOOK = `echo "@@PACE@@ $PPID"; echo @@CORES@@; sysctl -n hw.ncpu; echo @@PS@@; ps -A -o pid=,ppid=,pgid=,etime=,pri=,comm=; echo @@THREADS@@; ps -M -A -c | awk '($1 ~ /^[0-9]+$/ && $3 ~ /^R/) || ($1 !~ /^[0-9]+$/ && $5 ~ /^R/)'`
@@ -64,10 +68,18 @@ const isEngine = (p: PaceProc, self: string) => p.pid === self || (p.name.split(
 // Work that runs on after the command that started it ended: launchd took it in, and the shell that led its group is gone too
 // (as hooks/usage.ts counts it Claude's)
 const isLeft = (p: PaceProc, alive: Set<string>) => p.ppid === '1' && p.pgid !== p.pid && !alive.has(p.pgid) && !/^\/System\/|crashpad/i.test(p.name)
-// Claude's commands: everything the engines started, and work they left running, never an engine itself
+// Claude's commands: everything the engines started, and work they left running, never a chat's engine itself. An engine one of
+// Claude's commands started is a command too, with all it starts: a test kit's `claude plugin test` runs each test file in a claude
+// of its own, and on 27 Nov 28 of them ran at full speed, never paced, as each was taken for a chat
 export const commandsOf = (look: PaceLook) => {
   const alive = new Set(look.procs.map(p => p.pid))
-  const engines = new Set(look.procs.filter(p => isEngine(p, look.self)).map(p => p.pid))
+  const byPid = new Map(look.procs.map(p => [p.pid, p]))
+  const named = new Set(look.procs.filter(p => isEngine(p, look.self)).map(p => p.pid))
+  const isUnderEngine = (p: PaceProc | undefined) => {
+    for (let up = byPid.get(p?.ppid ?? ''), n = 0; up && n < 64; up = byPid.get(up.ppid), n++) if (named.has(up.pid)) return true
+    return false
+  }
+  const engines = new Set([...named].filter(pid => pid === look.self || !isUnderEngine(byPid.get(pid))))
   const children = new Map<string, string[]>()
   for (const p of look.procs) children.set(p.ppid, [...(children.get(p.ppid) ?? []), p.pid])
   const found = new Set<string>()
@@ -80,15 +92,15 @@ export const commandsOf = (look: PaceLook) => {
 // ready at full speed, taken as the lower of this look's count and the last one's (`before`): a burst of a moment, which the reserve
 // covers, would otherwise hold Claude's work back for a whole look while cores stood idle (seen 21 Nov: counts of 3 to 31 a few
 // seconds apart). The oldest commands first run at full speed while their ready threads fit in it (the first always does), the rest
-// wait; a command with nothing ready is never held, and one waiting comes back once it fits
-export const paceOf = (look: PaceLook, before?: number) => {
+// wait; a command with nothing ready is never held, and one waiting comes back once it fits. On battery the room is a few cores at most
+export const paceOf = (look: PaceLook, before?: number, isBattery = false) => {
   const order = commandsOf(look).sort((a, b) => b.age - a.age || Number(a.pid) - Number(b.pid))
   // (a process the list of processes does not have was born between the two listings: it is not counted, as it may be Claude's)
   const ours = new Set(order.map(p => p.pid))
   const listed = new Set(look.procs.map(p => p.pid))
   const seen = Object.entries(look.threads).reduce((sum, [pid, t]) => sum + (ours.has(pid) || !listed.has(pid) ? 0 : t.full), 0)
   const others = before === undefined ? seen : Math.min(seen, before)
-  const room = Math.max(1, look.cores - paceReserve(look.cores) - others)
+  const room = Math.min(Math.max(1, look.cores - paceReserve(look.cores) - others), isBattery ? paceBatteryRoom(look.cores) : Infinity)
   const lower: string[] = []
   const lift: string[] = []
   let used = 0

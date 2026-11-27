@@ -19,9 +19,12 @@ const usagePathOf = async ($: EngineInterface) => {
 
 // One look when the last is due: a fresh one another chat left is taken as it is, and a chat that is looking says so first in a
 // small file beside it, so chats that fall due together look once
+// How often it looks: less often on battery, as the look itself costs the processor
+const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
 const lookUsage = async ($: EngineInterface) => {
   const now = await $.clock.now()
-  const isFresh = (at: number) => now >= at && now - at < USAGE_EVERY - 500
+  const every = usageEvery()
+  const isFresh = (at: number) => now >= at && now - at < every - 500
   if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
   usageBusy = true
   usageTriedAt = now
@@ -30,12 +33,12 @@ const lookUsage = async ($: EngineInterface) => {
     const shared = keptOf(await $.fs.read(path).catch(() => ''))
     if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
     const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
-    if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
+    if (taking && now >= taking && now - taking < every / 2) return
     await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
     const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
-    // top, the costly part, at most once a minute, answered or not
+    // top, the costly part, at most once a minute, answered or not, and on battery once in five
     const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
-    const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+    const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= (isOnBattery ? FOOTPRINT_BATTERY_EVERY : FOOTPRINT_EVERY))
     if (isTop) usageTopTriedAt = now
     const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
@@ -53,7 +56,7 @@ const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
   if (isNew) await update($, figuresAt, () => kept.at)
 }
 // The figures to show, when a look has been had lately
-const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
+const usageNow = (now: number) => (usageKept && now - usageKept.at < usageEvery() * 6 ? usageKept.figures : undefined)
 // The looks of the last minutes for the cards' charts, ending at the newest look, so a drawing between looks draws the same charts
 const usageHistory = () => ({ points: usageKept?.history ?? [], at: usageKept?.at ?? 0 })
 

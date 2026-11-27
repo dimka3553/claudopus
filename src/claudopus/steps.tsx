@@ -78,7 +78,8 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
   const one = work.length === 1 ? work[0] : undefined
   const command = one?.tool === 'Bash' ? String((one.input as { command?: unknown })?.command ?? '') : ''
   const kind = one && command && one.tookMs >= LONG_RUN && !isLookup(one.tool, one.input) ? kindOf(command) : ''
-  if (kind && seen.lastRun === kind) say('serial', SERIAL_RUNS(kind))
+  // (on battery, one after the other is what saves it)
+  if (kind && seen.lastRun === kind && !isOnBattery) say('serial', SERIAL_RUNS(kind))
   seen.lastRun = kind || (one ? undefined : seen.lastRun)
   // A commit with no second look started
   if (isTop && lean.second !== 'asked' && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)

@@ -91,7 +91,8 @@ const lookJobs = async ($: EngineInterface) => {
   const moved = new Set<string>()
   if (files.length) {
     // One go: the end of each output with when it last changed
-    const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
+    // (stat as this system has it: a Mac tried Linux's form first, a failed process for each output every few seconds)
+    const mtime = isLinux ? 'm=$(stat -c %Y "$f" 2>/dev/null || echo 0)' : 'm=$(stat -f %m "$f" 2>/dev/null || echo 0)'
     const script = `for f; do ${mtime}; printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done`
     const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
     if (!r) return

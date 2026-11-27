@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.305 · 27 November 2026
+- On battery, Claude's commands get only a few fast cores at once, and the rest move to the Mac's slow, low-power cores. Test runs that start a Claude of their own for each test file were never slowed before, and about thirty at once drew 50 to 60 W.
+- On battery, Claudopus looks at the computer a third as often for the line above the prompt, and takes its costliest look once in five minutes instead of every minute.
+- Claudopus reads your results list again only where something changed, not all of them every 20 seconds, and its watcher that brings it back after Claude switches it off starts far fewer processes.
+- Tasks are told to run big test suites and builds on GitHub or in the cloud while the Mac is on battery, or here only a few at a time.
+
 ## 0.2.304 · 27 November 2026
 - A task's part of its result, passed on by the chat, shows in that task's coloured box, not the box of the task that spoke before it, also after a reload.
 - A message the chat passes on to three or more tasks at once is quoted only over the chat's reply to it, not over each of those tasks' later results.
