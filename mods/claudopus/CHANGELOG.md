@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.293 · 27 November 2026
+- Each coloured reply quotes, in small letters under the task's name, what you wrote to start that task: three lines, then View more.
+
 ## 0.2.292 · 27 November 2026
 - The box above the chat for a task takes that task's colour: its heading and a dot before it, as its card and its replies in the chat have.
 - Tasks started one after another each get a colour of their own, kept on their card, so two cards side by side are never the same colour.

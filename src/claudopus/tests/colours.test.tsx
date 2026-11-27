@@ -14,7 +14,8 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   ]
   const { files, tabs } = world(on, { talk })
   await $.session.start(start)
-  await $.prompt.submit({ text: 'Fix the nose on head A', wait: false, origin: composer })
+  const ASKED = 'Fix the nose on head A\nThe left nostril is too wide\nKeep the bridge as it is\nMatch the scan\'s tip\nThen show me a picture'
+  await $.prompt.submit({ text: ASKED, wait: false, origin: composer })
   const r = (await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A' } as never)) as { agentId: string }
   expect(r.agentId).toBe('a1')
   await $.agent.spawn({ ...spawn, description: 'Make the price page', prompt: 'price' } as never)
@@ -28,6 +29,11 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
     expect(await reply.find({ type: 'Text', text: 'Links' })).toBeDefined()
     expect((await reply.findAll({ type: 'Markdown' })).map(one => one.props.text)).toContain(`- **GitHub** · [The nose is fixed and merged](${PR})`)
     expect(await keyed(reply, `task-reply-${r.agentId}`)).toBeDefined()
+    // What you wrote to the task, quoted small under its name: three lines, and View more for the rest
+    const quote = await reply.find({ type: 'Text', text: /^“Fix the nose on head A/ })
+    expect(quote?.props.size).toBe('footnote')
+    expect(quote?.text).toBe('“Fix the nose on head A\nThe left nostril is too wide\nKeep the bridge as it is…”')
+    expect((await reply.findAll({ type: 'Button' })).find(one => /^quote-more-/.test(one.key ?? ''))?.props.label).toBe('View more')
     // A reply about no task gets no box
     const plain = await $.ui.mount({ ...MSG, requestId: 'r2', props: { text: 'I cannot see the weather from here.', isFirstOfReply: true }, surface } as never)
     expect(await plain.find({ type: 'Text', text: /●/ })).toBeUndefined()
@@ -37,6 +43,10 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   // Its name opens its Details, which lists its links; its card leads with the same colour
   const reply = await $.ui.mount({ ...MSG, surface: 'desktop' } as never)
   const colour = (await until(async () => reply.find({ type: 'Text', text: '● ' })))?.props.color
+  // View more shows the whole of it
+  await reply.press({ key: String((await reply.findAll({ type: 'Button' })).find(one => /^quote-more-/.test(one.key ?? ''))?.key) })
+  expect(await until(async () => (await reply.findAll({ type: 'Button' })).find(one => one.props.label === 'View less'))).toBeDefined()
+  expect((await reply.find({ type: 'Text', text: /^“Fix the nose on head A/ }))?.text).toBe(`“${ASKED}”`)
   await pressed(reply, `task-open-${r.agentId}`)
   expect(await until(async () => tabs.find(tab => tab.startsWith(`work-${r.agentId}:`)))).toBeDefined()
   // Reply opens the box above the chat, to that task: while it asks something, its answer box

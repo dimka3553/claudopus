@@ -130,6 +130,38 @@ const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
   openWork($, id)
 }
 
+// What you wrote to a task, quoted small under its name in each reply about it, so you remember what you asked: about three lines
+// (its first three, at most QUOTE_CHARS, as small letters run about 80 to a line in a narrow chat), and View more for the rest. A box of
+// three rows would hold four lines of small letters: rows are the body text's. Its press is kept for the reply it was made on
+const quotesOpen = new Set<string>()
+const QUOTE_LINES = 3
+const QUOTE_CHARS = 240
+const quoteShort = (words: string) => cut(words.split('\n').slice(0, QUOTE_LINES).join('\n'), QUOTE_CHARS)
+const quoteOf = ($: EngineInterface, ui: Ui, key: string, words: string) => {
+  const short = quoteShort(words)
+  const isLong = short !== words
+  const isOpen = quotesOpen.has(key)
+  return (
+    <ui.Box key={`quote-${key}`} flexDirection="column">
+      <ui.Text key="quote-words" size="footnote" dimColor wrap="wrap">{`“${isLong && !isOpen ? `${short.replace(/\s*…$/, '')}…` : words}”`}</ui.Text>
+      {isLong ? (
+        <ui.Button
+          key={`quote-more-${key}-${presses}`}
+          label={isOpen ? 'View less' : 'View more'}
+          plain
+          dimColor
+          onPress={() => {
+            presses += 1
+            if (isOpen) quotesOpen.delete(key)
+            else quotesOpen.add(key)
+            redraw($)
+          }}
+        />
+      ) : null}
+    </ui.Box>
+  )
+}
+
 // A list of links, one a line, each led by where it goes
 const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
 
@@ -182,6 +214,10 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
           )
         })}
       </Box>
+      {ids.map(id => {
+        const words = cards.find(one => one.id === id)?.words.trim() ?? ''
+        return words ? quoteOf($, ui, `${mark(e.requestId)}-${id}`, words) : null
+      })}
       {reply}
       {links}
     </Box>
