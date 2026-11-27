@@ -20,6 +20,8 @@ if [ -n "${CLAUDECODE:-}" ] || ! [ -t 0 ] || ! [ -t 1 ]; then
 fi
 file=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json
 mkdir -p "$(dirname "$file")" || exit 1
+# Python where there is one; on Windows, where python3 is often missing or only the Store's stand-in, Node, else Git's own perl
+if python3 -I -c 'import json' >/dev/null 2>&1; then
 python3 -I - "$file" "$rule" <<'PY' || exit 1
 import json, os, sys
 path, rule = os.path.realpath(sys.argv[1]), sys.argv[2]
@@ -49,3 +51,53 @@ os.replace(tmp, path)
 print(f'Added {rule} to your Claude Code settings: your tasks may use it from now on. Press Try again on the card.')
 print(f'To take it back, remove that line from {path}.')
 PY
+elif command -v node >/dev/null 2>&1; then
+node - "$file" "$rule" <<'JS' || exit 1
+const fs = require('fs')
+const [given, rule] = process.argv.slice(2)
+let path = given
+try { path = fs.realpathSync(given) } catch {}
+let text = ''
+try { text = fs.readFileSync(path, 'utf8') } catch (err) { if (err.code !== 'ENOENT') throw err }
+let data
+try { data = text.trim() ? JSON.parse(text) : {} } catch (err) {
+  console.log(`allow-tool: your settings file is not valid JSON (${err.message}), so nothing was changed: ${path}`)
+  process.exit(1)
+}
+if (!data || typeof data !== 'object' || Array.isArray(data)) {
+  console.log(`allow-tool: your settings file is not a JSON object, so nothing was changed: ${path}`)
+  process.exit(1)
+}
+const perms = (data.permissions ??= {})
+const allow = (perms.allow ??= [])
+if (allow.includes(rule)) {
+  console.log(`${rule} is already allowed in your Claude Code settings. Press Try again on the card.`)
+  process.exit(0)
+}
+allow.push(rule)
+const tmp = `${path}.allow-tool.${process.pid}`
+fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
+fs.renameSync(tmp, path)
+console.log(`Added ${rule} to your Claude Code settings: your tasks may use it from now on. Press Try again on the card.`)
+console.log(`To take it back, remove that line from ${path}.`)
+JS
+else
+# (perl writes the settings' keys in order of their names)
+/usr/bin/perl -MJSON::PP -e '
+  my ($path, $rule) = @ARGV;
+  my $text = "";
+  if (open(my $f, "<", $path)) { local $/; $text = <$f>; close $f }
+  my $json = JSON::PP->new->utf8->pretty->space_before(0)->indent_length(2)->canonical;
+  my $data = $text =~ /\S/ ? eval { $json->decode($text) } : {};
+  if (!defined $data) { (my $err = $@) =~ s/\s+$//; print "allow-tool: your settings file is not valid JSON ($err), so nothing was changed: $path\n"; exit 1 }
+  if (ref $data ne "HASH") { print "allow-tool: your settings file is not a JSON object, so nothing was changed: $path\n"; exit 1 }
+  my $allow = ($data->{permissions} //= {})->{allow} //= [];
+  if (grep { $_ eq $rule } @$allow) { print "$rule is already allowed in your Claude Code settings. Press Try again on the card.\n"; exit 0 }
+  push @$allow, $rule;
+  my $tmp = "$path.allow-tool.$$";
+  open(my $o, ">", $tmp) or exit 1; print $o $json->encode($data); close $o or exit 1;
+  rename($tmp, $path) or exit 1;
+  print "Added $rule to your Claude Code settings: your tasks may use it from now on. Press Try again on the card.\n";
+  print "To take it back, remove that line from $path.\n";
+' "$file" "$rule" || exit 1
+fi

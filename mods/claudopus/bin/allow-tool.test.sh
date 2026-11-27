@@ -2,6 +2,8 @@
 # Tests bin/allow-tool for real in a home of its own, at a terminal made by script(1) as the person's would be:
 #   bash mods/claudopus/bin/allow-tool.test.sh
 set -u
+# Its terminal is Python's own, which Windows (Git's bash) has neither a pty module nor often a Python for
+case $(uname -s) in MINGW* | MSYS* | CYGWIN*) echo "allow-tool.test.sh: skipped, it makes the person's terminal with Python's pty, which Windows has not"; exit 0 ;; esac
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-allow-tool-test.XXXXXX") && tmp=$(cd "$tmp" && pwd) || exit 1
 trap 'rm -rf "$tmp"' EXIT

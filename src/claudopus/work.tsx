@@ -29,14 +29,14 @@ const HELD_LONGEST = 2 * 60_000
 const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) => {
   const command = String(call.command ?? '')
   const description = String(call.description ?? '')
-  return call.tool === 'Bash' && !call.run_in_background && !/\bbin\/(?:admin|secret|release)\b|(?:^|[\s;&|(])\.\/(?:admin|secret|release)\b/.test(command) && Number(call.timeout ?? 0) > HELD_LONGEST && (Boolean(heavyOf(command)) || jobKindOf(command, description) === 'download')
+  return call.tool === 'Bash' && !call.run_in_background && !/\bbin[\\/](?:admin|secret|release)\b|(?:^|[\s;&|(])\.\/(?:admin|secret|release)\b/.test(command) && Number(call.timeout ?? 0) > HELD_LONGEST && (Boolean(heavyOf(command)) || jobKindOf(command, description) === 'download')
 }
 // A command that detaches what it starts from Claude Code's sight: under nohup or setsid, disowned, or sent off with a trailing &
 // (with `echo $!` or not). Nothing is detached: a command Claude Code does not track has no row on its card, and its end starts
 // nothing. Not one that goes to another Mac over ssh, where what it starts is that Mac's
 const isDetaching = (call: { tool: string; command?: unknown }) => {
   const command = String(call.command ?? '')
-  if (call.tool !== 'Bash' || /\bbin\/(?:admin|secret|release)\b/.test(command) || /^\s*(?:\S*\/)?ssh\b/.test(command)) return false
+  if (call.tool !== 'Bash' || /\bbin[\\/](?:admin|secret|release)\b/.test(command) || /^\s*(?:\S*\/)?ssh\b/.test(command)) return false
   // (as the shell reads it: what is quoted, or written into a here-document, is not run)
   const shell = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2\b/g, ' ').replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, '""')
   return /(?:^|[\s;&|(])(?:nohup|setsid|disown)(?:\s|$|;)/.test(shell) || /(?<![&>|<])&(?![&>])\s*(?:$|[;)\n]|echo\s+\$!|\S)/.test(shell.replace(/\d?>&\d?|&>>?/g, ' '))
@@ -48,7 +48,7 @@ const isPersonWait = (call: { tool: string; command?: unknown; description?: unk
   const them = `you${name ? `|${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}`
   return (
     call.tool === 'Bash' &&
-    !/\bbin\/(?:admin|secret|release)\b/.test(String(call.command ?? '')) &&
+    !/\bbin[\\/](?:admin|secret|release)\b/.test(String(call.command ?? '')) &&
     new RegExp(String.raw`^\s*(?:wait|watch|poll)(?:ing)?\s+(?:for|until|on)\s+(?:(?:${them})\b(?!')|(?:your|(?:${them})'s)\s+(?:answer|reply|response|press|go-ahead|yes|try|decision|word)s?(?=\s*(?:$|[(.,;:]|(?:to|on|about|before)\b)))`, 'i').test(String(call.description ?? ''))
   )
 }
@@ -109,7 +109,9 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
   const texts: string[] = []
   for (const path of filesRun(command, home, cwd || home)) {
     const runner = /\/bin\/(admin|secret|release|keyring)$/.exec(path)?.[1]
-    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret|release|keyring)$`).test(path))) continue
+    // (on Windows in any case, as its paths are)
+    const isOwn = runner && ((isWindows ? path.toLowerCase() === `${root}/bin/${runner}`.toLowerCase() : path === `${root}/bin/${runner}`) || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret|release|keyring)$`, isWindows ? 'i' : '').test(path))
+    if (isOwn) continue
     const text = (await readOr($, path)).slice(0, 1_000_000)
     if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
     if (text) texts.push(text)
@@ -118,7 +120,7 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
 }
 // A command, or a script it runs, that would print a kept key or password: read as written and with its quotes taken out
 const readsKept = async ($: EngineInterface, command: string) =>
-  [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
+  [command, unquoted(command)].some(one => isKeychainRead(one)) || (await scriptsRun($, command)).some(text => isKeychainRead(text) || isKeychainRead(unquoted(text)))
 // A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
 // by a command (refused: work changes those with Edit or Write, which wait for the person's press)
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
@@ -146,7 +148,7 @@ const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<
 // is refused. Commands that only name the word, such as `pip install keyring`, are refused with it. This stops slips and common
 // tricks, as the boxes' guard does; it is no wall
 const KEYRING_WORD = /(?:^|[\s'"=/;&|(`$])keyring(?:$|[\s'"/;&|)`])/i
-const KEYRING_PATH = /claudopus\/keyring(?:\/|\b)|\.local\/share\/claudopus\b/i
+const KEYRING_PATH = /claudopus[\\/]+keyring(?:[\\/]|\b)|\.local[\\/]+share[\\/]+claudopus\b/i
 const touchesKeyring = (e: { tool: string }) => {
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown; path?: unknown; pattern?: unknown; glob?: unknown }
   if (e.tool === 'Bash') {
@@ -171,7 +173,7 @@ const touchesKeyring = (e: { tool: string }) => {
 // The rules every piece of work a chat starts is handed after its brief, as they stand when it starts: where the chat's words are, the
 // work's own rules, and its panel's. They are its rules for as long as it runs: a change made since reaches the next task
 const workRules = async ($: EngineInterface) => {
-  const work = named(fillModels((await inForce($, pluginRoot($), dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${pluginRoot($)}/bin/admin`).replace(/\{secret\}/g, `${pluginRoot($)}/bin/secret`).replace(/\{release\}/g, `${pluginRoot($)}/bin/release`).replace(/\{pane-file\}/g, `${pluginRoot($)}/bin/pane-file`).trim()
+  const work = named(fillModels((await inForce($, pluginRoot($), dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, runnerAt(pluginRoot($), 'admin')).replace(/\{secret\}/g, runnerAt(pluginRoot($), 'secret')).replace(/\{release\}/g, runnerAt(pluginRoot($), 'release')).replace(/\{pane-file\}/g, runnerAt(pluginRoot($), 'pane-file')).trim()
   const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
@@ -305,7 +307,7 @@ const workHooks = (on: On) => {
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
-      return { deny: `${NO_PUSH} It is ${pluginRoot($)}/bin/release.` }
+      return { deny: `${NO_PUSH} It is ${runnerAt(pluginRoot($), 'release')}.` }
     }
     // The Claudopus code chats run stays as it is: work reads other versions with git show and changes code in worktrees of its own.
     // Claudopus refuses it before Claude Code sees it, so no card offers it to be run on a press either
@@ -362,7 +364,7 @@ const workHooks = (on: On) => {
       }
       grants = [...grants, ...released.grants]
       // A command that runs a runner may ask for a password or key in a box: the box is drawn only while one runs
-      if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin\/(?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now(), e.agentId)
+      if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin[\\/](?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now(), e.agentId)
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)

@@ -296,3 +296,30 @@ test("a password and a key a command waits for are each one block (its label, th
   }
   await settle()
 })
+
+// On Windows there is no keychain: what is typed for a key a command waits for goes, through Git's bash, into bin/keyring's file
+// store, and is read back there before the box goes, never handed to a keychain
+test("on Windows a key a command waits for is kept by bin/keyring through Git's bash, read back there, and never handed to a keychain", async ($, on) => {
+  const { files, clock, keep, keychain, windowsRuns, settle } = world(on, { windows: true })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Deploy the site', prompt: 'deploy it' } as never)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-2', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret STRIPE_KEY here deploy' } as never))
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const id = '1a1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`C:/Users/sam/.claude/claudopus/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'STRIPE_KEY', chat: 'engine-id', at: 1_700_000_000_000 }))
+  await clock.advance(1000)
+  expect(await until(async () => list.find({ type: 'Text', text: "STRIPE_KEY is needed to run this task's command." }))).toBeDefined()
+  const paste = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${id}-`) && b.props.label === 'Paste it'))
+  await list.press({ key: paste?.key ?? '' })
+  const field = await until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').includes(id)))
+  await bar.input({ key: field?.key ?? '', text: 'sk_live_made_up_0042' })
+  expect(await until(async () => files.get(`keyring:claudopus-box/${id}`))).toBe('sk_live_made_up_0042')
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You gave STRIPE_KEY' }))).toBeDefined()
+  expect(keychain).toEqual([])
+  const viaBash = (verb: string) => windowsRuns.some(argv => argv[0] === 'C:/Program Files/Git/bin/bash.exe' && argv[2] === 'exec "$0" "$@"' && String(argv[3]).endsWith('/bin/keyring') && argv[4] === verb && argv[5] === 'claudopus-box' && argv[6] === id)
+  expect([viaBash('set'), viaBash('has')]).toEqual([true, true])
+  expect(windowsRuns.some(argv => argv[0] === '/usr/bin/security' || argv[3] === '/usr/bin/security')).toBe(false)
+  await settle()
+})

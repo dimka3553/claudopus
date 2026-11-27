@@ -112,7 +112,7 @@ const hiddenJson = async ($: EngineInterface, text: string) => {
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
   const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
   if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
-  const { names, isAdminKept } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
+  const { names, isAdminKept } = await knowKept($, /bin[\\/](?:secret|admin)/.test(command))
   if (!names.length && !isAdminKept) return r
   try {
     const text = JSON.stringify({ result: r.result, context: r.context })

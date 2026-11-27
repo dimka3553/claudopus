@@ -758,7 +758,9 @@ const REFUSED =
 'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, `git -C <folder>` for a look into a topic\'s repo, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
 `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
-const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
+const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus[\\/]keyring\b/
+const KEYCHAIN_READ_WINDOWS = /\bcmdkey(?:\.exe)?\s+\/+list\b|\bvaultcmd\b|\bGet-StoredCredential\b|\bCredRead\w*|\bPasswordVault\b|\bProtectedData\b/i
+const isKeychainRead = (text: string) => KEYCHAIN_READ.test(text) || (isWindows && KEYCHAIN_READ_WINDOWS.test(text))
 const NO_READ = 'A saved key or password is never read or printed. Use it as an environment variable through the secret runner the task rules name; it hides the value in anything the command prints.'
 const shellWords = (command: string) => {
 const parts: string[][] = [[]]
@@ -785,14 +787,14 @@ shellWords(command).some(words => {
 let i = 0
 for (;;) {
 while (i < words.length && /^\w+=/.test(words[i]!)) if (/^RELEASE_PUSH=/.test(words[i++]!)) return true
-const head = (words[i] ?? '').split('/').pop() ?? ''
+const head = progName(words[i] ?? '')
 if (['env', 'command', 'sudo', 'nohup', 'time', 'exec'].includes(head)) {
 i++
 while (i < words.length && words[i]!.startsWith('-')) i += (head === 'env' && /^-[uCSP]$/.test(words[i]!)) || (head === 'sudo' && /^-[ugCchpUrtD]$/.test(words[i]!)) ? 2 : 1
 while (head === 'env' && i < words.length && /^\w+=/.test(words[i]!)) if (/^RELEASE_PUSH=/.test(words[i++]!)) return true
 } else break
 }
-const tool = (words[i] ?? '').split('/').pop()
+const tool = progName(words[i] ?? '')
 if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') return pushesMain(words[i + 2] ?? '')
 if (tool === 'gh') return (words[i + 1] === 'pr' && words[i + 2] === 'merge') || (words[i + 1] === 'api' && words.slice(i + 2).some(one => /\/pulls\/\d+\/merge\b/.test(one)))
 if (tool !== 'git') return false
@@ -805,11 +807,7 @@ return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map
 })
 const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch', 'rm', 'mv', 'symbolic-ref']
 const changesOf = (command: string, start: string, home: string): string[] => {
-const at = (here: string, path: string) =>
-(path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home).startsWith('/') ? path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home) : `${here}/${path}`)
-.split('/')
-.reduce<string[]>((kept, part) => (part === '..' ? kept.slice(0, Math.max(1, kept.length - 1)) : part === '.' || (part === '' && kept.length) ? kept : [...kept, part]), [])
-.join('/') || '/'
+const at = (here: string, path: string) => pathOf(path, home, here)
 let here = start
 let before = start
 return shellWords(command.replace(/\d*>&(\d+|-)/g, ' ').replace(/&>>?/g, ' >')).flatMap((all): string[] => {
@@ -818,10 +816,10 @@ const words = all
 .map(one => (/\s/.test(one) ? one : one.replace(/\d*[<>].*$/, '')))
 .filter(Boolean)
 let i = commandAt(words)
-const isEnv = words.slice(0, i).some(one => one.split('/').pop() === 'env')
+const isEnv = words.slice(0, i).some(one => progName(one) === 'env')
 let envFolder = isEnv ? words.slice(0, i).find(one => one.startsWith('--chdir='))?.slice(8) : undefined
 if (isEnv && (words[i - 1] === '-C' || words[i - 1] === '--chdir')) (envFolder = words[i]), (i += 1 + commandAt(words.slice(i + 1)))
-const tool = (words[i] ?? '').split('/').pop()
+const tool = progName(words[i] ?? '')
 if (tool === 'cd' || tool === 'pushd') {
 const to = words.slice(i + 1).find(one => !one.startsWith('-') || one === '-')
 const next = to === undefined ? home : to === '-' ? before : at(here, to)
@@ -877,13 +875,13 @@ const commandAt = (words: string[]) => {
 let i = 0
 for (;;) {
 while (i < words.length && /^\w+=/.test(words[i]!)) i++
-const head = (words[i] ?? '').split('/').pop() ?? ''
+const head = progName(words[i] ?? '')
 if (!BOX_WRAPPERS.includes(head)) return i
 i++
 while (i < words.length && (words[i]!.startsWith('-') || /^\d[\d.]*[smhd]?$/.test(words[i]!))) i += head === 'sudo' && /^-[ugCchpUrt]$/.test(words[i]!) ? 2 : 1
 }
 }
-const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
+const BOX_WORDS = (text: string) => (isWindows ? text.replace(/\\/g, '/') : text).replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
 const wordIs = (word: string, name: string) => {
 const bare = word.replace(/^\[+(?=[^\]]*$)/, '').replace(/(?<=^[^[]*)\]+$/, '')
 if (word === name || bare === name) return true
@@ -909,13 +907,14 @@ if (/\bCLAUDOPUS_BOX(?:ES|_TAKEN)\b/.test(text)) return true
 const kept = shellWords(text.toLowerCase())
 .map(words => {
 const part = words.join(' ')
-if (!BOX_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+if (!BOX_READERS.includes(progName(words[commandAt(words)] ?? ''))) return part
 return part.includes('>') ? part.slice(part.indexOf('>')) : ''
 })
 .join('\n')
 return [0, 1, 2, 3].some(k => namesBoxes(k ? kept.replace(/\{([^{}]*,[^{}]*)\}/g, (_, alts: string) => alts.split(',')[k - 1] ?? '') : kept))
 }
 const RUNNERS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'source', '.', 'python', 'python3', 'node', 'bun', 'deno', 'perl', 'ruby', 'php', 'osascript', 'swift', 'tsx', 'ts-node']
+const WINDOWS_RUNNERS = ['powershell', 'pwsh', 'cmd', 'wscript', 'cscript', 'py']
 const filesRun = (command: string, home: string, from: string): string[] => {
 let folder = from
 const found: string[] = []
@@ -923,9 +922,23 @@ const parts = shellWords(command)
 parts.forEach((words, n) => {
 const i = commandAt(words)
 const head = words[i] ?? ''
-const name = head.split('/').pop() ?? ''
+const name = progName(head)
 if ((name === 'cd' || name === 'pushd') && words[i + 1]) return void (folder = pathOf(words[i + 1]!, home, folder))
 const take = (path: string) => found.push(pathOf(path, home, folder))
+if (isWindows && WINDOWS_RUNNERS.includes(name)) {
+const rest = words.slice(i + 1)
+if (name === 'cmd') {
+const c = rest.findIndex(word => /^\/\/?[ck]$/i.test(word))
+if (c >= 0) found.push(...filesRun(rest.slice(c + 1).join(' '), home, folder))
+} else if (name === 'powershell' || name === 'pwsh') {
+const f = rest.findIndex(word => /^-(?:f|file)$/i.test(word))
+if (f >= 0 && rest[f + 1]) take(rest[f + 1]!)
+} else {
+const at = rest.findIndex(word => !word.startsWith('-') && !word.startsWith('//'))
+if (at >= 0) take(rest[at]!)
+}
+return
+}
 if (RUNNERS.includes(name) || /^python3(?:\.\d+)?$/.test(name)) {
 const rest = words.slice(i + 1).filter(word => word !== 'run')
 const fed = rest.findIndex(word => word.startsWith('<'))
@@ -934,22 +947,34 @@ const at = rest.findIndex(word => !word.startsWith('-') && !word.startsWith('<')
 if (at >= 0 && !rest.slice(0, at).some(flag => /^-[cem]$/.test(flag))) take(rest[at]!)
 if (['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'].includes(name) && at >= 0 && rest[at - 1] === '-c') found.push(...filesRun(rest[at]!, home, folder))
 const before = parts[n - 1] ?? []
-if (at < 0 && fed < 0 && (before[commandAt(before)] ?? '').split('/').pop() === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
+if (at < 0 && fed < 0 && progName(before[commandAt(before)] ?? '') === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
 return
 }
-if (head.includes('/') && !/^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head)) take(head)
+const isSystem = /^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head) || (isWindows && /^[A-Z]:\/Windows\//i.test(pathOf(head, home, folder)))
+if ((head.includes('/') || (isWindows && head.includes('\\'))) && !isSystem) take(head)
 })
 return found
 }
+const HOME_WORD = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/
+const WINDOWS_HOME_WORD = /^(?:~|\$HOME|\$\{HOME\}|\$USERPROFILE|\$\{USERPROFILE\}|%USERPROFILE%|\$env:USERPROFILE)(?=[\\/]|$)/i
+const windowsPath = (path: string) => {
+const forward = path.replace(/\\/g, '/')
+const m = /^(?:([A-Za-z]):|\/([A-Za-z]))(?=\/|$)(.*)$/.exec(forward)
+return m ? `${(m[1] ?? m[2] ?? '').toUpperCase()}:${m[3] || '/'}` : forward
+}
 const pathOf = (path: string, home: string, folder: string) => {
-const full = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
+const full = isWindows ? windowsPath(path.replace(WINDOWS_HOME_WORD, home)) : path.replace(HOME_WORD, home)
+const whole = isWindows ? (isAbsPath(full) ? full : `${windowsPath(folder)}/${full}`) : full.startsWith('/') ? full : `${folder}/${full}`
+const drive = isWindows ? (/^[A-Z]:/.exec(whole)?.[0] ?? '') : ''
 const parts: string[] = []
-for (const part of (full.startsWith('/') ? full : `${folder}/${full}`).split('/')) {
+for (const part of whole.slice(drive.length).split('/')) {
 if (part === '..') parts.pop()
 else if (part && part !== '.') parts.push(part)
 }
-return `/${parts.join('/')}`
+return `${drive}/${parts.join('/')}`
 }
+const progName = (word: string) => (isWindows ? (word.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.exe$/, '') : (word.split('/').pop() ?? ''))
+const runnerAt = (root: string, name: string) => (/\s/.test(root) ? `"${root}/bin/${name}"` : `${root}/bin/${name}`)
 const MEMORY_READERS = [...BOX_READERS, 'cat', 'jq', 'diff', 'cmp', 'shasum', 'sha256sum', 'md5', 'md5sum']
 const MEMORY_OWN = ['live', 'ledger', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
 const MEMORY_PERSON = ['config.json', 'rules', 'roles']
@@ -965,7 +990,7 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
 const kept = shellWords(text.toLowerCase())
 .map(words => {
 const part = words.join(' ')
-if (!MEMORY_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+if (!MEMORY_READERS.includes(progName(words[commandAt(words)] ?? ''))) return part
 return part.includes('>') ? part.slice(part.indexOf('>')) : ''
 })
 .join('\n')
@@ -1201,7 +1226,7 @@ return hidden && hidden.exitCode === 0 && !hidden.isStdoutTruncated && hidden.st
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
 const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
 if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
-const { names, isAdminKept } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
+const { names, isAdminKept } = await knowKept($, /bin[\\/](?:secret|admin)/.test(command))
 if (!names.length && !isAdminKept) return r
 try {
 const text = JSON.stringify({ result: r.result, context: r.context })
@@ -8879,8 +8904,8 @@ if (!runner) return undefined
 const kept = typeof one.id === 'string' ? boxAgents.get(one.id) : undefined
 if (kept) return { call: runner.call, command: runner.command, agent: kept }
 const live = [...runnerCalls].map(([call, other]) => ({ ...other, call })).filter(other => other.until >= now && other.at <= at + BOX_SKEW)
-const isScript = (command: string) => !/\bbin\/(?:admin|secret)\b/.test(command)
-const same = live.filter(other => isScript(other.command) || (one.kind === 'admin' ? /\bbin\/admin\b/.test(other.command) : /\bbin\/secret\b/.test(other.command) && (typeof one.name !== 'string' || other.command.includes(one.name))))
+const isScript = (command: string) => !/\bbin[\\/](?:admin|secret)\b/.test(command)
+const same = live.filter(other => isScript(other.command) || (one.kind === 'admin' ? /\bbin[\\/]admin\b/.test(other.command) : /\bbin[\\/]secret\b/.test(other.command) && (typeof one.name !== 'string' || other.command.includes(one.name))))
 const [only] = same
 if (same.length === 1 && only) {
 if (only.agent && typeof one.id === 'string') boxAgents.set(one.id, only.agent)
@@ -8894,8 +8919,10 @@ const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
 const BOX_KEY = /^MII[A-Za-z0-9+/]{280,1400}={0,2}$/
 const boxKeys = new Map<string, string>()
 const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A'
+const SEAL_FOR_WINDOWS =
+'PATH=/usr/bin:/bin:/mingw64/bin; d=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EXIT; printf %s "$1" | perl -MMIME::Base64 -0777 -ne \'print decode_base64($_)\' >"$d/key" && openssl pkeyutl -encrypt -pubin -keyform DER -inkey "$d/key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -out "$d/sealed" && perl -MMIME::Base64 -0777 -ne \'print encode_base64($_, "")\' "$d/sealed"'
 const sealedFor = async ($: EngineInterface, key: string, value: string) => {
-const r = await runOn($, ['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
+const r = await runOn($, ['/bin/bash', '-c', isWindows ? SEAL_FOR_WINDOWS : SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
 const out = r?.exitCode === 0 ? r.stdout.trim() : ''
 return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
 }
@@ -8908,7 +8935,7 @@ const boxWording = (one: Record<string, unknown>): Pick<Asked, 'kind' | 'name' |
 const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
 if (one.kind === 'admin') {
 if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key)) return undefined
-const mac = one.host === 'here' ? "This Mac's password" : `The password of ${one.host}`
+const mac = one.host === 'here' ? `T${thisMac().slice(1)}'s password` : `The password of ${one.host}`
 return { kind: 'password', host: one.host, text: `${again}${mac} is needed to run this as admin.`, details: 'It goes only to this command and is never saved.' }
 }
 if (one.kind === 'secret') {
@@ -8998,7 +9025,7 @@ drawAgain($)
 const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
 !(await hasKeychain($))
 ? { exitCode: -1 }
-: isLinux
+: isLinux || isWindows
 ? runOn($, [`${pluginRoot($)}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
 : what === 'delete'
 ? runOn($, ['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
@@ -9027,12 +9054,12 @@ return void drawAgain($)
 const escaped = sent.replace(/[\\"]/g, '\\$&')
 const r = !(await hasKeychain($))
 ? { exitCode: -1 }
-: isLinux
+: isLinux || isWindows
 ? await boxKeyring($, 'set', id, `${sent}\n`)
 : await $.process
 .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
 .catch(() => ({ exitCode: -1 }))
-const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await runOn($, ['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+const isKept = r.exitCode === 0 && (isLinux || isWindows ? await boxKeyring($, 'has', id) : await runOn($, ['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
 if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
 boxPresses += 1
 boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
@@ -9081,7 +9108,7 @@ const card = one.card ?? ''
 await changeTodos($, list => list.map(other => (other.id === card && keyAsksOf(other).some(ask => ownBoxId(card, ask.at) === one.id) ? withKeyAsks(other, keyAsksOf(other).filter(ask => ownBoxId(card, ask.at) !== one.id)) : other)))
 await toTask($, card, one.agent ?? card, text, label, one.text).catch(err => log($, `task not told of its key: ${String(err)}`))
 }
-const KEY_GIVEN = (root: string, name: string) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${root}/bin/secret ${name} here '<command using $${name}>'\`.`
+const KEY_GIVEN = (root: string, name: string) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${runnerAt(root, 'secret')} ${name} here '<command using $${name}>'\`.`
 const KEY_NOT_GIVEN = (name: string) => `{Name} pressed Don't give it on your question for ${name}, so it was not given.`
 const KEY_ANSWERED = (name: string, said: string) => `{Name} answered your question for ${name} in their own words instead of giving it: ${said}`
 const cancelBox = async ($: EngineInterface, id: string, said = '') => {
@@ -9238,6 +9265,8 @@ const gateThing = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'Th
 const GATE_GONE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: the wait for {name} to allow it was interrupted. Run it again if it is still needed.`)
 const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} didn't answer in time. Run it again when it is needed, and Claudopus will ask {name} again.`)
 const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: Claudopus asks {name} first, on a card in its panel, and this chat has no panel open.`)
+const ADMIN_NOT_HERE = () =>
+named("This admin command didn't run: Windows has no admin runner, so Claudopus can't run a command as admin on this PC. Ask {name} to run it in a terminal opened as administrator: give it whole in the `ask` tool's `command`, with the folder it runs in. An admin command on a Mac or Linux machine reached over SSH runs as before.")
 const GATE_UNSEALED = () => `This admin command did not run: Claudopus could not secure what was allowed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
 named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
@@ -9245,16 +9274,17 @@ named('Claude never reads or writes the list of admin commands {name} always all
 const gateAct = (gate: Gate) =>
 gate.isUndone ? `Make the change to ${gate.host} again` : gate.kind === 'release' ? `Release ${gate.host} to main` : gate.kind === 'file' ? `Change ${gate.host}` : `Run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
 const gateWhat = (gate: Gate) =>
-gate.isUndone ? `Make the change to ${gate.host} again?` : gate.kind === 'release' ? `Release ${gate.branch || gate.host} to main?` : gate.kind === 'file' ? `Change ${gate.host}?` : `Run this as admin on ${gate.host === 'here' ? 'this Mac' : gate.host}?`
+gate.isUndone ? `Make the change to ${gate.host} again?` : gate.kind === 'release' ? `Release ${gate.branch || gate.host} to main?` : gate.kind === 'file' ? `Change ${gate.host}?` : `Run this as admin on ${gate.host === 'here' ? thisMac() : gate.host}?`
 
 const isAdminPath = (word: string, root: string, name = 'admin') => {
+const [said, own] = isWindows ? [windowsPath(word).toLowerCase(), windowsPath(root).toLowerCase()] : [word, root]
 const parts: string[] = []
-for (const part of word.split('/')) {
+for (const part of said.split('/')) {
 if (part === '..' && parts.length && parts.at(-1) !== '..' && parts.at(-1) !== '') parts.pop()
 else if (part !== '.' && (part !== '' || !parts.length)) parts.push(part)
 }
 const path = parts.join('/')
-return path === name || path === `bin/${name}` || (path.endsWith(`/bin/${name}`) && (path === `${root}/bin/${name}` || /claudopus/i.test(path) || path.includes('$')))
+return path === name || path === `bin/${name}` || (path.endsWith(`/bin/${name}`) && (path === `${own}/bin/${name}` || /claudopus/i.test(path) || path.includes('$')))
 }
 const adminCalls = (command: string, root: string, depth = 0): AdminCall[] => {
 if (depth > 4) return []
@@ -9262,12 +9292,12 @@ return shellWords(command).flatMap(words => {
 let i = 0
 for (;;) {
 while (i < words.length && /^\w+=/.test(words[i]!)) i++
-const head = (words[i] ?? '').split('/').pop() ?? ''
+const head = progName(words[i] ?? '')
 if (!['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'builtin', 'timeout', 'caffeinate', 'nice', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{'].includes(head)) break
 i++
 while (i < words.length && (words[i]!.startsWith('-') || (head === 'sudo' && words[i - 1] === '-u') || /^\d+[smhd]?$/.test(words[i]!) || (head === 'env' && /^\w+=/.test(words[i]!)))) i++
 }
-const tool = (words[i] ?? '').split('/').pop() ?? ''
+const tool = progName(words[i] ?? '')
 if (tool === 'eval') return adminCalls(words.slice(i + 1).join(' '), root, depth + 1)
 if (tool === 'bash' || tool === 'sh' || tool === 'zsh') {
 const c = words.findIndex((one, n) => n > i && /^-[a-z]*c$/.test(one))
@@ -9292,7 +9322,9 @@ if [ -x /usr/bin/security ]; then
   key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a "$acct" -w 2>/dev/null; }
   keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "%s" -l "Claudopus admin gate" -w "%s"\\n' "$acct" "$1" | /usr/bin/security -i >/dev/null 2>&1; }
 else
-  # Linux: where bin/keyring keeps it, a file only this user reads, under the home folder (never XDG_DATA_HOME)
+  # Linux and Windows: where bin/keyring keeps it, a file only this user reads, under the home folder (never XDG_DATA_HOME). On
+  # Windows, in Git's bash, that is the person's profile, as bin/keyring finds it
+  [ -x /usr/bin/cygpath ] && { p=$(/usr/bin/cygpath -F 40 2>/dev/null); HOME=$(/usr/bin/cygpath -u "\${p:-\${USERPROFILE:-}}" 2>/dev/null); [ -n "$HOME" ] || exit 1; }
   d=$HOME/.local/share
   f=$d/claudopus/keyring/${GATE_SERVICE}
   key() { [ -f "$f/$acct" ] && cat "$f/$acct" 2>/dev/null; }
@@ -9313,7 +9345,7 @@ done`
 const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
 if (!(await hasKeychain($))) return undefined
 const r = await runOn($, ['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
-const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
+const lines = r?.exitCode === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : undefined
 return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
 }
 
@@ -9382,7 +9414,7 @@ await setConfig($, dir, 'admin', mode === 'each' ? undefined : mode)
 await setConfig($, dir, 'adminSealed', mode === 'each' ? undefined : seals[kept.length])
 if (change.mode) workAllowed.clear()
 }
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else [ -x /usr/bin/cygpath ] && { p=$(/usr/bin/cygpath -F 40 2>/dev/null); HOME=$(/usr/bin/cygpath -u "${p:-${USERPROFILE:-}}" 2>/dev/null); [ -n "$HOME" ] || exit 0; }; d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
 let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
 if (isKeptForgotten || !dir) return
@@ -9406,11 +9438,11 @@ for (const name of names) await runOn($, ['rm', '-f', `${grantsDir()}/${name}.js
 }
 
 const unquoted = (command: string) => command.replace(/["'\\]/g, '')
-const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)(?![\w.-])/
+const RUNNER_NAMED = /\bbin[\\/](?:admin|secret|release|keyring)(?![\w.-])/
 const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\b[^;&|\n]*\s-i\b|\benv(?:\s+-\w+)*\s+-(?=\s|$)|\bexec\s+-\w*c/
-const RELEASE_NAMED = /\bbin\/release(?![\w.-])/
+const RELEASE_NAMED = /\bbin[\\/]release(?![\w.-])/
 const RELEASE_MOVED =
-/(?:^|[\s;&|(`'"])(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+|BASH_FUNC_\S+)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+)\b|\b(?:export|declare|typeset)\s+(?:-\w+\s+)*-\w*f|(?:^|[;&|(]\s*)(?:source|\.)\s|\b(?:ba|z|da|k|c|tc|fi)?sh\s+(?:-\S+\s+)*\S*bin\/release(?![\w.-])/
+/(?:^|[\s;&|(`'"])(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+|BASH_FUNC_\S+)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+)\b|\b(?:export|declare|typeset)\s+(?:-\w+\s+)*-\w*f|(?:^|[;&|(]\s*)(?:source|\.)\s|\b(?:ba|z|da|k|c|tc|fi)?sh(?:\.exe)?\s+(?:-\S+\s+)*\S*bin[\\/]release(?![\w.-])/
 const movesRunner = (command: string) =>
 [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => (RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one)) || (RELEASE_NAMED.test(one) && RELEASE_MOVED.test(one)))
 const NO_RUNNER_MOVED =
@@ -9418,10 +9450,11 @@ const NO_RUNNER_MOVED =
 const touchesGate = (e: ToolCallInput) => {
 if (e.tool === 'Bash') {
 const command = String((e as { command?: unknown }).command ?? '')
-return [command, unquoted(command)].some(one => /claudopus\/admin-(?:allowed\.json|grants|known\.json)\b/.test(one) || (/\b(?:security|keyring)\b/.test(one) && /claudopus-admin\b/.test(one)))
+return [command, unquoted(command)].some(one => /claudopus[\\/]admin-(?:allowed\.json|grants|known\.json)\b/.test(one) || (/\b(?:security|keyring)\b/.test(one) && /claudopus-admin\b/.test(one)))
 }
-const path = String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? '')
-return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool) && /\/claudopus\/admin-(?:allowed\.json$|known\.json$|grants(?:\/|$))/.test(path)
+const said = String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? '')
+const path = isWindows ? windowsPath(said) : said
+return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool) && new RegExp(/\/claudopus\/admin-(?:allowed\.json$|known\.json$|grants(?:\/|$))/.source, isWindows ? 'i' : '').test(path)
 }
 
 const setGates = async ($: EngineInterface, top: string, fn: (list: Gate[]) => Gate[]) => {
@@ -9555,6 +9588,7 @@ const PERMIT_TALK_KEPT = 8
 const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
 const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), pluginRoot($))
 if (!calls.length || !dir) return { grants: [] }
+if (isWindows && calls.some(one => one.host === 'here')) return { deny: ADMIN_NOT_HERE(), grants: [] }
 const gate = await gateOf($)
 if (gate.mode === 'never') return { grants: [] }
 const list = await read($, todos)
@@ -9618,7 +9652,7 @@ const cut = word.search(/[<>]/)
 return cut > 0 && isAdminPath(word.slice(0, cut), root, 'release') ? [word.slice(0, cut), word.slice(cut)] : [word]
 })
 const i = commandAt(words)
-const name = (words[i] ?? '').split('/').pop() ?? ''
+const name = progName(words[i] ?? '')
 if ((name === 'cd' || name === 'pushd') && words[i + 1]) {
 folder = pathOf(words[i + 1]!, home, folder)
 continue
@@ -9713,7 +9747,7 @@ const lower = full.toLowerCase()
 if (lower === `${memory}/config.json`) return 'your Claudopus settings (config.json)'
 if (lower === `${memory}/rules` || lower.startsWith(`${memory}/rules/`)) return `your rules (${full.slice(dir.length + 1)})`
 if (lower === `${memory}/roles` || lower.startsWith(`${memory}/roles/`)) return `your role file (${full.slice(dir.length + 1)})`
-if (/\/\.git\/release\.local$/.test(full)) return `this Mac's release settings (${full})`
+if (/\/\.git\/release\.local$/i.test(full)) return `${thisMac()}'s release settings (${full})`
 return ''
 }
 const FILE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']
@@ -10678,7 +10712,7 @@ if (!OPEN_APPS.includes((args[++i] ?? '').toLowerCase())) return false
 } else if (/^-[gnRet]+$/.test(one)) continue
 else if (one.startsWith('-')) return false
 else if (/^https?:\/\//i.test(one) && CURL_LOCAL.test(one)) shown++
-else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_FOLDER.test(one) || OPEN_VIEWS.test(one))) return false
+else if ((/^[a-z][\w+.-]*:/i.test(one) && !(isWindows && /^[A-Za-z]:\//.test(one))) || !(isReveal || OPEN_FOLDER.test(one) || OPEN_VIEWS.test(one))) return false
 else shown++
 }
 return shown > 0
@@ -10699,7 +10733,8 @@ const m = /^-[sSfIikv]*([omw])(.*)$/.exec(flag)!
 const value = () => joined ?? args[++i] ?? ''
 if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag)) continue
 if (flag === '-o' || flag === '--output') {
-if (value() !== '/dev/null') return false
+const to = value()
+if (to !== '/dev/null' && !(isWindows && /^nul$/i.test(to))) return false
 } else if (flag === '-w' || flag === '--write-out') {
 const format = value()
 if (/output\{/i.test(format) || format.startsWith('@')) return false
@@ -10714,6 +10749,7 @@ else asked++
 return asked > 0
 }
 const CHAT_SHAPES: Record<string, string> = {
+start: 'On Windows, a `start ""` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), as `explorer.exe` does a folder or `explorer.exe /select,<file>` a file in Explorer; sent with `run_in_background: true`.',
 open: 'An `open` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`; sent with `run_in_background: true`.',
 curl: 'A `curl` the chat runs itself starts with -q (so it reads no curlrc) and is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]), its body printed or sent to /dev/null, never to a file: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O; sent with `run_in_background: true`.',
 preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
@@ -10725,8 +10761,19 @@ if (['preview_list', 'preview_logs', 'tabs_context'].includes(m[1]!)) return tru
 const call = e as { url?: unknown; name?: unknown }
 return m[1] === 'preview_start' && call.name === undefined && typeof call.url === 'string' && /^https?:\/\//i.test(call.url) && CURL_LOCAL.test(call.url)
 }
-const isPlaceOf = (path: string, places: string[]) =>
-!path.split('/').includes('..') && places.some(place => place && (path === place || path.startsWith(`${place.replace(/\/+$/, '')}/`) || (!path.startsWith('/') && place === cwd)))
+const isPlaceOf = (path: string, places: string[]) => {
+const said = isWindows ? windowsPath(path).toLowerCase() : path
+return !said.split('/').includes('..') && places.some(place => {
+const one = isWindows ? windowsPath(place).toLowerCase() : place
+return place && (said === one || said.startsWith(`${one.replace(/\/+$/, '')}/`) || (!(isWindows ? isAbsPath(said) : said.startsWith('/')) && place === cwd))
+})
+}
+const WINDOWS_OPENS = ['start', 'explorer', 'explorer.exe', 'cygstart']
+const windowsOpenArgs = (head: string, args: string[]) => {
+const rest = head === 'start' && args[0] === '' ? args.slice(1) : args
+if (rest.some(one => one === '' || /^\/[A-Za-z]+$/.test(one) || (one.startsWith('/') && one.includes(',') && !one.toLowerCase().startsWith('/select,')))) return ['-x']
+return rest.flatMap(one => (one.toLowerCase().startsWith('/select,') ? ['-R', one.slice(8).replace(/\\/g, '/')] : [one.replace(/\\/g, '/')]))
+}
 const isChatRunnable = (command: string, branch = '', places: string[] = []) => {
 if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
 const said = shellWords(command)[0] ?? []
@@ -10734,10 +10781,12 @@ const isElsewhere = said[0] === 'git' && said[1] === '-C' && /^[^-]/.test(said[2
 if (said[0] === 'git' && said[1] === '-C' && !(isElsewhere && isPlaceOf(said[2] ?? '', places))) return false
 const words = isElsewhere ? ['git', ...said.slice(3)] : said
 const head = words[0] ?? ''
-const homed = head === 'open' ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
+const isOpen = head === 'open' || (isWindows && WINDOWS_OPENS.includes(head))
+const homed = isOpen ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
 if (/[$\\{}*?[\]~!]/.test(homed.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
 const rest = words.slice(2)
 if (head === 'open') return isChatOpen(words.slice(1))
+if (isOpen) return isChatOpen(windowsOpenArgs(head, words.slice(1)))
 if (head === 'curl') return isChatCurl(words.slice(1))
 if (head === 'git') {
 const verb = words[1] ?? ''
@@ -13002,12 +13051,7 @@ type SbosKind = 'database' | 'login'
 type KeyEntry = { name: string; store: KeyStore; where?: string; label?: string; kind?: SbosKind; isPresent: boolean; added: number; seen: number }
 type SbosName = { name: string; label?: string; kind?: SbosKind; isPresent: boolean }
 type KeysState = { at: number; sbosAt?: number; entries: KeyEntry[] }
-const STORE_NAMES: Record<KeyStore, string> = {
-claudopus: "Claudopus's keychain",
-keychain: "this Mac's keychain",
-sbos: 'SBOS secrets',
-env: 'a .env file',
-}
+const storeName = (store: KeyStore) => ({ claudopus: "Claudopus's keychain", keychain: `${thisMac()}'s keychain`, sbos: 'SBOS secrets', env: 'a .env file' })[store]
 const plainName = (text: string) => (/^[\w .:@/+|-]{1,80}$/.test(text) ? text : '')
 const KEY_WORDS = new Set(['api', 'key', 'keys', 'token', 'tokens', 'secret', 'secrets', 'access', 'password', 'passwd', 'pat', 'auth', 'the'])
 const coreOf = (name: string) =>
@@ -13047,12 +13091,12 @@ const keychain = pairs
 .map(([service = '', account = '']) => ({ name: plainName(ENV_NAME.test(account) ? account : service), where: plainName(ENV_NAME.test(account) ? `${service} / ${account}` : service) }))
 .filter(one => one.name && one.where)
 const env: { name: string; where: string }[] = []
-const folders = [...new Set((await readIndex($).catch(() => [] as Stream[])).map(one => one.repo).filter(one => one.startsWith('/')))]
+const folders = [...new Set((await readIndex($).catch(() => [] as Stream[])).map(one => slashed(one.repo)).filter(one => isAbsPath(one)))]
 for (const folder of folders) {
 const files = (await $.fs.list(folder).catch(() => [])).filter(one => one.kind === 'file' && !one.isLink).map(one => one.name).filter(name => /^\.env(?:\.[\w-]+)?$/.test(name) && !/\.(?:example|sample|template|dist)$/.test(name))
 for (const file of files) {
 const r = await runOn($, ['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
-for (const line of (r?.stdout ?? '').split('\n')) {
+for (const line of (r?.stdout ?? '').split(/\r?\n/)) {
 const name = line.replace(/^\s*(?:export\s+)?/, '').replace(/\s*=$/, '')
 if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && isKeyVariable(name)) env.push({ name, where: `${folder}/${file}` })
 }
@@ -13105,7 +13149,7 @@ return now - keys.at < KEYS_MS ? keys : refreshKeys($)
 const dayOf = (at: number) => (at ? new Date(at).toISOString().slice(0, 10) : '')
 const routeOf = (root: string, one: KeyEntry) =>
 one.store === 'claudopus'
-? `\`${root}/bin/secret ${one.name} here '<command using $${one.name}>'\``
+? `\`${runnerAt(root, 'secret')} ${one.name} here '<command using $${one.name}>'\``
 : one.store === 'sbos' && one.kind === 'database'
 ? `SBOS's \`query\` and \`tables\` with db ${one.name}`
 : one.store === 'sbos' && one.kind === 'login'
@@ -13120,7 +13164,7 @@ one.store === 'claudopus'
 const keysText = (root: string, state: KeysState) => {
 const rows = [...state.entries]
 .sort((a, b) => Number(b.isPresent) - Number(a.isPresent) || a.store.localeCompare(b.store) || a.name.localeCompare(b.name))
-.map(one => `| ${one.name} | ${one.label ? oneLine(one.label).replace(/\|/g, '/').slice(0, 80) : ''} | ${STORE_NAMES[one.store]} | ${one.isPresent ? 'present' : 'asked, not given'} | ${dayOf(one.added)} | ${dayOf(one.seen)} | ${named(routeOf(root, one)).replace(/\|/g, '/')} |`)
+.map(one => `| ${one.name} | ${one.label ? oneLine(one.label).replace(/\|/g, '/').slice(0, 80) : ''} | ${storeName(one.store)} | ${one.isPresent ? 'present' : 'asked, not given'} | ${dayOf(one.added)} | ${dayOf(one.seen)} | ${named(routeOf(root, one)).replace(/\|/g, '/')} |`)
 return [
 '# Keys',
 '',
@@ -13153,7 +13197,7 @@ return undefined
 const usable = (one: KeyEntry) => one.isPresent && one.kind !== 'database' && (one.store === 'claudopus' || one.store === 'sbos')
 const KEY_KEPT = (root: string, one: KeyEntry, asked: string, again: string) =>
 named(
-`Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${STORE_NAMES[one.store]}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
+`Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${storeName(one.store)}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
 )
 const AGAIN_IN = (one: KeyEntry, field: string) => `If it no longer works, ask again with its name, ${one.name}, written as it is here, and why it does not do, in \`${field}\`.`
 const AGAIN_BOX = (one: KeyEntry, asked = one.name) =>
@@ -13163,8 +13207,9 @@ const KEY_WORD = /\b(?:(?:api|access|secret|auth|personal) )?(?:key|token|secret
 const ASK_KEY_FIELD =
 'Not shown: a question that asks {name} for a key has no box to paste it in. Ask again with `key` set to the name the key is saved under (such as SENTRY_READ_TOKEN) and `from` saying where {name} gets it (the full link of the page and what to press there): the box shows with your question on your card at once, and replaces a saved key of that name. A password for an admin command is asked by the admin runner itself.'
 const KEY_ASK_SHOWN = (root: string, name: string, isSaved: boolean, beside?: string) =>
-`Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${root}/bin/secret ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`
-const isKeyName = (name: string) => /^[A-Za-z_][A-Za-z0-9_]{0,199}$/.test(name) && !/^(?:PATH|IFS|HOME|USER|SHELL|ENV|BASH_ENV|PS4|SHELLOPTS|BASHOPTS|CDPATH|TMPDIR|LD_.*|DYLD_.*|CLAUDOPUS_.*)$/.test(name)
+`Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${runnerAt(root, 'secret')} ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`
+const isKeyName = (name: string) =>
+/^[A-Za-z_][A-Za-z0-9_]{0,199}$/.test(name) && !/^(?:PATH|IFS|HOME|USER|SHELL|ENV|BASH_ENV|PS4|SHELLOPTS|BASHOPTS|CDPATH|TMPDIR|LD_.*|DYLD_.*|CLAUDOPUS_.*)$/.test(name) && !/^(?:USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|PATHEXT|PROGRAMFILES|HOMEDRIVE|HOMEPATH|MSYSTEM)$/i.test(name)
 const keyAskDetails = (why: string, from: string, name: string, same?: KeyEntry, like?: KeyEntry) =>
 [why, `Where to get it:\n${from}`, same ? `It replaces the ${name} saved now.` : like ? `${like.name} stays saved as it is: this is a second key.` : '', `It goes only into ${keptWhere()}.`].filter(Boolean).join('\n\n')
 const namesWhole = (text: string, name: string) => new RegExp(`(?:^|[^A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^A-Za-z0-9_-])`).test(text)
@@ -13175,7 +13220,7 @@ return listed
 .filter(({ core, whole }) => whole || (core.length > 0 && new RegExp(` ${core.join(' ')}(?: (?:api|access|secret|auth|personal))* (?:key|token|secret|password|pat|credentials?)s? `).test(flat)))
 .sort((a, b) => b.core.length - a.core.length)[0]?.one
 }
-const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|--forget|[^\s'"-][^\s'"]*)/g
+const SECRET_RUNS = /[\\/]secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|--forget|[^\s'"-][^\s'"]*)/g
 const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
 if (!dir) return ''
 const input = e as { command?: unknown; name?: unknown; text?: unknown; copy?: unknown; details?: unknown; for?: unknown; agent?: unknown }
@@ -13322,7 +13367,7 @@ const writtenBy = (command: string, home: string, from: string): string[] => {
 const { text, plain } = shellPieces(command)
 if (!plain) return []
 const at = commandFolder(command, home, from)
-const vars = new Map<string, string>([['HOME', home]])
+const vars = new Map<string, string>([['HOME', home], ...(isWindows ? [['USERPROFILE', home] as [string, string]] : [])])
 const bare = (word: string) => word.replace(/^(["'])(.*)\1$/, '$2')
 for (const m of plain.matchAll(/(?:^|[\s;&|(])([A-Za-z_]\w*)=(\S*)/g)) {
 const start = (m.index ?? 0) + m[0].indexOf('=') + 1
@@ -13338,7 +13383,7 @@ for (const m of plain.matchAll(/(?<![<>=&\d-])\d?>>?\|?\s*("[^"]*"|'[^']*'|[^\s;
 for (const m of plain.matchAll(/(?:^|[\s;&|(])tee\s+(?:-a\s+)?("[^"]*"|'[^']*'|[^\s;&|<>()]+)/g)) words.push(target(m))
 return words
 .map(expand)
-.filter(word => word && !word.startsWith('&') && !word.startsWith('/dev/') && !word.includes('$') && !word.includes('`') && (word.startsWith('/') || word.startsWith('~') || Boolean(at)))
+.filter(word => word && !word.startsWith('&') && !word.startsWith('/dev/') && !(isWindows && /^nul$/i.test(word)) && !word.includes('$') && !word.includes('`') && ((isWindows ? isAbsPath(word) : word.startsWith('/')) || word.startsWith('~') || Boolean(at)))
 .map(word => pathOf(word, home, at || from))
 }
 
@@ -13353,18 +13398,23 @@ return e.tool === 'Bash' ? writtenBy(String(input.command ?? ''), home, cwd || h
 }
 
 const rootCache = new Map<string, { root: string; at: number }>()
+const upOf = (path: string) => {
+const drive = /^[A-Za-z]:/.exec(path)?.[0] ?? ''
+const rest = path.slice(drive.length)
+return drive && rest.lastIndexOf('/') <= 0 ? `${drive}/` : `${drive}${rest.slice(0, rest.lastIndexOf('/')) || '/'}`
+}
 const rootOf = async ($: EngineInterface, path: string, now: number) => {
-const folder = path.slice(0, path.lastIndexOf('/')) || '/'
+const folder = upOf(path)
 const kept = rootCache.get(folder)
 if (kept && now - kept.at < (kept.root ? CROSS_RECENT : 60_000)) return kept.root
 let at = folder
 let root = ''
-for (let hops = 0; at.length > 1 && hops < 12; hops += 1) {
+for (let hops = 0; at.length > 1 && !/^[A-Za-z]:\/$/.test(at) && hops < 12; hops += 1) {
 if (await $.fs.exists(`${at}/.git`).catch(() => false)) {
 root = at
 break
 }
-at = at.slice(0, at.lastIndexOf('/')) || '/'
+at = upOf(at)
 }
 for (const [one, was] of rootCache) if (now - was.at > CROSS_RECENT) rootCache.delete(one)
 rootCache.set(folder, { root, at: now })
@@ -13372,7 +13422,7 @@ return root
 }
 
 const scratchRest = (path: string, session: string) => {
-const m = /^\/.*\/claude-\d+\/[^/]+\/([^/]+)\/scratchpad(?:\/(.*))?$/.exec(path)
+const m = /^(?:[A-Za-z]:)?\/.*\/claude-\d+\/[^/]+\/([^/]+)\/scratchpad(?:\/(.*))?$/.exec(path)
 return m && m[1] === session ? (m[2] ?? '') : undefined
 }
 
@@ -13461,7 +13511,7 @@ if (!at || READ_ONLY.test(first)) return ''
 const lines = outputOf(result).split('\n')
 for (const [i, line] of lines.entries()) {
 if (!lines.slice(Math.max(0, i - 2), i + 3).some(near => ERROR_WORDS.test(near))) continue
-for (const m of line.matchAll(/(?:^|[\s'"(`])((?:~|\.{1,2})?\/?[\w@.+-]+(?:\/[\w@.+-]+)+)(?::\d+)*/g)) {
+for (const m of line.matchAll(isWindows ? /(?:^|[\s'"(`])((?:[A-Za-z]:|~|\.{1,2})?[\\/]?[\w@.+-]+(?:[\\/][\w@.+-]+)+)(?::\d+)*/g : /(?:^|[\s'"(`])((?:~|\.{1,2})?\/?[\w@.+-]+(?:\/[\w@.+-]+)+)(?::\d+)*/g)) {
 const path = pathOf(m[1] ?? '', home, at)
 const one = crossWrites.get(path)
 if (!one || one.top === top || !list.some(card => card.id === one.top && card.status === 'working')) continue
@@ -13500,11 +13550,11 @@ const HELD_LONGEST = 2 * 60_000
 const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) => {
 const command = String(call.command ?? '')
 const description = String(call.description ?? '')
-return call.tool === 'Bash' && !call.run_in_background && !/\bbin\/(?:admin|secret|release)\b|(?:^|[\s;&|(])\.\/(?:admin|secret|release)\b/.test(command) && Number(call.timeout ?? 0) > HELD_LONGEST && (Boolean(heavyOf(command)) || jobKindOf(command, description) === 'download')
+return call.tool === 'Bash' && !call.run_in_background && !/\bbin[\\/](?:admin|secret|release)\b|(?:^|[\s;&|(])\.\/(?:admin|secret|release)\b/.test(command) && Number(call.timeout ?? 0) > HELD_LONGEST && (Boolean(heavyOf(command)) || jobKindOf(command, description) === 'download')
 }
 const isDetaching = (call: { tool: string; command?: unknown }) => {
 const command = String(call.command ?? '')
-if (call.tool !== 'Bash' || /\bbin\/(?:admin|secret|release)\b/.test(command) || /^\s*(?:\S*\/)?ssh\b/.test(command)) return false
+if (call.tool !== 'Bash' || /\bbin[\\/](?:admin|secret|release)\b/.test(command) || /^\s*(?:\S*\/)?ssh\b/.test(command)) return false
 const shell = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2\b/g, ' ').replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, '""')
 return /(?:^|[\s;&|(])(?:nohup|setsid|disown)(?:\s|$|;)/.test(shell) || /(?<![&>|<])&(?![&>])\s*(?:$|[;)\n]|echo\s+\$!|\S)/.test(shell.replace(/\d?>&\d?|&>>?/g, ' '))
 }
@@ -13513,7 +13563,7 @@ const isPersonWait = (call: { tool: string; command?: unknown; description?: unk
 const them = `you${name ? `|${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}`
 return (
 call.tool === 'Bash' &&
-!/\bbin\/(?:admin|secret|release)\b/.test(String(call.command ?? '')) &&
+!/\bbin[\\/](?:admin|secret|release)\b/.test(String(call.command ?? '')) &&
 new RegExp(String.raw`^\s*(?:wait|watch|poll)(?:ing)?\s+(?:for|until|on)\s+(?:(?:${them})\b(?!')|(?:your|(?:${them})'s)\s+(?:answer|reply|response|press|go-ahead|yes|try|decision|word)s?(?=\s*(?:$|[(.,;:]|(?:to|on|about|before)\b)))`, 'i').test(String(call.description ?? ''))
 )
 }
@@ -13562,7 +13612,8 @@ const root = pluginRoot($)
 const texts: string[] = []
 for (const path of filesRun(command, home, cwd || home)) {
 const runner = /\/bin\/(admin|secret|release|keyring)$/.exec(path)?.[1]
-if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret|release|keyring)$`).test(path))) continue
+const isOwn = runner && ((isWindows ? path.toLowerCase() === `${root}/bin/${runner}`.toLowerCase() : path === `${root}/bin/${runner}`) || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret|release|keyring)$`, isWindows ? 'i' : '').test(path))
+if (isOwn) continue
 const text = (await readOr($, path)).slice(0, 1_000_000)
 if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
 if (text) texts.push(text)
@@ -13570,7 +13621,7 @@ if (text) texts.push(text)
 return texts
 }
 const readsKept = async ($: EngineInterface, command: string) =>
-[command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
+[command, unquoted(command)].some(one => isKeychainRead(one)) || (await scriptsRun($, command)).some(text => isKeychainRead(text) || isKeychainRead(unquoted(text)))
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
 if (!dir) return ''
 const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
@@ -13590,7 +13641,7 @@ return MEMORY_OWN.some(name => path === `${memory}/${name}` || path.startsWith(`
 }
 
 const KEYRING_WORD = /(?:^|[\s'"=/;&|(`$])keyring(?:$|[\s'"/;&|)`])/i
-const KEYRING_PATH = /claudopus\/keyring(?:\/|\b)|\.local\/share\/claudopus\b/i
+const KEYRING_PATH = /claudopus[\\/]+keyring(?:[\\/]|\b)|\.local[\\/]+share[\\/]+claudopus\b/i
 const touchesKeyring = (e: { tool: string }) => {
 const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown; path?: unknown; pattern?: unknown; glob?: unknown }
 if (e.tool === 'Bash') {
@@ -13611,7 +13662,7 @@ return roots.some(root => path === root || path.startsWith(`${root}/`) || (isSea
 }
 
 const workRules = async ($: EngineInterface) => {
-const work = named(fillModels((await inForce($, pluginRoot($), dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${pluginRoot($)}/bin/admin`).replace(/\{secret\}/g, `${pluginRoot($)}/bin/secret`).replace(/\{release\}/g, `${pluginRoot($)}/bin/release`).replace(/\{pane-file\}/g, `${pluginRoot($)}/bin/pane-file`).trim()
+const work = named(fillModels((await inForce($, pluginRoot($), dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, runnerAt(pluginRoot($), 'admin')).replace(/\{secret\}/g, runnerAt(pluginRoot($), 'secret')).replace(/\{release\}/g, runnerAt(pluginRoot($), 'release')).replace(/\{pane-file\}/g, runnerAt(pluginRoot($), 'pane-file')).trim()
 const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`
 return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
@@ -13722,7 +13773,7 @@ return { deny: SEND_BACKGROUND(who()) }
 }
 if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
 await log($, 'refused a command that pushes or merges to main itself')
-return { deny: `${NO_PUSH} It is ${pluginRoot($)}/bin/release.` }
+return { deny: `${NO_PUSH} It is ${runnerAt(pluginRoot($), 'release')}.` }
 }
 if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
 const command = String((e as { command?: unknown }).command ?? '')
@@ -13768,7 +13819,7 @@ await dropGrants($, grants)
 return { deny: released.deny }
 }
 grants = [...grants, ...released.grants]
-if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin\/(?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now(), e.agentId)
+if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin[\\/](?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now(), e.agentId)
 }
 if (!isRefusedHere) {
 const fileSaid = await gateOwnFile($, e, raw as never)

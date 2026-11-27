@@ -18,11 +18,14 @@
 case $- in *p*) ;; *) exec /bin/bash -p "$0" "$@" ;; esac
 set -u
 unset PERL5OPT PERL5LIB PERLLIB PERL5DB
-# The runner uses only the system's own programs, so nothing earlier on the PATH is handed the password
+# The runner uses only the system's own programs, so nothing earlier on the PATH is handed the password (on Windows Git's own,
+# whose openssl is in /mingw64/bin)
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
+case $(uname -s) in MINGW* | MSYS* | CYGWIN*) windows=1 PATH=$PATH:/mingw64/bin ;; *) windows= ;; esac
 # The home folder is the one the user database names for this user, never $HOME, which whoever runs this can set to a folder of
-# their own (with a key, a sealed setting and grants made there)
-own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null)
+# their own (with a key, a sealed setting and grants made there); on Windows the profile Windows names for this user, as bin/keyring
+# finds it
+own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null); case $(uname -s) in MINGW* | MSYS* | CYGWIN*) p=$(cygpath -F 40 2>/dev/null); own_home=$(cygpath -u "${p:-${USERPROFILE:-}}" 2>/dev/null) ;; esac
 [ -n "$own_home" ] || own_home=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
 [ -n "$own_home" ] && [ -d "$own_home" ] || { echo "admin: this user has no home folder" >&2; exit 1; }
 HOME=$own_home
@@ -37,14 +40,20 @@ fi
 service=claudopus-admin
 # This Mac's keychain, or on Linux a folder only this user reads: bin/keyring beside this runner
 keyring=$(cd -P "$(dirname "$0")" && pwd)/keyring
-# What this computer is called in what is said: a Mac, or on Linux this machine
-if [ "$(uname -s)" = Darwin ]; then machine='this Mac'; else machine='this machine'; fi
+# What this computer is called in what is said: a Mac, this PC on Windows, or on Linux this machine
+if [ "$(uname -s)" = Darwin ]; then machine='this Mac'; elif [ -n "$windows" ]; then machine='this PC'; else machine='this machine'; fi
 
 forget() { "$keyring" delete "$service" "$mac" >/dev/null 2>&1; }
 
 if [ "$command" = --forget ]; then
   forget && echo "The password for $mac is forgotten." || echo "No password was kept for $mac."
   exit 0
+fi
+
+# Windows has no sudo, and no box of its own that asks for an admin password: a command for this PC is the person's to run
+if [ -n "$windows" ] && [ "$mac" = here ]; then
+  echo "Refused: this admin command did not run. Windows has no admin runner: run it yourself in a terminal opened as administrator. An admin command for a Mac or Linux machine reached over SSH runs as before." >&2
+  exit 6
 fi
 
 # ---- The gate ----
@@ -114,8 +123,8 @@ check() {
 # no chat with a panel takes the request in its first 15 s (the .told mark), as in a -p run with no chat open on this Mac
 box_ask() {
   local boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1 taken=${CLAUDOPUS_BOX_TAKEN:-15} private public
-  # uuidgen, or Linux's own where it is not installed
-  id=$({ /usr/bin/uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null; } | /usr/bin/tr '[:upper:]' '[:lower:]')
+  # uuidgen, or Linux's own where it is not installed, else one made of random bytes (Git's bash on Windows has neither)
+  id=$({ /usr/bin/uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || od -An -tx1 -N16 /dev/urandom | tr -d ' \n' | sed -E 's/^(.{8})(.{4})(.{4})(.{4})(.{12})$/\1-\2-\3-\4-\5\n/'; } | /usr/bin/tr '[:upper:]' '[:lower:]')
   [ -n "$id" ] || return 1
   private=$(openssl genrsa 2048 2>/dev/null) && [ -n "$private" ] || return 1
   public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A) && [ -n "$public" ] || return 1
@@ -127,8 +136,16 @@ box_ask() {
   for ((i = 0; i < 590; i++)); do
     if value=$("$keyring" get claudopus-box "$id" 2>/dev/null); then
       "$keyring" delete claudopus-box "$id" >/dev/null 2>&1
-      # Opened with the private half on a pipe of its own: it is never in a file or a command line
-      printf '%s' "$value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null && status=0
+      # Opened with the private half on a pipe of its own: it is never in a file or a command line. On Windows Git's openssl is a
+      # Windows program, which cannot open the shell's pipe by its name: there the private half is a file for that moment, in a
+      # folder of this run's own under the person's profile, which only they can read, removed as soon as it is opened
+      if [ -n "$windows" ]; then
+        open_with=$(mktemp -d "$HOME/.claudopus-admin.XXXXXX") && (umask 077; printf '%s\n' "$private" >"$open_with/key") &&
+          printf '%s' "$value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey "$open_with/key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 2>/dev/null && status=0
+        [ -n "${open_with:-}" ] && /bin/rm -rf "$open_with"
+      else
+        printf '%s' "$value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null && status=0
+      fi
       unset value
       break
     fi

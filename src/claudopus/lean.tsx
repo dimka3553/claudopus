@@ -102,7 +102,8 @@ const isChatOpen = (args: string[]) => {
     else if (one.startsWith('-')) return false
     else if (/^https?:\/\//i.test(one) && CURL_LOCAL.test(one)) shown++
     // a path: never a link of another kind or a page elsewhere, and for anything but -R a folder or one of the kinds above
-    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_FOLDER.test(one) || OPEN_VIEWS.test(one))) return false
+    // (on Windows a path may start at its drive, C:/)
+    else if ((/^[a-z][\w+.-]*:/i.test(one) && !(isWindows && /^[A-Za-z]:\//.test(one))) || !(isReveal || OPEN_FOLDER.test(one) || OPEN_VIEWS.test(one))) return false
     else shown++
   }
   return shown > 0
@@ -127,7 +128,9 @@ const isChatCurl = (args: string[]) => {
     const value = () => joined ?? args[++i] ?? ''
     if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag)) continue
     if (flag === '-o' || flag === '--output') {
-      if (value() !== '/dev/null') return false
+      // (Windows' own name for it too)
+      const to = value()
+      if (to !== '/dev/null' && !(isWindows && /^nul$/i.test(to))) return false
     } else if (flag === '-w' || flag === '--write-out') {
       const format = value()
       if (/output\{/i.test(format) || format.startsWith('@')) return false
@@ -143,6 +146,7 @@ const isChatCurl = (args: string[]) => {
 }
 // The shape each of these passes in, told with a refusal of one that does not
 const CHAT_SHAPES: Record<string, string> = {
+  start: 'On Windows, a `start ""` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), as `explorer.exe` does a folder or `explorer.exe /select,<file>` a file in Explorer; sent with `run_in_background: true`.',
   open: 'An `open` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`; sent with `run_in_background: true`.',
   curl: 'A `curl` the chat runs itself starts with -q (so it reads no curlrc) and is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]), its body printed or sent to /dev/null, never to a file: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O; sent with `run_in_background: true`.',
   preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
@@ -158,8 +162,22 @@ const isPaneShow = (e: { tool: string }) => {
 // The folders a chat's `git -C` may look into: its own folder and the topics' repos, each with what is below it. Never another
 // path: a repo's own settings can make git run a program (core.fsmonitor on status, diff.external, a textconv or gpg.program on log),
 // so a look into an unpacked download would run what it holds. A path with .. in it is no place of these
-const isPlaceOf = (path: string, places: string[]) =>
-  !path.split('/').includes('..') && places.some(place => place && (path === place || path.startsWith(`${place.replace(/\/+$/, '')}/`) || (!path.startsWith('/') && place === cwd)))
+// (on Windows by either separator, C:/x or /c/x alike, in any case)
+const isPlaceOf = (path: string, places: string[]) => {
+  const said = isWindows ? windowsPath(path).toLowerCase() : path
+  return !said.split('/').includes('..') && places.some(place => {
+    const one = isWindows ? windowsPath(place).toLowerCase() : place
+    return place && (said === one || said.startsWith(`${one.replace(/\/+$/, '')}/`) || (!(isWindows ? isAbsPath(said) : said.startsWith('/')) && place === cwd))
+  })
+}
+// On Windows the chat's open is Git's start (cmd's own, whose first quoted word is a window's title, here empty), Explorer, or
+// cygstart: each shows a page, a folder or a file as open does, Explorer's /select, as open's -R, and no switch of their own
+const WINDOWS_OPENS = ['start', 'explorer', 'explorer.exe', 'cygstart']
+const windowsOpenArgs = (head: string, args: string[]) => {
+  const rest = head === 'start' && args[0] === '' ? args.slice(1) : args
+  if (rest.some(one => one === '' || /^\/[A-Za-z]+$/.test(one) || (one.startsWith('/') && one.includes(',') && !one.toLowerCase().startsWith('/select,')))) return ['-x']
+  return rest.flatMap(one => (one.toLowerCase().startsWith('/select,') ? ['-R', one.slice(8).replace(/\\/g, '/')] : [one.replace(/\\/g, '/')]))
+}
 const isChatRunnable = (command: string, branch = '', places: string[] = []) => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
   // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history, outside quotes; inside double
@@ -173,10 +191,12 @@ const isChatRunnable = (command: string, branch = '', places: string[] = []) => 
   if (said[0] === 'git' && said[1] === '-C' && !(isElsewhere && isPlaceOf(said[2] ?? '', places))) return false
   const words = isElsewhere ? ['git', ...said.slice(3)] : said
   const head = words[0] ?? ''
-  const homed = head === 'open' ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
+  const isOpen = head === 'open' || (isWindows && WINDOWS_OPENS.includes(head))
+  const homed = isOpen ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
   if (/[$\\{}*?[\]~!]/.test(homed.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
   const rest = words.slice(2)
   if (head === 'open') return isChatOpen(words.slice(1))
+  if (isOpen) return isChatOpen(windowsOpenArgs(head, words.slice(1)))
   if (head === 'curl') return isChatCurl(words.slice(1))
   if (head === 'git') {
     // the verb straight after git: no -c, -C or --config-env before it, which set what git runs
