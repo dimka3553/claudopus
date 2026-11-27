@@ -1,0 +1,2 @@
+- When your Mac is busy, Claudopus no longer reloads itself again and again in a chat whose Claudopus is still running, which cut off the chat's turn and hid its task kinds for a while.
+- A task can no longer change the files of the Claudopus copy your chats run from; it works in a copy of its own.

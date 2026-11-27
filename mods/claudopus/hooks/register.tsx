@@ -820,6 +820,8 @@ return [folder]
 }
 const NO_SWITCH = (folder: string) =>
 named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there. No checkout, switch, reset, merge or commit runs in it, except going back to main and a fast-forward to main online. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
+const NO_EDIT_OWN = (folder: string) =>
+named(`Not changed: ${folder} holds the Claudopus code {name}'s chats run, and a change there reaches every chat as it next loads, finished or not. Make a worktree of your own and change the file there.`)
 const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
 const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
 const commandAt = (words: string[]) => {
@@ -11374,6 +11376,8 @@ await watchLoaded($).catch(err => log($, `tabs not watched: ${String(err)}`))
 
 const id = await $.session.id()
 heldChat = id
+isEnded = false
+await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
 const title = await appTitle($)
 await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
 await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
@@ -11544,7 +11548,6 @@ asked = []
 await unshare($, true).catch(() => undefined)
 if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
 isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
-await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
 await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`))
 if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
 if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
@@ -13656,6 +13659,22 @@ if (said.exitCode === 0 && gitDir && gitDir === common && top.replace(/\/+$/, ''
 return ''
 }
 
+const ownCheckoutWritten = async ($: EngineInterface, path: string, start: string) => {
+const home = (await $.env.get('HOME')) ?? ''
+if (!path) return ''
+const known = await knowSource($).catch(() => undefined)
+const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
+const full = pathOf(path, home, start || home)
+if (!own || !full.startsWith(`${own}/`)) return ''
+for (let folder = full.slice(0, full.lastIndexOf('/')); folder.length >= own.length; folder = folder.slice(0, folder.lastIndexOf('/'))) {
+const said = await $.process.run(['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+if (said.exitCode !== 0) continue
+const [gitDir = '', common = '', top = ''] = said.stdout.trim().split('\n').map(line => line.trim())
+return gitDir && gitDir === common && top.replace(/\/+$/, '') === own ? own : ''
+}
+return ''
+}
+
 const workHooks = (on: On) => {
 
 on('tool.call', async ($, e, raw) => {
@@ -13756,6 +13775,14 @@ const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command],
 if (changed) {
 await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
 return { deny: NO_SWITCH(changed) }
+}
+}
+if (dir && !isOff && e.agentId !== undefined && FILE_TOOLS.includes(e.tool)) {
+const input = e as { file_path?: unknown; notebook_path?: unknown }
+const written = await ownCheckoutWritten($, String(input.file_path ?? input.notebook_path ?? ''), cwd || '.')
+if (written) {
+await log($, `refused work ${e.agentId}'s change to a file of Claudopus's own checkout`)
+return { deny: NO_EDIT_OWN(written) }
 }
 }
 if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
