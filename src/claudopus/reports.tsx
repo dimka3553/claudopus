@@ -74,8 +74,18 @@ const loadReports = async ($: EngineInterface) => {
   return found
 }
 
-// The absolute paths a report names, as written, without the punctuation after them
-const namedPaths = (text: string) => [...new Set((text.match(/\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(path => path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+// The absolute paths a report names, as written, without the punctuation after them. A folder's name may hold spaces ("FaceIQ email
+// lifecycle"), and so may a whole path on a line of its own or between backticks; the shorter readings stay beside the longer, for
+// whoever looks a path up to keep the one that is there (27 Nov: a board in a folder with spaces was named as "/Users/…/FaceIQ")
+const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
+const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g
+const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g
+const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm
+const namedPaths = (text: string) => {
+  const found = [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN].flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), path: one[1] ?? one[0] })))
+  found.sort((a, b) => a.at - b.at || b.path.length - a.path.length)
+  return [...new Set(found.map(one => one.path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+}
 // What a report found, in plain words: its first sentences that say something. A heading, a path, a line that only leads in to
 // what follows ("Here is the sheet:", "The answer is back. As it came:") or repeats the title says nothing
 const gistOf = (text: string, title = '') => {

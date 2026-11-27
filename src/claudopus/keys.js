@@ -181,7 +181,19 @@ const usable = (one) => one.isPresent && one.kind !== 'database' && (one.store =
 const KEY_KEPT = (root, one, asked, again) => named(`Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${STORE_NAMES[one.store]}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`);
 // Asked again on purpose: the ask names the kept key exactly, as it is written, and says why it does not do
 const AGAIN_IN = (one, field) => `If it no longer works, ask again with its name, ${one.name}, written as it is here, and why it does not do, in \`${field}\`.`;
-const AGAIN_FORGET = (root, one) => `If it no longer works, take it out first with \`${root}/bin/secret ${one.name} --forget\`; the next run asks for it.`;
+// A kept key that does not do, or a second key for the same service, is asked with the ask tool's \`key\`: its box shows at once
+const AGAIN_BOX = (one, asked = one.name) => `If it does not do, ask {name} for the key with \`ask\`, \`key\` set to ${asked === one.name ? `${one.name} to replace it, or to a new name for a second key` : `${asked} for a second key beside it, or to ${one.name} to replace it`}, and \`from\` saying where {name} gets it: the box to paste it in shows on your card with your question at once.`;
+// An ask that wants a key pasted or typed, with no \`key\`: such a question has no box to paste into (21 Nov, the Sentry key: asked
+// three times, and the person never saw where to put it)
+const KEY_PASTE = /\b(?:paste|type|enter|put|copy|give|send|add|make|create|generate)\b/i;
+const KEY_WORD = /\b(?:(?:api|access|secret|auth|personal) )?(?:key|token|secret|password|credentials?|pat)s?\b/i;
+const ASK_KEY_FIELD = 'Not shown: a question that asks {name} for a key has no box to paste it in. Ask again with `key` set to the name the key is saved under (such as SENTRY_READ_TOKEN) and `from` saying where {name} gets it (the full link of the page and what to press there): the box shows with your question on your card at once, and replaces a saved key of that name. A password for an admin command is asked by the admin runner itself.';
+// What a task is told once its question for a key is on its card
+const KEY_ASK_SHOWN = (root, name, isSaved, beside) => `Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${root}/bin/secret ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`;
+// A name the secret runner takes for a key (bin/secret, valid)
+const isKeyName = (name) => /^[A-Za-z_][A-Za-z0-9_]{0,199}$/.test(name) && !/^(?:PATH|IFS|HOME|USER|SHELL|ENV|BASH_ENV|PS4|SHELLOPTS|BASHOPTS|CDPATH|TMPDIR|LD_.*|DYLD_.*|CLAUDOPUS_.*)$/.test(name);
+// What the key's box says under the task's question: why, where to get it, and what it does to a key saved already
+const keyAskDetails = (why, from, name, same, like) => [why, `Where to get it:\n${from}`, same ? `It replaces the ${name} saved now.` : like ? `${like.name} stays saved as it is: this is a second key.` : '', `It goes only into ${keptWhere()}.`].filter(Boolean).join('\n\n');
 // A name written whole in a text, as it is: not inside another word
 const namesWhole = (text, name) => new RegExp(`(?:^|[^A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^A-Za-z0-9_-])`).test(text);
 // The kept key a text asks for: its whole name in it, in any case and with any dashes, or the words of its name in their order right
@@ -212,6 +224,9 @@ const keyAsked = async ($, e) => {
         return one && !namesWhole(String(input.for ?? ''), one.name) ? KEY_KEPT(root, one, name, AGAIN_IN(one, 'for')) : '';
     }
     if (e.tool === `${TOOLS}ask`) {
+        // One that names the key brings its box: a saved key of that name is replaced, and one of another name stays beside it
+        if (typeof input.key === 'string' && String(input.key).trim())
+            return '';
         // What the ask tells the person to do (a word for a key, and a kept key's name or every word of it), or, when it asks them to
         // paste or type something, what it is about
         const said = `${String(input.text ?? '')} ${String(input.copy ?? '')}`;
@@ -220,7 +235,10 @@ const keyAsked = async ($, e) => {
             return '';
         const fresh = await listed();
         const one = askedIn(said, fresh) ?? (/\b(?:paste|type|enter|give|send|add|put)\b/i.test(said) ? askedIn(about, fresh) : undefined);
-        return one && !namesWhole(about, one.name) ? KEY_KEPT(root, one, one.name, AGAIN_IN(one, 'details')) : '';
+        if (one && !namesWhole(about, one.name))
+            return KEY_KEPT(root, one, one.name, AGAIN_BOX(one));
+        // (a key the person puts somewhere else, with a Copy or a command of its own, is no key given here)
+        return KEY_PASTE.test(said) && (KEY_WORD.test(said) || /[A-Z0-9]_[A-Z0-9]/.test(said)) && !input.copy && !input.command ? named(ASK_KEY_FIELD) : '';
     }
     if (e.tool !== 'Bash')
         return '';
@@ -240,12 +258,12 @@ const keyAsked = async ($, e) => {
             for (const name of (run[1] ?? '').split(',').filter(Boolean)) {
                 const kept = mine.find(entry => entry.name === name);
                 if (kept && run[2] === '--add')
-                    return KEY_KEPT(root, kept, name, AGAIN_FORGET(root, kept));
+                    return KEY_KEPT(root, kept, name, AGAIN_BOX(kept));
                 if (kept)
                     continue;
                 const one = mine.find(entry => sameKey(entry.name, name));
                 if (one)
-                    return KEY_KEPT(root, one, name, AGAIN_FORGET(root, one));
+                    return KEY_KEPT(root, one, name, AGAIN_BOX(one, name));
             }
         }
     }

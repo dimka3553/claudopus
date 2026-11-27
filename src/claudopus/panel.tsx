@@ -700,19 +700,26 @@ const panelHooks = (on: On) => {
     // A row is a dot at the end of its line, the helper's name, its model, context and time, and a press on the name
     // opens its own Details. The dot is purple while it works, green once it finished, red when an error stopped it, grey when it
     // was stopped; one that ended is dim, and one at work has a ring that slowly grows out of its dot and fades.
-    // The lines are drawn as a card's three dots are, which the app is seen to draw
+    // The lines are drawn as a card's three dots are, which the app is seen to draw.
+    // The desktop draws each moving picture in a frame of its own and keeps that frame, its animation going on, only while the
+    // picture and the boxes it sits in stay the same; any change makes it anew, from its first moment (27 Nov: rings that turned
+    // a little and jumped back). There a moving mark is a picture of its own laid over the lines, which change as rows come and go
+    const twigPicture = (t: Twig, key: string, dot: string, isMoving: boolean, alt: string, shape?: Parameters<typeof twigSvg>[4]) =>
+      !('Svg' in table) ? null : isMoving && e.surface === 'desktop' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, dot, true, shape, 'lines')} alt={alt} width={twigWidth(t)} height={LINE} isInteractive />
+          <Box key={`${key}-moving`} position="absolute" top={0} left={0}>
+            <table.Svg key={`${key}-mark`} source={twigSvg(t, LINE, dot, true, shape, 'mark')} alt={alt} width={twigWidth(t)} height={LINE} isInteractive />
+          </Box>
+        </Box>
+      ) : (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, dot, isMoving, shape)} alt={alt} width={twigWidth(t)} height={LINE} isInteractive />
+        </Box>
+      )
     const twigLines = (t: Twig, key: string, status?: Todo['status']) =>
       'Svg' in table && e.surface !== 'terminal' ? (
-        <Box key={key} flexShrink={0}>
-          <table.Svg
-            key={`${key}-svg`}
-            source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working')}
-            alt={status ? { working: 'Working', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[status] : 'Ended'}
-            width={twigWidth(t)}
-            height={LINE}
-            isInteractive
-          />
-        </Box>
+        twigPicture(t, key, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working', status ? { working: 'Working', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[status] : 'Ended')
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>
@@ -749,17 +756,19 @@ const panelHooks = (on: On) => {
       const row = twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
       // Under a helper at work, what it is doing now in plain words, as a command's second line says how it goes (17 Nov: a
       // helper's row said only its model, tokens and time, nothing of what it did)
+      // (the row sits in the same box with that line or without it, so its moving mark is not made anew as the line comes and goes)
       const doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one).length, Math.max(12, width)) : ''
-      if (!doing) return row
       return (
         <Box key={`twig-pair-${scope}-${one.id}`} flexDirection="column" flexShrink={0}>
           {row}
-          <Box key={`twig-now-${scope}-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-            {twigRails(t, `twig-rails-${scope}-${one.id}`)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={lead}>
-              <Text dimColor wrap="truncate-end">{doing}</Text>
+          {doing ? (
+            <Box key={`twig-now-${scope}-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+              {twigRails(t, `twig-rails-${scope}-${one.id}`)}
+              <Box flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={lead}>
+                <Text dimColor wrap="truncate-end">{doing}</Text>
+              </Box>
             </Box>
-          </Box>
+          ) : null}
         </Box>
       )
     }
@@ -770,11 +779,10 @@ const panelHooks = (on: On) => {
     // (the row that stands for the commands folded away is a command's square in grey, with no ring: it is no one command)
     const isMore = (job: Job) => job.id.startsWith('more-')
     const MORE_COLOR = '#9A9A9A'
+    // (its ring turns for as long as it runs: a quiet one says so in its words, and its ring stopped while its row stayed, 27 Nov)
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
-        <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind], !isMore(job) && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={isMore(job) ? 'More commands running' : JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
-        </Box>
+        twigPicture(t, key, isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind], !isMore(job), isMore(job) ? 'More commands running' : JOB_WORD[job.kind], JOB_SHAPE[job.kind])
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>

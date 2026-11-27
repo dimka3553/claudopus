@@ -242,6 +242,8 @@ export const personWords = (text: string) =>
   text
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
     .replace(/<(command-[a-z]+|local-command-[a-z]+)>[\s\S]*?<\/\1>/g, '')
+    // Text the person pasted is theirs: its words stay, the app's marks around it go
+    .replace(/<\/?pasted_content[^>]*>/g, '')
     .trim()
 
 /** A user row that only reminds the model of something: it opens no turn. */

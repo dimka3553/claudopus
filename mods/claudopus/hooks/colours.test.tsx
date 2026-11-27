@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { SessionMessage } from 'claude-code'
 
-import { Builder, NO_ANSWER, PALETTE, linksIn, passedOn, slotsFor } from './colours'
+import { Builder, NO_ANSWER, PALETTE, linksIn, passedOn, personWords, slotsFor } from './colours'
 
 const PUPIL = 'a3333333333333333'
 const GAPS = 'a4444444444444444'
@@ -186,5 +186,8 @@ describe('which task a reply is about', () => {
     expect(asked[GAPS]).toBe('Pass my page edits on, and test the hair worker for grey hair.')
     // Nothing the person said to a task, nothing quoted
     expect(quotes.r1).toBeUndefined()
+    // Text the person pasted is quoted as their words, without the app's marks around it
+    expect(personWords('\n\n<pasted_content id="de2c">\nCan you change the emails?\n</pasted_content id="de2c">\n')).toBe('Can you change the emails?')
+    expect(personWords('<system-reminder>A note.</system-reminder>\nMy words')).toBe('My words')
   })
 })

@@ -881,6 +881,44 @@ const appDraws = (tree: unknown) => {
   walk(sent, 0)
   return { parts, deepest, chars: JSON.stringify(sent).length, isDrawn: parts <= 2000 && deepest <= 32 && JSON.stringify(sent).length <= 262_144 }
 }
+// The desktop draws each moving picture (an Svg with isInteractive) in a frame of its own, and when a pane is drawn again keeps a
+// frame it drew before, its animation going on, only as its engine surface matches them (Uc, in the app's own code): in the new
+// drawing's order, each takes the first frame of the drawing before, at or after the last one taken, that is the same picture with
+// the same words and size, whose elements from the pane's top down are as many and of the same kinds, and none of them taken for
+// another place. Any other is made anew and its animation starts again (27 Nov: rings that turned a little and jumped back). Each
+// moving picture of the new drawing, by its words, and whether the app keeps it
+const appKeeps = (before: unknown, after: unknown) => {
+  type El = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const TAGS: Record<string, string> = { Box: 'div', Text: 'span', div: 'div', span: 'span', b: 'b' }
+  type Frame = { path: object[]; tags: string[]; leaf: string; alt: string; isMoving: boolean }
+  const framesOf = (root: unknown) => {
+    const out: Frame[] = []
+    const walk = (n: unknown, path: object[], tags: string[]): void => {
+      if (!n || typeof n !== 'object') return
+      if (Array.isArray(n)) return n.forEach(one => walk(one, path, tags))
+      const el = n as El
+      const p = el.props ?? {}
+      if (el.type === 'Svg') {
+        if (p.isInteractive) out.push({ path: [...path, el], tags: [...tags, 'iframe'], leaf: JSON.stringify([p.source, p.alt, p.width, p.height]), alt: String(p.alt), isMoving: String(p.source).includes('<animate') })
+        return
+      }
+      // A part that is no element of the app's own puts its children in its parent's place
+      const tag = el.type ? TAGS[el.type] : undefined
+      for (const child of el.children ?? []) tag ? walk(child, [...path, el], [...tags, tag]) : walk(child, path, tags)
+    }
+    walk(root, [], [])
+    return out
+  }
+  const old = framesOf(before)
+  const map = new Map<object, object>()
+  const used = new Set<object>()
+  let from = 0
+  return framesOf(after).flatMap(f => {
+    const i = old.findIndex((o, n) => n >= from && o.path.length === f.path.length && o.leaf === f.leaf && f.path.every((el, k) => (map.has(el) ? map.get(el) === o.path[k] : !used.has(o.path[k]!) && o.tags[k] === f.tags[k])))
+    if (i !== -1) ((from = i + 1), f.path.forEach((el, k) => (map.set(el, old[i]!.path[k]!), used.add(old[i]!.path[k]!))))
+    return f.isMoving ? [{ alt: f.alt, isKept: i !== -1 }] : []
+  })
+}
 
 // Pictures a piece of work made, in its chat
 
@@ -1213,12 +1251,16 @@ test("what a task made is on its card under its title, side by side, and as tile
   await until(async () => ((await texts(term)).includes('■■■■■■') ? true : undefined))
   expect((await texts(term)).filter(text => /^[■·]+$/.test(text))).toEqual(['■■■', '■', '··', '■■■■■■'])
   await term.unmount()
-  // Done: what its result names joins in, but a code file it names stays in the count, and only a link it says it made is a thing
-  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: `The report is made: ${pdf}. The fix is in /repo/src/app.ts.\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide` } as never)
+  // Done: what its result names joins in, but a code file it names stays in the count, and only a link it says it made is a thing.
+  // A page it names in a folder with spaces in its name is one, made before this step began, and comes before every link; a source
+  // it only cites is none, though its address says "releases" (27 Nov: a card showed one cited page and not the board it named)
+  const board = '/Users/me/Email board/board.html'
+  files.set(board, 'x')
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: `The report is made: ${pdf}. The fix is in /repo/src/app.ts.\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide\n\nThe board is unchanged:\n\n${board}\n\nSources:\n- [State AG: settlement with Meta](https://ag.example.gov/news/releases/settlement-meta)` } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' } as never)
   await until(async () => (await keyed(pane, 'made-a1-link-0-open')) || undefined)
   const madeShown = async () => (await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))
-  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', '2 changed files'])
+  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'board', 'os report 9 ↗', '2 changed files'])
   // Started again, it changes a file in a worktree of its own and opens a pull request, and its next result names that only by its
   // number: what its first result named stays, and the pull request is there from what the command printed (19 Nov: a card started
   // again showed only "3 changed files" of seven pull requests, a published page and a document)
@@ -1232,7 +1274,7 @@ test("what a task made is on its card under its title, side by side, and as tile
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a1', message: 'The fix is in pull request #284.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer', agentId: 'a1' } as never)
   await until(async () => ((await madeShown()).includes('web #284 ↗') ? true : undefined))
-  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', '3 changed files'])
+  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'board', 'os report 9 ↗', 'web #284 ↗', '3 changed files'])
   // Started a third time: its worktree is taken away once merged, a step ends with words of its own, and its result lists pull
   // requests in a table and a published page with no word saying it made them. The file it changed there stays with its count, and
   // a page it only cites is still no thing it made
@@ -1251,7 +1293,7 @@ test("what a task made is on its card under its title, side by side, and as tile
   await until(async () => ((await madeShown()).includes('clipify #70 ↗') ? true : undefined))
   // The artifact comes first, by the title it was published under, with an icon of its own; an address to try a flaw on is no
   // thing it made
-  expect(await madeShown()).toEqual(['Review Tracker', '3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', 'web #285 ↗', 'clipify #70 ↗', '3 changed files'])
+  expect(await madeShown()).toEqual(['Review Tracker', '3 pictures', 'vat-report', 'board', 'os report 9 ↗', 'web #284 ↗', 'web #285 ↗', 'clipify #70 ↗', '3 changed files'])
   expect((await pane.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 18).map(svg => String(svg.props.alt).trim())[0]).toBe('Artifact')
   // It opens in the app's own artifact pane beside the chat, and in the browser where the app won't show it
   files.delete('ccd_view:refused')

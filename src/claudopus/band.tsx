@@ -394,13 +394,13 @@ const bandHooks = (on: On) => {
         </Box>
       )
       // Where the figures are drawn, a pointer resting on one shows its card floating over the chat above them, taking no room
-      return marker ? (
+      // (the row sits in the same box with the marker or without it, so the octopus at work is not drawn anew from its start as
+      // the marker comes and goes)
+      return (
         <Box flexDirection="column">
           {marker}
           {row}
         </Box>
-      ) : (
-        row
       )
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last

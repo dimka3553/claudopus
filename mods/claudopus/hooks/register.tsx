@@ -15,7 +15,7 @@ import { copyOf, download, FAILS, folderMarketplace, folderReady, install, insta
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_NOW, JOB_SHAPE, whyOf, logLines, endedName, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
+import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_NOW, JOB_SHAPE, whyOf, logLines, endedName, JOB_LOOK, JOB_NEWS, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
 import { isOwnLongScript, plainOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, WaitKind } from './jobs'
@@ -1844,7 +1844,7 @@ const TWIG_STEP = 18
 const TWIG_ENDED = '#4EBA65'
 const TWIG_FAILED = '#E5484D'
 const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 36
-const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'hollow' | 'diamond' | 'down' | 'up' | 'open' = 'circle') => {
+const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'hollow' | 'diamond' | 'down' | 'up' | 'open' = 'circle', part: 'whole' | 'lines' | 'mark' = 'whole') => {
 const mid = line / 2
 const x = (level: number) => level * TWIG_STEP + 9
 const own = x(t.rails.length)
@@ -1867,7 +1867,8 @@ open: `<path d="M${at} ${mid - 4}L${at + 4} ${mid}L${at} ${mid + 4}L${at - 4} ${
 const mark = dot
 ? `${isMoving ? ring : ''}${shaped}`
 : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
-return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
+const lines = part === 'mark' ? '' : `<path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>`
+return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}">${lines}${part === 'lines' && isMoving ? '' : mark}</svg>`
 }
 
 const railSvg = (t: Twig, line: number) => {
@@ -2866,7 +2867,15 @@ if (JSON.stringify(found) !== JSON.stringify(await read($, reports))) await upda
 return found
 }
 
-const namedPaths = (text: string) => [...new Set((text.match(/\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(path => path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
+const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g
+const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g
+const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm
+const namedPaths = (text: string) => {
+const found = [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN].flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), path: one[1] ?? one[0] })))
+found.sort((a, b) => a.at - b.at || b.path.length - a.path.length)
+return [...new Set(found.map(one => one.path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+}
 const gistOf = (text: string, title = '') => {
 const lead = /^(here is|here are|here's|as it came)\b|\b(is|are) back\b[^.]{0,30}\.?$/i
 const paragraphs = text.split(/\n\s*\n/).map(part =>
@@ -3692,7 +3701,7 @@ if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
 const given = isLinked ? replyLinksIn(e.props.text) : []
 const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
 const hash = colourTextHash(e.props.text)
-if (isColoured && !ids.length && !colourIndex.texts[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
+if (isColoured && !colourIndex.texts[hash] && !colourIndex.quotes[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
 const [first] = ids
 if (!first && !given.length) return reply
 const { Box, Button, Markdown, Text } = ui
@@ -5417,7 +5426,7 @@ const LINK = /https?:\/\/[^\s`'"()<>[\]{}|,;*\\]+/g
 const LINKS_MOST = 30
 const linksOf = (text: string) => (text.match(LINK) ?? []).map(link => link.replace(/[.:!?]+$/, ''))
 const isPlainPage = (link: string) => !/\?|\/api\//.test(link.replace(/^https?:\/\/[^/]+/, ''))
-const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK.test(link) || (MADE_LINK_LINE.test(line) && isPlainPage(link)))))].slice(0, LINKS_MOST)
+const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK.test(link) || (MADE_LINK_LINE.test(line.replace(LINK, ' ')) && isPlainPage(link)))))].slice(0, LINKS_MOST)
 const ARTIFACT = /^https?:\/\/claude\.ai\/(public\/)?artifacts?\//i
 const isLink = (said: string) => /^https?:\/\//.test(said)
 const linkName = (link: string) => {
@@ -5475,7 +5484,7 @@ if (seen.has(path)) continue
 seen.add(path)
 const isNamed = named.includes(given)
 const stat = await $.fs.stat(path).catch(() => undefined)
-if (!stat || stat.kind !== 'file' || (isDated && stat.mtimeMs < since - 5000)) continue
+if (!stat || stat.kind !== 'file' || (isDated && !isNamed && stat.mtimeMs < since - 5000)) continue
 const kind = madeKind(path).kind
 const top = kind === 'file' || (TEXT_DOC.test(path) && !isNamed) ? await repoTop($, path.slice(0, path.lastIndexOf('/'))) : ''
 if (top && path.startsWith(`${top}/`)) {
@@ -15047,13 +15056,11 @@ const row = (
 ) : null}
 </Box>
 )
-return marker ? (
+return (
 <Box flexDirection="column">
 {marker}
 {row}
 </Box>
-) : (
-row
 )
 }
 const bar = `bar|${e.requestId ?? ''}|${e.surface}`
@@ -15712,18 +15719,22 @@ return count > EDGE_PARTS ? (
 )
 }
 
+const twigPicture = (t: Twig, key: string, dot: string, isMoving: boolean, alt: string, shape?: Parameters<typeof twigSvg>[4]) =>
+!('Svg' in table) ? null : isMoving && e.surface === 'desktop' ? (
+<Box key={key} flexShrink={0}>
+<table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, dot, true, shape, 'lines')} alt={alt} width={twigWidth(t)} height={LINE} isInteractive />
+<Box key={`${key}-moving`} position="absolute" top={0} left={0}>
+<table.Svg key={`${key}-mark`} source={twigSvg(t, LINE, dot, true, shape, 'mark')} alt={alt} width={twigWidth(t)} height={LINE} isInteractive />
+</Box>
+</Box>
+) : (
+<Box key={key} flexShrink={0}>
+<table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, dot, isMoving, shape)} alt={alt} width={twigWidth(t)} height={LINE} isInteractive />
+</Box>
+)
 const twigLines = (t: Twig, key: string, status?: Todo['status']) =>
 'Svg' in table && e.surface !== 'terminal' ? (
-<Box key={key} flexShrink={0}>
-<table.Svg
-key={`${key}-svg`}
-source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working')}
-alt={status ? { working: 'Working', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[status] : 'Ended'}
-width={twigWidth(t)}
-height={LINE}
-isInteractive
-/>
-</Box>
+twigPicture(t, key, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working', status ? { working: 'Working', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[status] : 'Ended')
 ) : (
 <Box key={key} flexDirection="row" flexShrink={0}>
 <Text dimColor>{twigText(t)}</Text>
@@ -15754,16 +15765,17 @@ const width = perRow - 4 - t.depth * 2
 const side = [[model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
 const row = twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
 const doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one).length, Math.max(12, width)) : ''
-if (!doing) return row
 return (
 <Box key={`twig-pair-${scope}-${one.id}`} flexDirection="column" flexShrink={0}>
 {row}
+{doing ? (
 <Box key={`twig-now-${scope}-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
 {twigRails(t, `twig-rails-${scope}-${one.id}`)}
 <Box flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={lead}>
 <Text dimColor wrap="truncate-end">{doing}</Text>
 </Box>
 </Box>
+) : null}
 </Box>
 )
 }
@@ -15771,9 +15783,7 @@ const isMore = (job: Job) => job.id.startsWith('more-')
 const MORE_COLOR = '#9A9A9A'
 const jobLines = (t: Twig, key: string, job: Job) =>
 'Svg' in table && e.surface !== 'terminal' ? (
-<Box key={key} flexShrink={0}>
-<table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind], !isMore(job) && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={isMore(job) ? 'More commands running' : JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
-</Box>
+twigPicture(t, key, isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind], !isMore(job), isMore(job) ? 'More commands running' : JOB_WORD[job.kind], JOB_SHAPE[job.kind])
 ) : (
 <Box key={key} flexDirection="row" flexShrink={0}>
 <Text dimColor>{twigText(t)}</Text>

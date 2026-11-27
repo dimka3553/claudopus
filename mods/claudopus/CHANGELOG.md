@@ -2,6 +2,17 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.298 · 27 November 2026
+- The moving rings on a card's helpers and commands keep turning smoothly as rows come and go around them, instead of turning a little and jumping back to their start.
+- A command's ring keeps turning for as long as the command runs, even when it has printed nothing for minutes; its row still says when it has gone quiet.
+
+## 0.2.297 · 27 November 2026
+- Text you pasted into a message shows in its quote as your words, without the marks around it.
+- A task's result quotes your newest message to it, even when that message came after the chat was last read.
+
+## 0.2.296 · 27 November 2026
+- A task's card shows the pages, pictures and documents its result names, even in a folder with spaces in its name or made earlier in the task, ahead of web links; a page the result only cites is no longer shown as one it made.
+
 ## 0.2.295 · 27 November 2026
 - The chat no longer ends its replies with a line about which cards wait for you. You see the waiting cards in the panel, so it names a card's question only when you ask how things stand.
 

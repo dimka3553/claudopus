@@ -881,6 +881,44 @@ const appDraws = (tree: unknown) => {
   walk(sent, 0)
   return { parts, deepest, chars: JSON.stringify(sent).length, isDrawn: parts <= 2000 && deepest <= 32 && JSON.stringify(sent).length <= 262_144 }
 }
+// The desktop draws each moving picture (an Svg with isInteractive) in a frame of its own, and when a pane is drawn again keeps a
+// frame it drew before, its animation going on, only as its engine surface matches them (Uc, in the app's own code): in the new
+// drawing's order, each takes the first frame of the drawing before, at or after the last one taken, that is the same picture with
+// the same words and size, whose elements from the pane's top down are as many and of the same kinds, and none of them taken for
+// another place. Any other is made anew and its animation starts again (27 Nov: rings that turned a little and jumped back). Each
+// moving picture of the new drawing, by its words, and whether the app keeps it
+const appKeeps = (before: unknown, after: unknown) => {
+  type El = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const TAGS: Record<string, string> = { Box: 'div', Text: 'span', div: 'div', span: 'span', b: 'b' }
+  type Frame = { path: object[]; tags: string[]; leaf: string; alt: string; isMoving: boolean }
+  const framesOf = (root: unknown) => {
+    const out: Frame[] = []
+    const walk = (n: unknown, path: object[], tags: string[]): void => {
+      if (!n || typeof n !== 'object') return
+      if (Array.isArray(n)) return n.forEach(one => walk(one, path, tags))
+      const el = n as El
+      const p = el.props ?? {}
+      if (el.type === 'Svg') {
+        if (p.isInteractive) out.push({ path: [...path, el], tags: [...tags, 'iframe'], leaf: JSON.stringify([p.source, p.alt, p.width, p.height]), alt: String(p.alt), isMoving: String(p.source).includes('<animate') })
+        return
+      }
+      // A part that is no element of the app's own puts its children in its parent's place
+      const tag = el.type ? TAGS[el.type] : undefined
+      for (const child of el.children ?? []) tag ? walk(child, [...path, el], [...tags, tag]) : walk(child, path, tags)
+    }
+    walk(root, [], [])
+    return out
+  }
+  const old = framesOf(before)
+  const map = new Map<object, object>()
+  const used = new Set<object>()
+  let from = 0
+  return framesOf(after).flatMap(f => {
+    const i = old.findIndex((o, n) => n >= from && o.path.length === f.path.length && o.leaf === f.leaf && f.path.every((el, k) => (map.has(el) ? map.get(el) === o.path[k] : !used.has(o.path[k]!) && o.tags[k] === f.tags[k])))
+    if (i !== -1) ((from = i + 1), f.path.forEach((el, k) => (map.set(el, old[i]!.path[k]!), used.add(old[i]!.path[k]!))))
+    return f.isMoving ? [{ alt: f.alt, isKept: i !== -1 }] : []
+  })
+}
 
 // Task colours and links at the end of chat replies, each a switch in Config
 
@@ -901,7 +939,7 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
     { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
     { role: 'assistant', text: 'The tip of the nose is rounder now, and the bridge is as it was.', uuid: 'r4', toolUses: [] },
   ]
-  const { files, tabs } = world(on, { talk })
+  const { files, tabs, clock } = world(on, { talk })
   await $.session.start(start)
     await $.prompt.submit({ text: ASKED, wait: false, origin: composer })
   const r = (await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A' } as never)) as { agentId: string }
@@ -935,6 +973,19 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   const later = await $.ui.mount({ ...MSG, requestId: 'r4', props: { text: 'The tip of the nose is rounder now, and the bridge is as it was.', isFirstOfReply: true }, surface: 'desktop' } as never)
   expect(await until(async () => later.find({ type: 'Text', text: '“Also make the tip rounder”' }))).toBeDefined()
   await later.unmount()
+  // A result handed in after the last read of the chat, found by its words, quotes the newest message passed on to its task since
+  const RESULT = 'The bridge is narrower now, and the tip is as you asked it to be.'
+  talk.push(
+    { role: 'user', text: 'Make the bridge narrower too', toolUses: [] },
+    { role: 'assistant', text: 'Passing that on.', uuid: 'r5', toolUses: [{ tool_use_id: 'pass2', tool: 'SendMessage', input: { to: 'a1', message: 'Make the bridge narrower too' } }] },
+    { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
+    { role: 'assistant', text: RESULT, uuid: 'r6', toolUses: [] },
+  )
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: RESULT } as never)
+  const result = await $.ui.mount({ ...MSG, requestId: 'msg_r6', props: { text: RESULT, isFirstOfReply: true }, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => result.find({ type: 'Text', text: '“Make the bridge narrower too”' }))).toBeDefined()
+  await result.unmount()
   // View more shows the whole of it
   await reply.press({ key: String((await reply.findAll({ type: 'Button' })).find(one => /^quote-more-/.test(one.key ?? ''))?.key) })
   expect(await until(async () => (await reply.findAll({ type: 'Button' })).find(one => one.props.label === 'View less'))).toBeDefined()

@@ -170,10 +170,11 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
   if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
   const given = isLinked ? replyLinksIn(e.props.text) : []
   const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
-  // A reply the last pass did not read: the rows since are read, and it is drawn again in its box
-  // (once for each text: a reply about no task stays out of its box, and asks no pass again)
+  // A reply the last pass did not read: the rows since are read, and it is drawn again in its box, quoting the message it answers.
+  // A reply found by the result it passes on too, as the person's newest message to its task may have come since that pass (27 Nov:
+  // a result quoted the message before the one it answered). Once for each text: a reply about no task asks no pass again
   const hash = colourTextHash(e.props.text)
-  if (isColoured && !ids.length && !colourIndex.texts[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
+  if (isColoured && !colourIndex.texts[hash] && !colourIndex.quotes[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
   const [first] = ids
   if (!first && !given.length) return reply
   const { Box, Button, Markdown, Text } = ui

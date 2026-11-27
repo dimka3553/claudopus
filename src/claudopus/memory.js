@@ -1,5 +1,5 @@
 "use strict";
-// Memory files in tabs of the mod's own, links to them in the chat's replies, and the Memory button
+// Memory files in tabs of the mod's own, links to them in the chat's replies, and Config's Memory, which opens the folder
 // ---- Memory files in tabs of the mod's own: the app's file pane opens only the session's folders, and it never lets ~/.claude
 // in (the app's list of protected places), so a memory path in a reply is the mod's link to answer ----
 const MEMORY_PANE = 'memory-';
@@ -81,12 +81,12 @@ const openMemory = ($, path) => {
         for (const pane of open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1))))
             await $.ui.close({ id: pane.id }).catch(() => undefined);
         const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim();
-        // The memory folder itself is named Memory, as its button; else its heading would read 'claudopus' beside the panel's tab
+        // The memory folder itself is named Memory, as in Config; else its heading would read 'claudopus' beside the panel's tab
         await front($, id, path === dir ? 'Memory' : cut(heading || fileName(path), 30));
         redraw($);
     })()).catch(err => log($, `memory file ${path} not opened: ${String(err)}`));
 };
-// Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
+// Memory, in Config: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
 // A terminal, or a chat run over ssh, has no Finder the person can see: there the folder opens as a tab of the panel, each file a link
 const showMemory = async ($, surface) => {
     if (isRunFromAfar || surface === 'terminal' || !hasDesktop)
@@ -95,9 +95,6 @@ const showMemory = async ($, surface) => {
     if (opened.exitCode !== 0)
         await log($, `memory folder not opened: ${opened.stderr}`);
 };
-const memoryButton = ($, ui, isKeyed = false) => (<ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} plain={isKeyed ? true : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))}/>
-  </ui.Box>);
 // ---- Every chat on this Mac in memory: bin/catch-up saves the words of chats no chat saved itself and each chat's work (what its
 // helpers were asked and reported, what connected tools returned, the documents it wrote), so recall finds them all.
 // Each chat starts it; it keeps its own lock and its own pause between runs, so one runs at a time and no more often than that.
@@ -122,17 +119,18 @@ const memoryHooks = (on) => {
             const { Box } = uiOf($, e);
             return <Box key={`quiet-${mark(e.requestId)}`}/>;
         }
+        // Every reply then goes in its task's box, with its links at its end, as the person's settings have it (colours.tsx)
         if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text))
-            return next(e);
+            return withTaskBox($, e, await next(e), uiOf($, e));
         const { text, hrefs } = memoryLinked(e.props.text);
         if (!hrefs.length)
-            return next(e);
+            return withTaskBox($, e, await next(e), uiOf($, e));
         const { Markdown } = uiOf($, e);
-        return (<Markdown key={`memory-reply-${mark(e.requestId)}`} text={text} pressableLinks={hrefs.slice(0, 256)} onLinkPress={link => {
+        return withTaskBox($, e, (<Markdown key={`memory-reply-${mark(e.requestId)}`} text={text} pressableLinks={hrefs.slice(0, 256)} onLinkPress={link => {
                 const path = memoryPressed(link.href);
                 if (path)
                     openMemory($, path);
-            }}/>);
+            }}/>), uiOf($, e));
     });
     // A memory file opened as a tab of its own; the links in it to other memory files open there too
     on('ui.render', { component: 'Pane' }, async ($, e, next) => {
