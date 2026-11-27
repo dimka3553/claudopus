@@ -14937,8 +14937,7 @@ usageFile = tmp ? `${tmp}/claudopus-usage.json` : `${home}/.cache/claudopus-usag
 return usageFile
 }
 
-const usageEvery = () => (isWindows ? USAGE_EVERY * 3 : USAGE_EVERY)
-const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
+const usageEvery = () => Math.max(isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY, isWindows ? USAGE_EVERY * 3 : 0)
 const lookUsage = async ($: EngineInterface) => {
 const now = await $.clock.now()
 const every = usageEvery()
