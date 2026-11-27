@@ -31,7 +31,9 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 // `adminPassword` is read no more: no admin password is kept
 // `askPictures`: true has Claudopus draw a task's question with buttons as one picture, open it on the screen and show it with the
 // question; off as shipped
-export type Config = { name?: string; agents?: boolean; askPictures?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
+// `taskColours`: true puts each chat reply about a task in a box of that task's colour, with its name and Reply, and gives the
+// task's card the same colour dot; off as shipped. `replyLinks`: false takes away the list of a reply's links at its end; on as shipped
+export type Config = { name?: string; agents?: boolean; askPictures?: boolean; taskColours?: boolean; replyLinks?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
 
 // When Fable runs and when a second agent checks, each a choice in Config's Tasks band, the shipped one first. `lean` in config.json
 // holds only the ones changed; a key of a choice that was taken out (small, quick, start, checker, readers) is read as nothing. A job
@@ -267,10 +269,10 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {below}
     </Box>
   )
-  // On and Off side by side, the one in force filled. `agents` is on as shipped, so Off is written as false and On takes the key out;
-  // `askPictures` is off as shipped, so On is written as true and Off takes the key out
-  const onOff = (key: 'agents' | 'askPictures') => {
-    const isShippedOn = key === 'agents'
+  // On and Off side by side, the one in force filled. `agents` and `replyLinks` are on as shipped, so Off is written as false and On
+  // takes the key out; `askPictures` and `taskColours` are off as shipped, so On is written as true and Off takes the key out
+  const onOff = (key: 'agents' | 'askPictures' | 'taskColours' | 'replyLinks') => {
+    const isShippedOn = key === 'agents' || key === 'replyLinks'
     const isOn = isShippedOn ? config[key] !== false : config[key] === true
     const setTo = (value: boolean) => (value === isShippedOn ? undefined : value)
     return (
@@ -379,6 +381,8 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             () => undefined,
           )}
           {item('config-ask-pictures', 'Pictures of questions', "When a task asks you something with buttons, Claudopus draws the question and each button in one picture, opens it on your screen, and shows it with the question on the card and in the chat.", onOff('askPictures'), config.askPictures !== undefined, () => acts.set('askPictures', undefined))}
+          {item('config-task-colours', 'Task colours', "Each chat reply about a task sits in a box of that task's colour, headed by its name and Reply. Its card in the panel gets the same colour dot.", onOff('taskColours'), config.taskColours !== undefined, () => acts.set('taskColours', undefined))}
+          {item('config-reply-links', 'Links at the end', 'Each chat reply ends with a list of the links it gave, each with where it goes. A task\'s Details lists every link the chat gave about it.', onOff('replyLinks'), config.replyLinks !== undefined, () => acts.set('replyLinks', undefined))}
         </Box>,
       )}
       {band(

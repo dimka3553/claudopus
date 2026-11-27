@@ -1,5 +1,5 @@
 // Progress: each task sorted into the area of the person's work it moves on, kept in the memory folder's progress/ by Claudopus
-// alone: the picture (the north star and the goals, in the person's own words), the areas with their next steps, and each area's
+// alone: the picture (the north star and the goals, in the person's own words), the areas, and each area's
 // entries, the newest first. The hooks only queue events; the indexer here drains the queue in the background, one chat at a time,
 // with one answer of Sonnet's for each. What needs no engine (the files' shapes, the prompts, applying an answer) is in
 // mods/claudopus/hooks/progress.ts; the Progress tab draws from the files
@@ -112,20 +112,6 @@ const readProgress = async ($: EngineInterface) => {
   return { areas, entries }
 }
 
-// A press on a next step in the Progress tab: done by hand, or open again
-const setNextState = async ($: EngineInterface, areaId: string, nextId: string, state: ProgressNext['state']) => {
-  const changed = await withProgressFiles($, async () => {
-    const at = new Date(await $.clock.now()).toISOString()
-    const areas = await readAreas($)
-    const area = areas.find(one => one.id === areaId)
-    if (!area?.next.some(one => one.id === nextId && one.state !== state)) return false
-    await writeAreas($, areas.map(one => (one === area ? { ...one, next: one.next.map(n => (n.id === nextId ? { ...n, state, at } : n)), updated: at } : one)))
-    await indexLog($, `next step ${nextId} of ${areaId} made ${state} by hand`)
-    return true
-  })
-  if (changed) await progressMoved($)
-  return changed
-}
 // A press on Set aside: the task's entries are marked at once, before the model has sorted anything
 const markAside = async ($: EngineInterface, task: string) => {
   const isMarked = await withProgressFiles($, async () => {

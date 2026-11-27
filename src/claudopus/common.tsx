@@ -409,6 +409,9 @@ const loadSettings = async ($: EngineInterface) => {
   if (dir) await personCheck($).catch(err => log($, `files not compared as the mod loads: ${String(err)}`))
   const config = await readConfig($, dir)
   isOff = config.agents === false
+  // Task colours, off as shipped, and links at the end of replies, on as shipped (colours.tsx)
+  isColoured = config.taskColours === true
+  isLinked = config.replyLinks !== false
   // Admin passwords an earlier version kept leave the keychain as the mod loads: none is kept any more
   void forgetKeptPasswords($).catch(() => undefined)
   person = typeof config.name === 'string' ? config.name.trim() : ''

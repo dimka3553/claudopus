@@ -17,6 +17,7 @@ import * as M14 from '../../mods/claudopus/hooks/progress-page'
 import * as M15 from '../../mods/claudopus/hooks/progress'
 import * as M16 from '../../mods/claudopus/hooks/topics'
 import * as M17 from '../../mods/claudopus/hooks/reads'
+import * as M18 from '../../mods/claudopus/hooks/colours'
 
 declare global {
   export import atom = M0.atom
@@ -344,11 +345,9 @@ declare global {
   export import daysOf = M14.daysOf
   export import fewerProgress = M14.fewerProgress
   export import goalsOf = M14.goalsOf
-  export import monthOf = M14.monthOf
   export import progressArea = M14.progressArea
   export import progressOverview = M14.progressOverview
   export import PROGRESS_PICTURES_MOST = M14.PROGRESS_PICTURES_MOST
-  export import PROGRESS_THUMBS_MOST = M14.PROGRESS_THUMBS_MOST
   export import progressView = M14.progressView
   export import ProgressActs = M14.ProgressActs
   export import ProgressData = M14.ProgressData
@@ -393,9 +392,14 @@ declare global {
   export import withLatest = M16.withLatest
   export import withoutLatest = M16.withoutLatest
   export import readsOnly = M17.readsOnly
+  export import ColourBuilder = M18.Builder
+  export import replyLinksIn = M18.linksIn
+  export import PALETTE = M18.PALETTE
+  export import colourTextHash = M18.textHash
+  export import ColourIndex = M18.ColourIndex
+  export import TaskLink = M18.TaskLink
   export import ProgressArea = M15.ProgressArea
   export import ProgressEntry = M15.ProgressEntry
   export import ProgressEvent = M15.ProgressEvent
-  export import ProgressNext = M15.ProgressNext
   export import ProgressPicture = M15.ProgressPicture
 }

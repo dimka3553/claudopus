@@ -544,6 +544,9 @@ const panelHooks = (on: On) => {
             <Box flexDirection="column">
               <Box flexDirection="row" gap={1} height={1} overflow="hidden">
                 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+                  {/* With task colours on, the colour of the task's box in the chat leads its name (colours.tsx), outside the button,
+                      as the app draws a button's words in its own colour */}
+                  {taskColour(one.id) ? <Text color={taskColour(one.id)}>● </Text> : null}
                   <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
                     <Text bold wrap="truncate-end">{titleOf(one)}</Text>
                   </Button>
@@ -1724,6 +1727,8 @@ const panelHooks = (on: On) => {
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
             : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
+          {/* Every link the chat's replies about it gave, newest first, while links at the end are on (colours.tsx) */}
+          {taskLinks($, one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks($, one.id))} />) : null}
           {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
           {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}

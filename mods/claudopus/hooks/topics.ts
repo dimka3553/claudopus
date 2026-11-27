@@ -30,7 +30,6 @@ export const latestBlock = (areas: { area: Area; entries: Entry[] }[], reportsDi
       ...entries
         .slice(0, LATEST_ENTRIES)
         .map(e => `  - ${e.at.slice(0, 10)} ${e.title}${e.outcome ? `: ${e.outcome}` : ''}${e.kind === 'aside' ? ` (set aside${e.reason ? `: ${e.reason}` : ''})` : ''}${e.report ? ` · ${reportsDir}/${e.report}/report.md` : ''}`),
-      ...(area.next.some(n => n.state === 'open') ? [`  - Next: ${area.next.filter(n => n.state === 'open').map(n => n.text).join('; ')}`] : []),
     ]),
     LATEST_END,
   ].join('\n')
