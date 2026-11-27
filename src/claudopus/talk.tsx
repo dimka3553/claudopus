@@ -15,6 +15,8 @@ type Line = {
   name?: string
   covers?: string
   sentAt?: number
+  // (it never reached the task, which can't be reached any more: the chat has it)
+  isLost?: boolean
   readAt?: number
   pictures?: string[]
   seen?: string[]
@@ -139,7 +141,7 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
   entries.forEach((entry, i) => {
     if (entry.kind !== 'steer') return
     const text = oneLine(entry.text.replace(/<\/?pasted_content[^>]*>/g, ' '))
-    const when = isFollowed(entry) ? { sentAt: entry.at, ...(entry.readAt ? { readAt: entry.readAt } : {}) } : {}
+    const when = isFollowed(entry) ? { sentAt: entry.at, ...(entry.readAt ? { readAt: entry.readAt } : {}), ...(entry.isLost ? { isLost: true } : {}) } : {}
     const head = flat(text).slice(0, 40)
     const sent = all.findIndex((line, n) => n > 0 && flat(line.covers ?? (line.kind === 'told' ? line.text : '')).includes(head))
     if (sent >= 0) {

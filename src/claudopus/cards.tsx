@@ -288,12 +288,19 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
   const list = await read($, todos)
   const statusOf = (one: Todo) => live.find(agent => agent.id === one.id)?.status
   const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at
+  // A task no run of this process is behind, that nothing has moved under for STUCK_AFTER, and that can't be reached: its run went
+  // with a rewind of the chat, or a message of the person's has waited unread as long. Its card ends so (keep.tsx cutUnreachable)
+  const isGone = (one: Todo) =>
+    one.status === 'working' && !one.chat && !one.parentId && statusOf(one) === undefined && !runningKids(list, one.id).length && !one.bg?.length && !holdsCard(one.id) && !one.retry?.at && !waiting.some(p => p.agent === one.id) &&
+    now - movedAt(list, one) >= STUCK_AFTER && (Boolean(one.chatWas) || one.entries.some(entry => entry.kind === 'steer' && entry.isUnread && now - entry.at >= STUCK_AFTER))
+  const gone = new Set(list.filter(isGone).map(one => one.id))
+  for (const id of gone) await cutUnreachable($, id)
   for (const id of [...overSince.keys()]) if (!list.some(one => one.id === id && isOver(one))) overSince.delete(id)
   const folder = chat ? await agentsFolder($, chat) : ''
   // The deepest first, so a task whose last helper ends in this look is looked at with it ended
   const depth = (one: Todo) => (one.parentId ? 1 : 0)
   const endedNow: string[] = []
-  for (const one of list.filter(isOver).sort((a, b) => depth(b) - depth(a))) {
+  for (const one of list.filter(one => isOver(one) && !gone.has(one.id)).sort((a, b) => depth(b) - depth(a))) {
     const isListed = statusOf(one) !== undefined
     if (one.id !== heard) {
       const since = overSince.get(one.id) ?? now

@@ -1,0 +1,2 @@
+- A task that can no longer be reached, such as one a rewind of the chat left behind, no longer shows Working for good: its card says Interrupted · Can't be reached any more, keeps its last result, and has Carry on
+- A message you write to such a task is marked "Didn't reach the task · the chat has it" instead of "Not read yet", and the chat gets your words

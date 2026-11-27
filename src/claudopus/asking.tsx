@@ -762,7 +762,7 @@ const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attachShape
 // whether the task has read it, a repeat of earlier words and a Stop and send said too. While some wait, one line says what they
 // wait behind: the task reads messages only between its steps
 const MESSAGES_SHOWN = 5
-const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.readAt !== undefined)
+const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.isLost || entry.readAt !== undefined)
 const sentList = (ui: Ui, one: Todo, now: number) => {
   const all = one.entries.filter(isFollowed)
   if (!all.length) return null
@@ -770,7 +770,9 @@ const sentList = (ui: Ui, one: Todo, now: number) => {
   const unread = all.filter(entry => entry.isUnread).length
   const step = one.running ? `${one.running.label ? `“${cut(one.running.label, 80)}”` : one.running.what}, has run ${took(now - one.running.at)}` : ''
   const meanwhile = !unread
-    ? ''
+    ? all.some(entry => entry.isLost) && isInterrupted(one)
+      ? "This task can't be reached any more, so the chat has your messages. Carry on starts a fresh task in its place."
+      : ''
     : one.status !== 'working'
       ? `The task starts again with ${unread === 1 ? 'your message' : 'your messages'}.`
       : needsPerson(one)
@@ -782,7 +784,7 @@ const sentList = (ui: Ui, one: Todo, now: number) => {
         {all.slice(from).map((entry, i) => {
           const n = from + i + 1
           const same = all.slice(0, n - 1).findIndex(other => plainWords(other.text) === plainWords(entry.text))
-          const state = [entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
+          const state = [entry.isLost ? "Didn't reach the task · the chat has it" : entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
           return (
             <ui.Box key={`sent-${one.id}-${entry.at}`} flexDirection="row" alignItems="flex-start" gap={1} width="100%">
               <ui.Box flexShrink={0} width={String(all.length).length + 7}>
@@ -1186,12 +1188,23 @@ const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
   await changeTodos($, list => list.map(card => (card.id !== target || card.status === 'working' ? card : resumed(card, now))))
 }
+// What Claude Code says of a task it can't start again: its record is not in this chat's folder (a rewind's copy) or gone
+const UNRESUMABLE = /could not be resumed|no transcript found|no such agent/i
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
   // An ask its reply held waits on the person again, every answer back
   const ids = new Set(answers.map(({ one }) => one.id))
   await changeTodos($, list => list.map(card => (ids.has(card.id) ? mapAsks(card, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)) : card)))
+  // A task Claude Code can't start again, and that no run of this chat's is behind, can't be reached at all: its card ends so, and
+  // the chat has the words (keep.tsx)
+  const list = await read($, todos)
+  const top = list.find(card => card.id === topOf(list, target))
+  const isGone = UNRESUMABLE.test(reason) && top && !top.chat && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
+  if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
+    for (const { one, sent } of answers) sentReplies.set(one.id, { ...sent, to: 'chat' })
+    return redraw($)
+  }
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
     const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
