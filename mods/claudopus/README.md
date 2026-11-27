@@ -6,7 +6,7 @@
 <p align="center">
   <a href="https://github.com/dimka3553/claudopus/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/dimka3553/claudopus?color=8A63F0&label=release"></a>
   <a href="https://github.com/dimka3553/claudopus/actions/workflows/check.yml"><img alt="Check" src="https://github.com/dimka3553/claudopus/actions/workflows/check.yml/badge.svg"></a>
-  <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux-555">
+  <img alt="macOS, Windows and Linux" src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-555">
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-555"></a>
 </p>
 
@@ -20,9 +20,9 @@
   <a href="https://www.claudopus.ai">claudopus.ai</a>
 </p>
 
-**Claude Code, with eight arms.** One chat runs many tasks at once, on your own Mac or Linux machine.
+**Claude Code, with eight arms.** One chat runs many tasks at once, on your own Mac, Windows PC or Linux machine.
 
-Each message you send starts a task that Claude does in the background, so the chat is free for your next message straight away. A panel beside the chat shows each task as a card, and the chat stays small because the tasks run elsewhere. It adds to Claude Code. It doesn't replace it. macOS and Linux · free · MIT.
+Each message you send starts a task that Claude does in the background, so the chat is free for your next message straight away. A panel beside the chat shows each task as a card, and the chat stays small because the tasks run elsewhere. It adds to Claude Code. It doesn't replace it. macOS, Windows and Linux · free · MIT.
 
 Each task uses its own tokens, so five tasks at once use tokens about five times as fast as one. On a subscription, that uses up your limits sooner. With an API key or other pay-per-use billing, it multiplies what you pay in that time.
 
@@ -32,13 +32,19 @@ Each task uses its own tokens, so five tasks at once use tokens about five times
 
 ## Install
 
-Paste one line into Terminal (on a Mac: Applications, Utilities, Terminal):
+On a Mac or Linux, paste one line into Terminal (on a Mac: Applications, Utilities, Terminal):
 
 ```
 curl -fsSL https://www.claudopus.ai/install.sh | sh
 ```
 
-It finds Claude Code, the desktop app's own copy or `claude` in a terminal, installs Claudopus from this repo for you and switches it on. It also sets `"subagentPromptCacheTtl": "1h"` there, so tasks and their helpers keep their prompt cache for an hour, as the chat does, instead of 5 minutes, after which a task that waited longer pays to read its whole context again. A value you already set stays, and so does everything else in your `~/.claude/settings.json`. Claudopus sets the same as each chat starts, so an install from the marketplace gets it too. On a Mac without Apple's command line tools (Claude Code needs their git to fetch Claudopus), it opens their installer first and carries on once they are in. Then open a new chat in the desktop app's Code tab, or type `/reload-plugins` in a chat that's open. Running the line again brings Claudopus up to date.
+On Windows, paste one line into PowerShell (Start, type PowerShell, Enter):
+
+```
+irm https://www.claudopus.ai/install.ps1 | iex
+```
+
+It finds Claude Code, the desktop app's own copy or `claude` in a terminal, installs Claudopus from this repo for you and switches it on. It also sets `"subagentPromptCacheTtl": "1h"` there, so tasks and their helpers keep their prompt cache for an hour, as the chat does, instead of 5 minutes, after which a task that waited longer pays to read its whole context again. A value you already set stays, and so does everything else in your `~/.claude/settings.json`. Claudopus sets the same as each chat starts, so an install from the marketplace gets it too. On a Mac without Apple's command line tools (Claude Code needs their git to fetch Claudopus), it opens their installer first and carries on once they are in. On Windows without Git for Windows, which Claude Code needs there, or `jq`, which Stats and the memory read your chats with, it installs them with `winget` first. Then open a new chat in the desktop app's Code tab, or type `/reload-plugins` in a chat that's open. Running the line again brings Claudopus up to date.
 
 It is on in every chat from then on. The first time, the panel opens with a welcome and a **Bring in old chats** button that reads your past chats into its memory. After that, it opens by itself when a task starts. If you close it, it closes in every chat. Type `/claudopus` to open it again.
 

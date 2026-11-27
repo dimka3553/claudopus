@@ -1,6 +1,6 @@
 # Claudopus
 
-> Claudopus is a free, open-source (MIT) mod for Claude Code, Anthropic's coding agent, for macOS and Linux. Each message you send in a chat becomes a task that Claude runs in the background, so the chat is free for your next message straight away. A panel beside the chat shows every task as a card, questions that need you come to the top of it, and what each finished task found is kept in a Results list. Claudopus is not made by Anthropic.
+> Claudopus is a free, open-source (MIT) mod for Claude Code, Anthropic's coding agent, for macOS, Windows and Linux. Each message you send in a chat becomes a task that Claude runs in the background, so the chat is free for your next message straight away. A panel beside the chat shows every task as a card, questions that need you come to the top of it, and what each finished task found is kept in a Results list. Claudopus is not made by Anthropic.
 
 - Website: https://www.claudopus.ai
 - Source code: https://github.com/dimka3553/claudopus
@@ -15,7 +15,13 @@ In Terminal, on a Mac or Linux, one line:
 curl -fsSL https://www.claudopus.ai/install.sh | sh
 ```
 
-It finds Claude Code (the Claude desktop app's own copy, or `claude` in a terminal), installs Claudopus from GitHub (dimka3553/claudopus) and switches it on, keeping the rest of `~/.claude/settings.json`. On a Mac without Apple's command line tools, it opens their installer and carries on once they are in. Then open a new chat in the desktop app's Code tab, or type `/reload-plugins` in one that is open; `/claudopus` opens the panel.
+On Windows, in PowerShell, one line:
+
+```
+irm https://www.claudopus.ai/install.ps1 | iex
+```
+
+It finds Claude Code (the Claude desktop app's own copy, or `claude` in a terminal), installs Claudopus from GitHub (dimka3553/claudopus) and switches it on, keeping the rest of `~/.claude/settings.json`. On a Mac without Apple's command line tools, it opens their installer and carries on once they are in; on Windows without Git for Windows or jq, it installs them with winget first. Then open a new chat in the desktop app's Code tab, or type `/reload-plugins` in one that is open; `/claudopus` opens the panel.
 
 At the prompt of Claude Code in a terminal, the same in two lines:
 
