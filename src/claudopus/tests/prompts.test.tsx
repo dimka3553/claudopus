@@ -475,6 +475,15 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   on('tool.check', (_, e, next) => (String((e as { tool_use_id?: unknown }).tool_use_id).startsWith('chk') ? ({ decision: 'ask' } as never) : next(e)))
   const redraws = { count: 0 }
   on('ui.invalidate', (_, e, next) => ((redraws.count += 1), next(e)))
+  // (the runs as this copy of Claudopus reads them: those `hidden` it does not see, as a copy that read them before another kept one)
+  const view: { hidden: string[] } = { hidden: [] }
+  on('state.get', async (_, e, next) => {
+    const r = (await next(e)) as { value?: { value?: unknown } } | undefined
+    const kept = r?.value?.value as { value?: { command?: string }[] } | { command?: string }[] | undefined
+    if ((e as { key?: string }).key !== 'runs' || !view.hidden.length || !kept) return r as never
+    const shown = (list: { command?: string }[]) => list.filter(one => !view.hidden.includes(String(one.command)))
+    return { ...r, value: { ...r?.value, value: Array.isArray(kept) ? shown(kept) : { ...kept, value: shown(kept.value ?? []) } } } as never
+  })
   await $.session.start(start)
   await $.prompt.submit({ text: 'find the name servers', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Find the name servers', prompt: 'find the name servers' } as never)
@@ -501,6 +510,33 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   await pressOn('-deny-')
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))).toBeDefined()
   expect(pressRuns).toEqual([])
+  // Its Allow is there all the same when another copy of Claudopus kept the command: one an update replaced, which saw the refusal
+  // (27 Nov: a card came up 16 s after an update, and the new copy drew it with Don't allow alone). Pressed, it runs that command
+  await refuse('b0x', { command: 'dig +short MX example.net', description: 'Look up the mail servers' })
+  expect(await until(async () => list.find({ type: 'Text', text: BLOCKED }))).toBeDefined()
+  // (this copy reads the runs as it looks at the work every 20 s, before the other kept it; then draws afresh, past the calm 10 s)
+  view.hidden = ['dig +short MX example.net']
+  await clock.advance(21_000)
+  view.hidden = []
+  await clock.advance(12_000)
+  expect(await until(async () => ((await buttons()).includes('Allow') ? buttons() : undefined))).toEqual(['Allow', "Don't allow"])
+  await pressOn('-allow-')
+  expect(await until(async () => (pressRuns.length ? pressRuns.map(argv => argv[2]) : undefined))).toEqual(['dig +short MX example.net'])
+  files.set(String(pressRuns[0]?.[3]), 'mx.example.net.\nclaudopus-exit 0\n')
+  await clock.advance(5000)
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('mx.example.net.')))).toBeDefined()
+  await steps($, 1, 'mx', 'a1')
+  pressRuns.length = 0
+  // and when Claudopus keeps it no more: Allow runs nothing, and the task is told to try the same command again for a card of its own
+  await refuse('b0y', { command: 'dig +short TXT example.net', description: 'Look up the records' })
+  view.hidden = ['dig +short TXT example.net']
+  await clock.advance(21_000)
+  expect(await until(async () => ((await buttons()).includes('Allow') ? buttons() : undefined))).toEqual(['Allow', "Don't allow"])
+  await pressOn('-allow-')
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('(dig +short TXT example.net)') && one.includes('no longer keeps that command, so it did not run')))).toContain('run exactly the same command once more')
+  expect(pressRuns).toEqual([])
+  await steps($, 1, 'txt', 'a1')
+  view.hidden = []
   // A release Claude Code blocked came after the person's press that allowed it: its block says so, and why it needs this second press
   await refuse('b01', { command: 'cd /repo/wt && /plug/claudopus/bin/release -m "Name servers"', description: 'Release the name servers' })
   expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code blocked the release you allowed. Run it anyway?' }))).toBeDefined()
@@ -614,7 +650,7 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   expect((await until(async () => list.find({ type: 'Text', text: /^You stopped your command after / })))?.props.dimColor).toBe(true)
   expect(await list.find({ type: 'Text', text: 'Checking the name servers answer' })).toBeDefined()
   expect((await textsOf(list)).filter(t => /^(Your command (ended|failed|stopped|didn't)|You stopped)/.test(t) && !/^You stopped your command after \d/.test(t))).toEqual([])
-  expect((await labelsOf(list)).filter(one => /commands? ended/.test(one))).toEqual(['2 commands ended'])
+  expect((await labelsOf(list)).filter(one => /commands? ended/.test(one))).toEqual(['3 commands ended'])
   // (a minute on, the next drawing has it no more)
   await clock.advance(61_000)
   await $.tool.call({ tool: 'Read', agentId: 'a1', file_path: '/repo/soak.log', tool_use_id: 'r2' } as never)
