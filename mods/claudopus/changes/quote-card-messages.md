@@ -1,0 +1,2 @@
+- The grey quote over a coloured reply is now the message it answers wherever you sent it: a task's Message box, its answer box, Reply on a reply, or the chat.
+- A chat message you sent while Claude was working is quoted only over replies about the task it went to, never over another task's.

@@ -896,6 +896,8 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
   // The messages sent before this one that the task has not read yet, in the order sent
   const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
   await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
+  // (and quoted over the chat's replies about it from now: colours.tsx)
+  void writtenOnCard($, id, shown).catch(err => log($, `message on a card not kept for quotes: ${String(err)}`))
   const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
   // Send now on a task in the middle of a step: that step is stopped first, and the message starts it again from there, with the
   // ones it had not read yet before it
@@ -950,6 +952,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     askPressed.delete(mark)
     // The work has since asked something else, or it was answered elsewhere: nothing went, and the card shows what it carries now
     if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
+    void writtenOnCard($, one.id, said).catch(err => log($, `answer on a card not kept for quotes: ${String(err)}`))
     await answerCleared($, one, ask, said, isReply, target, at, line, note)
   } catch (err) {
     // It did not reach the work: the card says so, and its buttons come back to be pressed again, with nothing of the answer left
@@ -1098,6 +1101,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
     ((isHeld = false), list).map(card => (card.id === one.id && hasAsk(card, ask) ? ((isHeld = true), { ...mapAsk(card, ask, kept => ({ ...kept, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(kept.refused ? { talk: [...(kept.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) })), entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
+  void writtenOnCard($, one.id, said).catch(err => log($, `reply on a card not kept for quotes: ${String(err)}`))
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
   dropDrafts($, one.id, ask)
   // A new box, empty, whenever it comes back: the surface keeps what was typed in a box it finds again by its key
