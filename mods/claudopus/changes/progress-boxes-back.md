@@ -1,0 +1,1 @@
+- The boxes for every area are back under the Progress chart: each area with its picture and newest result, opened by a press on its name. This month's stand under their goals, with those under no goal folded; an earlier month shows its own.

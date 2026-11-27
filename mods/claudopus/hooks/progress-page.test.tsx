@@ -92,7 +92,7 @@ test('an earlier month is its own chart with its own rows, back to the first mon
   expect(chartOf('Software people trust to grow their small shop', areasOf(3), 728, now, now - 60 * 86_400_000).alt).not.toContain('Each square is')
 })
 
-test('a chart with Other opened too big to draw shuts it, and then has nothing more to give up', () => {
-  Object.assign(progressView, { area: '', isAllOpen: true })
-  expect([fewerProgress(), progressView.isAllOpen, fewerProgress()]).toEqual([true, false, false])
+test('a page of every area too big to draw gives up its boxes\' pictures, six at a time, then shuts the chart\'s Other, then the areas under no goal, and then has nothing more to give up', () => {
+  Object.assign(progressView, { area: '', thumbs: 8, isAllOpen: true, isOtherOpen: true })
+  expect([fewerProgress(), progressView.thumbs, fewerProgress(), progressView.thumbs, fewerProgress(), progressView.isAllOpen, fewerProgress(), progressView.isOtherOpen, fewerProgress()]).toEqual([true, 2, true, 0, true, false, true, false, false])
 })

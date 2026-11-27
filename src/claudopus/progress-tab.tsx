@@ -52,8 +52,10 @@ const askThumbs = ($: EngineInterface, r: Report) => {
 const picturesWanted = (data: ProgressRead, now: number) => {
   const first = (list: ProgressEntry[]) => list.map(one => progressPictures(data, one)[0]).filter((ref): ref is ProgressRef => Boolean(ref))
   const area = data.areas.find(one => one.id === progressView.area)
-  // (the chart of every area holds no pictures)
-  if (!area) return { small: [], large: [] }
+  // (each area's box shows its newest picture, an earlier month's box that month's own)
+  const month = monthOf(now, progressView.month)
+  const shown = (list: ProgressEntry[]) => (progressView.month ? list.filter(one => Date.parse(one.at) >= month.first.getTime() && Date.parse(one.at) < month.next.getTime()) : list)
+  if (!area) return { small: data.areas.flatMap(one => first(shown(data.entries.get(one.id) ?? [])).slice(0, 1)), large: [] }
   const entries = data.entries.get(area.id) ?? []
   const days = daysOf(entries, data.working, now).slice(0, progressView.daysShown)
   return { small: progressView.drawer === 'pictures' ? entries.flatMap(one => progressPictures(data, one)).slice(0, 24) : [], large: first(days.flatMap(d => [...d.asides, ...d.milestones])).slice(0, progressView.pictures) }
@@ -79,6 +81,7 @@ const progressActs = ($: EngineInterface): ProgressActs => {
     open: area => ((progressView.area = area), (progressView.daysShown = 5), (progressView.drawer = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
     back: () => ((progressView.area = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
     all: () => ((progressView.isAllOpen = !progressView.isAllOpen), again()),
+    other: () => ((progressView.isOtherOpen = !progressView.isOtherOpen), again()),
     month: by => ((progressView.month = Math.max(0, progressView.month + by)), again()),
     day: key => (flip(progressView.days, key), again()),
     pickUp: entry => void sendForPerson($, pickUpText(entry as ProgressEntry, reportsDir())).catch(err => log($, `not picked up again: ${String(err)}`)),
@@ -106,7 +109,7 @@ const progressTab = async ($: EngineInterface, ui: Ui, width: number, rows: numb
     const look: ProgressLook = {
       width,
       now,
-      gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.month, progressView.isAllOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], 'isTerminal' in ui]),
+      gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.month, progressView.isAllOpen, progressView.isOtherOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], 'isTerminal' in ui]),
       pictures: entry => progressPictures(data, entry as ProgressEntry),
       hasResult: entry => Boolean(entry.report && data.reports.has(entry.report)),
       small: ref => small.get(ref.key) ?? null,
@@ -120,6 +123,7 @@ const progressTab = async ($: EngineInterface, ui: Ui, width: number, rows: numb
       </ui.Box>
     )
   }
+  progressView.thumbs = PROGRESS_THUMBS_MOST
   let drawing = drawn()
   while (!drawingFits(drawing) && fewerProgress()) drawing = drawn()
   return drawing
