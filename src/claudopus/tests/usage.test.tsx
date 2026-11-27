@@ -180,7 +180,9 @@ test('a computer with no battery shows none, and a desktop plugged into a UPS do
 test('a pointer resting on a figure shows its card: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
   let n = 0
   const extra = `${gpuAt(37)}\n"In use system memory"=1288490188\n${batt('85%; discharging; 4:12 remaining')}`
-  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, extra) })
+  const { clock, files } = world(on, { usage: () => lookAt((n += 1), 1583261, extra) })
+  // The disk's space as df gives it, in kilobytes: its size, what is used, what is left
+  files.set('df', '/dev/disk3s5 971298980 879971536 39578536 96% /System/Volumes/Data\n')
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   await clock.advance(1000)
@@ -196,7 +198,7 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
     gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
     battery: ['Battery', '85%', 'On battery · about 4h 12m left', 'Charge, last 10 minutes', 'up to 85%'],
-    disk: ['Disk, read and written', '63 MB/s'],
+    disk: ['Disk, read and written', '63 MB/s', 'Disk space used', '889 of 926 GB', 'Disk space left', '38 GB'],
     net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
   // The drawn tree as the surface gets it: each element's props, its hover, its children

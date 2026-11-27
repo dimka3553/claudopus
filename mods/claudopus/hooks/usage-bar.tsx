@@ -8,10 +8,12 @@ type Ui = ElementTable
 // Claude's own part of each figure, named the same in every place: Claude and every command it started
 const CLAUDE_ALL = 'Claude and what it started'
 // What each figure says in words, for a reader that cannot see the drawings
-const usageWords = (f: UsageFigures) => ({
+// The disk's space, from the look at what is left on it (lookDisk, every half minute or so): no look of its own here
+type UsageSpace = { free: number; total: number }
+const usageWords = (f: UsageFigures, space?: UsageSpace) => ({
   memory: `Memory: ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use, ${gbText(f.memClaude)} GB by ${CLAUDE_ALL}`,
   cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, ${pctText(f.cpuClaude ?? 0)}% by ${CLAUDE_ALL}`,
-  disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written`,
+  disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written${space ? `, ${gbText(space.free)} of ${gbText(space.total)} GB left` : ''}`,
   net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} downloaded and uploaded`,
   gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, ${pctText(f.gpuClaude)}% by ${CLAUDE_ALL}` : ''}`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
@@ -37,7 +39,7 @@ const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
 // not known is left out
 type UsageChart = { source: string; width: number; height: number; alt: string; caption: [string, string] }
 type UsageCard = { title: string; value: string; note?: string; chart?: UsageChart; rows: [string, string][]; most?: [string, string][] }
-export const usageCards = (f: UsageFigures, history: { points: UsagePoint[]; at: number } = { points: [], at: 0 }, machine = 'computer'): Record<string, UsageCard | undefined> => {
+export const usageCards = (f: UsageFigures, history: { points: UsagePoint[]; at: number } = { points: [], at: 0 }, machine = 'computer', space?: UsageSpace): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
   // Each card's chart of the last ten minutes: the whole in grey, Claude's part in purple, and the highest it went. A part of the
@@ -111,7 +113,10 @@ export const usageCards = (f: UsageFigures, history: { points: UsagePoint[]; at:
       title: 'Disk, read and written',
       value: rateText(f.disk).join(' '),
       chart: chart('Disk', p => p.disk, rateFine, 1024 * 1024),
-      rows: f.diskClaude !== undefined ? [[CLAUDE_ALL, rateFine(Math.min(f.diskClaude, f.disk))]] : [],
+      rows: [
+        ...(f.diskClaude !== undefined ? [[CLAUDE_ALL, rateFine(Math.min(f.diskClaude, f.disk))] as [string, string]] : []),
+        ...(space ? [['Disk space used', `${gbText(space.total - space.free)} of ${gbText(space.total)} GB`], ['Disk space left', `${gbText(space.free)} GB`]] as [string, string][] : []),
+      ],
     },
     net: f.net === undefined ? undefined : {
       title: 'Network',
@@ -199,14 +204,14 @@ export const usageSpacersDrawn = (ui: Ui, bar = '') => {
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
 // for the disk and the network. The pointer resting on a figure lights its group: a faint fill under it, and its card above
 type UsageSvgPart = (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element
-export const usageDrawn = (ui: Ui, f: UsageFigures, history: { points: UsagePoint[]; at: number }, machine: string, fill: string) => {
+export const usageDrawn = (ui: Ui, f: UsageFigures, history: { points: UsagePoint[]; at: number }, machine: string, fill: string, space?: UsageSpace) => {
   const table = ui as Ui & { Svg?: UsageSvgPart }
   const { Box, Text } = ui
   if (!table.Svg) return null
   const Svg = table.Svg
   const isHigh = isMemoryHigh(f)
-  const words = usageWords(f)
-  const cards = usageCards(f, history, machine)
+  const words = usageWords(f, space)
+  const cards = usageCards(f, history, machine, space)
   const one = (key: string, card: UsageCard | undefined, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
     // A member of a group must change how it looks, or the desktop app never wires it to the pointer: hence the fill
     <Box key={`usage-${key}`} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: `usage-${key}`, backgroundColor: fill }}>
