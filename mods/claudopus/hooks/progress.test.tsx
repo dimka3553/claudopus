@@ -22,8 +22,6 @@ test("a task's start gives it its area at once, and its result takes that entry'
   const started = apply(event({ kind: 'start', task: 'a1', title: 'Fix the nose' }), { areas: ['nose', 'site'], entry: { title: 'Fix the nose' } }, entries)
   expect(entries.get('nose')?.map(e => [e.task, e.title, e.report])).toEqual([['a1', 'Fix the nose', '']])
   expect(entries.get('site')?.length).toBe(1)
-  // (a start ticks no step)
-  expect(apply(event({ kind: 'start', task: 'a2' }), { areas: ['nose'], next: { done: ['n1'] } }).areas[0]?.next[0]?.state).toBe('open')
   const answer = {
     areas: ['nose'],
     entry: { title: 'Fixed the nose in `register.tsx` for v0.2.10 and more words here', kind: 'milestone', outcome: 'The nose now fits side faces', live: 'not a link', pictures: ['a.png', '/etc/passwd', `${REPORTS}/r1/b.png`] },
@@ -34,30 +32,28 @@ test("a task's start gives it its area at once, and its result takes that entry'
   expect(kept).toEqual({ task: 'a1', title: 'Fixed the nose in for and more words', at: new Date(NOW - 60_000).toISOString(), kind: 'milestone', outcome: 'The nose now fits side faces', report: 'r1', pictures: [`${REPORTS}/r1/a.png`, `${REPORTS}/r1/b.png`], live: '', reason: '' })
   expect(entries.get('nose')?.length).toBe(1)
   expect(entries.get('site')).toEqual([])
-  expect(done.areas[0]?.next.map(n => n.state)).toEqual(['done', 'open'])
-  // (the task's next result is an entry of its own beside the first; one read in again only to be counted ticks no step)
+  // (Progress keeps no next steps: an answer that names some changes none of those an area still holds)
+  expect(done.areas[0]?.next.map(n => n.state)).toEqual(['open', 'open'])
+  // (the task's following result is an entry of its own beside the first)
   const again = apply(event({ kind: 'result', task: 'a1', report: 'r2', isEntryOnly: true }), { entry: { title: 'Nose checked on ten more faces', kind: 'milestone' }, next: { done: ['n2'] } }, entries, done.areas)
   expect(entries.get('nose')?.map(e => e.report).sort()).toEqual(['r1', 'r2'])
-  expect(again.areas[0]?.next.map(n => n.state)).toEqual(['done', 'open'])
   apply(event({ kind: 'result', task: 'a1', report: 'r2' }), { areas: ['nose'], entry: { title: 'Nose checked on ten more faces', kind: 'milestone' } }, entries, again.areas)
   expect(entries.get('nose')?.length).toBe(2)
   expect(progressThumb(REPORTS, `${REPORTS}/r1/shots/a.png`)).toBe(`${REPORTS}/r1/thumbs/shots--a.png.jpg`)
 })
 
-test('only the person sets work or a step aside, renames or merges: a result or a start that says so changes none of it, their words, answer or press do', async () => {
-  const say = { areas: ['nose'], next: { aside: ['n2'] }, aside: { task: 'a1', reason: 'Not needed now' }, rename: [{ id: 'site', name: 'Home page' }], merge: [{ from: 'site', into: 'nose' }] }
+test('only the person sets work aside, renames or merges: a result or a start that says so changes none of it, their words, answer or press do', async () => {
+  const say = { areas: ['nose'], aside: { task: 'a1', reason: 'Not needed now' }, rename: [{ id: 'site', name: 'Home page' }], merge: [{ from: 'site', into: 'nose' }] }
   for (const kind of ['result', 'start'] as const) {
     const entries = new Map([['nose', [entry({ task: 'a1' })]]])
     const done = apply(event({ kind, task: kind === 'start' ? 'a9' : 'a1', report: 'r2' }), say, entries)
     expect(done.areas.map(a => a.name)).toEqual(['Nose', 'Website'])
-    expect(done.areas[0]?.next.map(n => n.state)).toEqual(['open', 'open'])
     expect((entries.get('nose') ?? []).some(e => e.kind === 'aside')).toBe(false)
   }
   for (const kind of ['said', 'answer'] as const) {
     const entries = new Map([['nose', [entry({ task: 'a1' })]], ['site', [entry({ task: 'a3' })]]])
     const done = apply(event({ kind, text: 'drop the nose moving, not needed now' }), say, entries)
     expect(done.areas.map(a => a.id)).toEqual(['nose'])
-    expect(done.areas[0]?.next.map(n => n.state)).toEqual(['open', 'aside'])
     expect(entries.get('nose')?.map(e => [e.task, e.kind, e.reason])).toEqual([['a1', 'aside', 'Not needed now'], ['a3', 'task', '']])
   }
   // The press: the task's entry set aside with no reason of the model's, and its later result stays set aside
@@ -72,33 +68,24 @@ test('only the person sets work or a step aside, renames or merges: a result or 
   expect(fresh.get('site')?.map(e => [e.task, e.title, e.kind])).toEqual([['a5', 'Render the song', 'aside']])
 })
 
-test('a new area is made only once for a new direction, under a goal that exists; an area keeps at most five open steps, each new one once', async () => {
+test('a new area is made only once for a new direction, under a goal that exists', async () => {
   const entries = new Map<string, ProgressEntry[]>()
   const first = apply(event({ kind: 'start', task: 'a1' }), { newArea: { name: 'Song stills', goal: 'nope', aim: 'Stills for the song' } }, entries)
   expect(first.areas.at(-1)).toMatchObject({ id: 'song-stills', name: 'Song stills', goal: '', aim: 'Stills for the song' })
   const again = apply(event({ kind: 'start', task: 'a2' }), { newArea: { name: 'song  stills', goal: 'heads' } }, entries, first.areas)
   expect(again.areas.filter(a => a.id.startsWith('song')).length).toBe(1)
   expect(entries.get('song-stills')?.map(e => e.task)).toEqual(['a2', 'a1'])
-  const add = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'].map(word => `${word} finished picture`)
-  const added = apply(event({ kind: 'said' }), { areas: ['nose'], next: { add: [...add, 'A nose that fits side faces'] } })
-  expect(added.areas[0]?.next.map(n => n.text)).toEqual(['A nose that fits side faces', 'A nose that moves with the mouth', 'One finished picture', 'Two finished picture', 'Three finished picture'])
-  expect(new Set(added.areas[0]?.next.map(n => n.id)).size).toBe(5)
-
-  // A step that says what an open one says is not added again, nor twice in one answer; a task's start adds or rewords none
-  const like = apply(event({ kind: 'result', task: 'a3', report: 'r3' }), { areas: ['nose'], next: { add: ['A nose that fits side faces on the Mac camera recordings', 'A chin for every face', 'A chin for each face'] } })
-  expect(like.areas[0]?.next.map(n => n.text)).toEqual(['A nose that fits side faces', 'A nose that moves with the mouth', 'A chin for every face'])
-  const start = apply(event({ kind: 'start', task: 'a4' }), { areas: ['nose'], next: { add: ['The nose fixed'], reword: [{ id: 'n1', text: 'Another nose' }] } })
-  expect(start.areas[0]?.next.map(n => n.text)).toEqual(['A nose that fits side faces', 'A nose that moves with the mouth'])
 })
 
-test('the files read back whole whatever was written, the model is shown each area with its steps and newest entries, and its answer is read out of the text around it', async () => {
+test('the files read back whole whatever was written, the model is shown each area with its newest entries and no next steps, and its answer is read out of the text around it', async () => {
   expect(areasFrom('not json')).toEqual([])
   expect(areasFrom(JSON.stringify({ areas: [{ id: '../x', name: 'Bad' }, { id: 'ok', name: 'Ok', next: [{ id: 'n', text: 'A', state: 'weird' }, { id: 'm' }] }] }))).toEqual([{ id: 'ok', name: 'Ok', goal: '', aim: '', next: [{ id: 'n', text: 'A', state: 'open', at: '' }], updated: '' }])
   expect(entriesFrom(JSON.stringify({ entries: [entry({ title: 'old', at: '2026-11-01' }), { title: '' }, entry({ title: 'new', at: '2026-11-02', kind: 'odd' as never })] })).map(e => [e.title, e.kind])).toEqual([['new', 'task'], ['old', 'task']])
   expect(answerJson('Here it is:\n```json\n{"areas": ["nose"]}\n```')).toEqual({ areas: ['nose'] })
   expect(answerJson('no')).toBe(undefined)
   const prompt = progressPrompt(event({ kind: 'answer', task: 'a1', title: 'Fix the nose', text: 'Question: Ship it?\nAnswer: Yes' }), picture, areas(), new Map([['nose', [entry({ task: 'a1', title: 'Fixed it' })]]]), NOW)
-  expect(prompt).toContain('- nose: Nose (goal heads) · A nose that fits every face\n  Next steps:\n    - n1 [open] A nose that fits side faces')
+  expect(prompt).toContain('- nose: Nose (goal heads) · A nose that fits every face\n  Newest entries:\n    - 2026-11-19 task (task a1): Fixed it')
+  expect(prompt).not.toMatch(/next step/i)
   expect(prompt).toContain('This task is already in: nose')
   expect(prompt).toContain('Answer: Yes')
   expect(withSetAside(['Release it'])).toEqual(['Release it', 'Set aside'])

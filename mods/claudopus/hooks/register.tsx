@@ -26,14 +26,14 @@ import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
-import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
+import { daysOf, fewerProgress, goalsOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
 import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, textHash as colourTextHash } from './colours'
 import type { ColourIndex, TaskLink } from './colours'
-import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressNext, ProgressPicture } from './progress'
+import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
 
 const LIST = 'claudopus'
@@ -1539,19 +1539,6 @@ for (const area of areas) entries.set(area.id, await readEntries($, area.id))
 return { areas, entries }
 }
 
-const setNextState = async ($: EngineInterface, areaId: string, nextId: string, state: ProgressNext['state']) => {
-const changed = await withProgressFiles($, async () => {
-const at = new Date(await $.clock.now()).toISOString()
-const areas = await readAreas($)
-const area = areas.find(one => one.id === areaId)
-if (!area?.next.some(one => one.id === nextId && one.state !== state)) return false
-await writeAreas($, areas.map(one => (one === area ? { ...one, next: one.next.map(n => (n.id === nextId ? { ...n, state, at } : n)), updated: at } : one)))
-await indexLog($, `next step ${nextId} of ${areaId} made ${state} by hand`)
-return true
-})
-if (changed) await progressMoved($)
-return changed
-}
 const markAside = async ($: EngineInterface, task: string) => {
 const isMarked = await withProgressFiles($, async () => {
 let found = false
@@ -14993,9 +14980,7 @@ void makeThumbs($, r)
 const picturesWanted = (data: ProgressRead, now: number) => {
 const first = (list: ProgressEntry[]) => list.map(one => progressPictures(data, one)[0]).filter((ref): ref is ProgressRef => Boolean(ref))
 const area = data.areas.find(one => one.id === progressView.area)
-const month = monthOf(now, progressView.month)
-const shown = (list: ProgressEntry[]) => (progressView.month ? list.filter(one => Date.parse(one.at) >= month.first.getTime() && Date.parse(one.at) < month.next.getTime()) : list)
-if (!area) return { small: data.areas.flatMap(one => first(shown(data.entries.get(one.id) ?? [])).slice(0, 1)), large: [] }
+if (!area) return { small: [], large: [] }
 const entries = data.entries.get(area.id) ?? []
 const days = daysOf(entries, data.working, now).slice(0, progressView.daysShown)
 return { small: progressView.drawer === 'pictures' ? entries.flatMap(one => progressPictures(data, one)).slice(0, 24) : [], large: first(days.flatMap(d => [...d.asides, ...d.milestones])).slice(0, progressView.pictures) }
@@ -15018,11 +15003,9 @@ const flip = (set: Set<string>, key: string) => (set.has(key) ? set.delete(key) 
 return {
 open: area => ((progressView.area = area), (progressView.daysShown = 5), (progressView.drawer = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
 back: () => ((progressView.area = ''), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
-other: () => ((progressView.isOtherOpen = !progressView.isOtherOpen), again()),
+all: () => ((progressView.isAllOpen = !progressView.isAllOpen), again()),
 month: by => ((progressView.month = Math.max(0, progressView.month + by)), again()),
 day: key => (flip(progressView.days, key), again()),
-aside: key => (flip(progressView.asides, key), again()),
-tick: (area, next, state) => void setNextState($, area, next, state).then(again, err => log($, `next step not changed: ${String(err)}`)),
 pickUp: entry => void sendForPerson($, pickUpText(entry as ProgressEntry, reportsDir())).catch(err => log($, `not picked up again: ${String(err)}`)),
 result: id => openReport($, id),
 more: () => ((progressView.daysShown += 5), (progressView.pictures = PROGRESS_PICTURES_MOST), again()),
@@ -15047,7 +15030,7 @@ const drawn = () => {
 const look: ProgressLook = {
 width,
 now,
-gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.month, progressView.isOtherOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], [...progressView.asides], 'isTerminal' in ui]),
+gen: drawingMark(PROGRESS_PANE, [presses, changed, width, progressView.area, progressView.month, progressView.isAllOpen, progressView.daysShown, progressView.drawer, progressView.drawerMost, progressView.pictures, [...progressView.days], 'isTerminal' in ui]),
 pictures: entry => progressPictures(data, entry as ProgressEntry),
 hasResult: entry => Boolean(entry.report && data.reports.has(entry.report)),
 small: ref => small.get(ref.key) ?? null,
@@ -15061,7 +15044,6 @@ return (
 </ui.Box>
 )
 }
-progressView.thumbs = PROGRESS_THUMBS_MOST
 let drawing = drawn()
 while (!drawingFits(drawing) && fewerProgress()) drawing = drawn()
 return drawing
