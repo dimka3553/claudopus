@@ -52,6 +52,9 @@ test('F-019 · the look only reads the version page: the panel says a newer vers
   await panel.unmount()
   // Another look once the last is over an hour old, and through all of them nothing was fetched or moved, nothing installed or reloaded
   const aged = async () => files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
+  // (once the first look has written its own time, which comes after its read of the page: on a slow runner it came after this
+  // test's older time and put it right back)
+  expect(await until(async () => files.get(`${MEMORY}/update-seen.json`))).toBeDefined()
   await aged()
   await later(clock, 16 * 60_000)
   expect(await until(async () => (fetches() > 1 ? true : undefined))).toBe(true)
