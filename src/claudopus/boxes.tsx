@@ -63,10 +63,6 @@ const boxKeys = new Map<string, string>()
 // What was typed, sealed to the runner's key (RSA-OAEP, SHA-256) by openssl, which only the runner that asked can open: the value
 // on openssl's stdin, the key on a pipe of its own, so neither is ever in a file or a command line but the key, which is public
 const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A'
-// On Windows, in Git's bash, openssl is Git's own Windows program, which cannot open the shell's pipe by its name: the public key is
-// a file in a folder of this run's own, removed as it ends, and base64 is perl's. The value still goes on openssl's stdin alone
-const SEAL_FOR_WINDOWS =
-  'PATH=/usr/bin:/bin:/mingw64/bin; d=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EXIT; printf %s "$1" | perl -MMIME::Base64 -0777 -ne \'print decode_base64($_)\' >"$d/key" && openssl pkeyutl -encrypt -pubin -keyform DER -inkey "$d/key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -out "$d/sealed" && perl -MMIME::Base64 -0777 -ne \'print encode_base64($_, "")\' "$d/sealed"'
 const sealedFor = async ($: EngineInterface, key: string, value: string) => {
   const r = await runOn($, ['/bin/bash', '-c', isWindows ? SEAL_FOR_WINDOWS : SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
   const out = r?.exitCode === 0 ? r.stdout.trim() : ''
@@ -127,15 +123,25 @@ let boxChat = ''
 // Requests this chat has told or seen told
 const boxTold = new Set<string>()
 
+// The folder as it was at the last look that found it empty or not there (its time, -1 for none), and nothing to show: while it
+// stands so and no card asks for a key, a look is that one question to the file system. (A folder's time moves as a file comes or
+// goes, not as one is written again, so a folder with anything in it is read each second as before)
+let boxesIdle: number | undefined
 const lookBoxes = async ($: EngineInterface) => {
   if (!dir) return
+  if (boxesIdle !== undefined) {
+    const at = await $.fs.stat(boxesDir()).then(st => st.mtimeMs || undefined, () => -1)
+    if (at === boxesIdle && !boxes.length && !(await ownCards($)).some(card => keyAsksOf(card).length)) return
+    boxesIdle = undefined
+  }
   // A chat with nothing to draw on (a -p run) takes no request: one it took would wait on a panel nobody sees
   if (!(await $.session.surfaces().catch(() => [])).length) return
   boxChat = await $.session.id().catch(() => '')
   const now = await $.clock.now()
   const found: Asked[] = []
+  const idleAt = await $.fs.stat(boxesDir()).then(st => st.mtimeMs || undefined, () => -1)
   const entries = await $.fs.list(boxesDir()).catch(() => [])
-  const cards = await read($, todos)
+  const cards = await ownCards($)
   for (const entry of entries) {
     // A mark left after its request went (a chat that marked it as the runner ended) goes too
     const marked = entry.name.replace(/\.told$/, '')
@@ -194,6 +200,7 @@ const lookBoxes = async ($: EngineInterface) => {
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
   for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
   if (barOpen && isBoxKind(barOpen.kind) && !found.some(one => one.id === barOpen?.id)) closeBarOf(barOpen.id)
+  if (!entries.length && !found.length) boxesIdle = idleAt
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   drawAgain($)
@@ -279,6 +286,8 @@ const keepOwnKey = async ($: EngineInterface, one: Asked, value: string) => {
     await log($, `key ${name} not kept from its box: the keychain ended ${r.exitCode}`)
     return void drawAgain($)
   }
+  // (the kept keys' names and fingerprints are read again before the next thing is hidden: settings.tsx)
+  secrets.at = -SECRETS_MS
   boxSent.add(id)
   boxSaid.delete(id)
   boxHeldReply.delete(id)

@@ -12,12 +12,14 @@ import * as M9 from '../../mods/claudopus/hooks/tabmoves'
 import * as M10 from '../../mods/claudopus/hooks/jobs'
 import * as M11 from '../../mods/claudopus/hooks/naming'
 import * as M12 from '../../mods/claudopus/hooks/usage'
-import * as M13 from '../../mods/claudopus/hooks/pace'
-import * as M14 from '../../mods/claudopus/hooks/progress-page'
-import * as M15 from '../../mods/claudopus/hooks/progress'
-import * as M16 from '../../mods/claudopus/hooks/topics'
-import * as M17 from '../../mods/claudopus/hooks/reads'
-import * as M18 from '../../mods/claudopus/hooks/colours'
+import * as M13 from '../../mods/claudopus/hooks/windows'
+import * as M14 from '../../mods/claudopus/hooks/usage-bar'
+import * as M15 from '../../mods/claudopus/hooks/pace'
+import * as M16 from '../../mods/claudopus/hooks/progress-page'
+import * as M17 from '../../mods/claudopus/hooks/progress'
+import * as M18 from '../../mods/claudopus/hooks/topics'
+import * as M19 from '../../mods/claudopus/hooks/reads'
+import * as M20 from '../../mods/claudopus/hooks/colours'
 
 declare global {
   export import atom = M0.atom
@@ -315,104 +317,110 @@ declare global {
   export import Naming = M11.Naming
   export import NamingAsk = M11.NamingAsk
   export import batteryShown = M12.batteryShown
-  export import batterySvg = M12.batterySvg
-  export import chartSvg = M12.chartSvg
   export import FOOTPRINT_BATTERY_EVERY = M12.FOOTPRINT_BATTERY_EVERY
   export import FOOTPRINT_EVERY = M12.FOOTPRINT_EVERY
-  export import HISTORY_SPAN = M12.HISTORY_SPAN
   export import gbText = M12.gbText
-  export import isBatteryLow = M12.isBatteryLow
   export import isOnBatteryLook = M12.isOnBatteryLook
   export import isMemoryHigh = M12.isMemoryHigh
   export import keptOf = M12.keptOf
-  export import leftText = M12.leftText
   export import meterOf = M12.meterOf
   export import nextKept = M12.nextKept
   export import pctText = M12.pctText
   export import rateText = M12.rateText
-  export import USAGE_AMBER = M12.USAGE_AMBER
   export import USAGE_BATTERY_EVERY = M12.USAGE_BATTERY_EVERY
   export import USAGE_EVERY = M12.USAGE_EVERY
   export import USAGE_LINUX = M12.USAGE_LINUX
-  export import USAGE_PURPLE = M12.USAGE_PURPLE
   export import USAGE_WINDOWS = M12.USAGE_WINDOWS
   export import usageMac = M12.usageMac
-  export import usageSvg = M12.usageSvg
-  export import UsageTop = M12.UsageTop
-  export import UsageBattery = M12.UsageBattery
   export import UsageFigures = M12.UsageFigures
   export import UsageKept = M12.UsageKept
-  export import UsagePoint = M12.UsagePoint
-  export import PACE_EVERY = M13.PACE_EVERY
-  export import PACE_LOOK = M13.PACE_LOOK
-  export import PACE_SET = M13.PACE_SET
-  export import paceLookOf = M13.paceLookOf
-  export import paceOf = M13.paceOf
-  export import daysOf = M14.daysOf
-  export import fewerProgress = M14.fewerProgress
-  export import goalsOf = M14.goalsOf
-  export import monthOf = M14.monthOf
-  export import progressArea = M14.progressArea
-  export import progressOverview = M14.progressOverview
-  export import PROGRESS_PICTURES_MOST = M14.PROGRESS_PICTURES_MOST
-  export import PROGRESS_THUMBS_MOST = M14.PROGRESS_THUMBS_MOST
-  export import progressView = M14.progressView
-  export import ProgressActs = M14.ProgressActs
-  export import ProgressData = M14.ProgressData
-  export import ProgressLook = M14.ProgressLook
-  export import ProgressPictureRef = M14.ProgressPictureRef
-  export import ProgressThumb = M14.ProgressThumb
-  export import answerJson = M15.answerJson
-  export import applyProgress = M15.applyProgress
-  export import areasFrom = M15.areasFrom
-  export import chatEventOf = M15.chatEventOf
-  export import asideLines = M15.asideLines
-  export import entriesFrom = M15.entriesFrom
-  export import ENTRIES_MOST = M15.ENTRIES_MOST
-  export import EVENT_CHARS = M15.EVENT_CHARS
-  export import isAreaId = M15.isAreaId
-  export import pickUpText = M15.pickUpText
-  export import PICK_UP_AGAIN = M15.PICK_UP_AGAIN
-  export import PICTURE_SYSTEM = M15.PICTURE_SYSTEM
-  export import pictureFrom = M15.pictureFrom
-  export import pictureOf = M15.pictureOf
-  export import picturePrompt = M15.picturePrompt
-  export import PROGRESS_SYSTEM = M15.PROGRESS_SYSTEM
-  export import progressLine = M15.progressLine
-  export import progressPrompt = M15.progressPrompt
-  export import progressThumb = M15.progressThumb
-  export import SET_ASIDE = M15.SET_ASIDE
-  export import setAsideTold = M15.setAsideTold
-  export import topicState = M15.topicState
-  export import withSetAside = M15.withSetAside
-  export import wordsIn = M15.wordsIn
-  export import HISTORY_MOST = M16.HISTORY_MOST
-  export import holdsStems = M16.holdsStems
-  export import latestBlock = M16.latestBlock
-  export import latestIn = M16.latestIn
-  export import listChanges = M16.listChanges
-  export import listKeys = M16.listKeys
-  export import recallStems = M16.recallStems
-  export import saidEntry = M16.saidEntry
-  export import splitHistory = M16.splitHistory
-  export import tidyTopics = M16.tidyTopics
-  export import topicsShown = M16.topicsShown
-  export import withLatest = M16.withLatest
-  export import withoutLatest = M16.withoutLatest
-  export import readsOnly = M17.readsOnly
-  export import ColourBuilder = M18.Builder
-  export import replyLinksIn = M18.linksIn
-  export import PALETTE = M18.PALETTE
-  export import passedOn = M18.passedOn
-  export import personWords = M18.personWords
-  export import quoteFor = M18.quoteFor
-  export import slotsFor = M18.slotsFor
-  export import colourTextHash = M18.textHash
-  export import CardWords = M18.CardWords
-  export import ColourIndex = M18.ColourIndex
-  export import TaskLink = M18.TaskLink
-  export import ProgressArea = M15.ProgressArea
-  export import ProgressEntry = M15.ProgressEntry
-  export import ProgressEvent = M15.ProgressEvent
-  export import ProgressPicture = M15.ProgressPicture
+  export import PASTE_WINDOWS = M13.PASTE_WINDOWS
+  export import PATHS_SAID_WINDOWS = M13.PATHS_SAID_WINDOWS
+  export import PICK_WINDOWS = M13.PICK_WINDOWS
+  export import SEAL_FOR_WINDOWS = M13.SEAL_FOR_WINDOWS
+  export import slashed = M13.slashed
+  export import WINDOWS_OPENS = M13.WINDOWS_OPENS
+  export import WINDOWS_PROCS = M13.WINDOWS_PROCS
+  export import windowsFolderOf = M13.windowsFolderOf
+  export import windowsOpenArgs = M13.windowsOpenArgs
+  export import windowsPortsOf = M13.windowsPortsOf
+  export import windowsProcsOf = M13.windowsProcsOf
+  export import USAGE_CELLS = M14.USAGE_CELLS
+  export import usageDrawn = M14.usageDrawn
+  export import usageSpacersDrawn = M14.usageSpacersDrawn
+  export import usageText = M14.usageText
+  export import PACE_EVERY = M15.PACE_EVERY
+  export import PACE_LOOK = M15.PACE_LOOK
+  export import PACE_SET = M15.PACE_SET
+  export import PACE_THREADS = M15.PACE_THREADS
+  export import paceLookOf = M15.paceLookOf
+  export import paceNeedsThreads = M15.paceNeedsThreads
+  export import paceOf = M15.paceOf
+  export import daysOf = M16.daysOf
+  export import fewerProgress = M16.fewerProgress
+  export import goalsOf = M16.goalsOf
+  export import monthOf = M16.monthOf
+  export import progressArea = M16.progressArea
+  export import progressOverview = M16.progressOverview
+  export import PROGRESS_PICTURES_MOST = M16.PROGRESS_PICTURES_MOST
+  export import PROGRESS_THUMBS_MOST = M16.PROGRESS_THUMBS_MOST
+  export import progressView = M16.progressView
+  export import ProgressActs = M16.ProgressActs
+  export import ProgressData = M16.ProgressData
+  export import ProgressLook = M16.ProgressLook
+  export import ProgressPictureRef = M16.ProgressPictureRef
+  export import ProgressThumb = M16.ProgressThumb
+  export import answerJson = M17.answerJson
+  export import applyProgress = M17.applyProgress
+  export import areasFrom = M17.areasFrom
+  export import chatEventOf = M17.chatEventOf
+  export import asideLines = M17.asideLines
+  export import entriesFrom = M17.entriesFrom
+  export import ENTRIES_MOST = M17.ENTRIES_MOST
+  export import EVENT_CHARS = M17.EVENT_CHARS
+  export import isAreaId = M17.isAreaId
+  export import pickUpText = M17.pickUpText
+  export import PICK_UP_AGAIN = M17.PICK_UP_AGAIN
+  export import PICTURE_SYSTEM = M17.PICTURE_SYSTEM
+  export import pictureFrom = M17.pictureFrom
+  export import pictureOf = M17.pictureOf
+  export import picturePrompt = M17.picturePrompt
+  export import PROGRESS_SYSTEM = M17.PROGRESS_SYSTEM
+  export import progressLine = M17.progressLine
+  export import progressPrompt = M17.progressPrompt
+  export import progressThumb = M17.progressThumb
+  export import SET_ASIDE = M17.SET_ASIDE
+  export import setAsideTold = M17.setAsideTold
+  export import topicState = M17.topicState
+  export import withSetAside = M17.withSetAside
+  export import wordsIn = M17.wordsIn
+  export import HISTORY_MOST = M18.HISTORY_MOST
+  export import holdsStems = M18.holdsStems
+  export import latestBlock = M18.latestBlock
+  export import latestIn = M18.latestIn
+  export import listChanges = M18.listChanges
+  export import listKeys = M18.listKeys
+  export import recallStems = M18.recallStems
+  export import saidEntry = M18.saidEntry
+  export import splitHistory = M18.splitHistory
+  export import tidyTopics = M18.tidyTopics
+  export import topicsShown = M18.topicsShown
+  export import withLatest = M18.withLatest
+  export import withoutLatest = M18.withoutLatest
+  export import readsOnly = M19.readsOnly
+  export import ColourBuilder = M20.Builder
+  export import replyLinksIn = M20.linksIn
+  export import PALETTE = M20.PALETTE
+  export import passedOn = M20.passedOn
+  export import personWords = M20.personWords
+  export import quoteFor = M20.quoteFor
+  export import slotsFor = M20.slotsFor
+  export import colourTextHash = M20.textHash
+  export import CardWords = M20.CardWords
+  export import ColourIndex = M20.ColourIndex
+  export import TaskLink = M20.TaskLink
+  export import ProgressArea = M17.ProgressArea
+  export import ProgressEntry = M17.ProgressEntry
+  export import ProgressEvent = M17.ProgressEvent
+  export import ProgressPicture = M17.ProgressPicture
 }

@@ -194,7 +194,7 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
 // worktree taken away once merged), with the lines it was counted with, as one still there that is no longer changed is not
 const listMade = async ($: EngineInterface, one: Todo, answer: string): Promise<FilesMade> => {
   const now = await madeBy($, one.wrote ?? [], answer, one.begunAt ?? one.startedAt, true, one.said ?? [], one.titles ?? {})
-  const earlier = [one.made, ...(await read($, reports)).filter(r => r.agent === one.id && r.made).map(r => r.made)].filter((files): files is FilesMade => Boolean(files))
+  const earlier = [one.made, ...(await ownReports($)).filter(r => r.agent === one.id && r.made).map(r => r.made)].filter((files): files is FilesMade => Boolean(files))
   if (!earlier.length) return now
   const paths = new Set(now.made.map(made => made.path))
   // (an artifact listed before as a plain link is one now, with its title)
@@ -740,7 +740,7 @@ const diffOf = async ($: EngineInterface, id: string): Promise<DiffOf | undefine
     const file = kept.code?.files?.find(one => diffPaneOf(one.path) === id)
     if (file) return { file, since: kept.code?.since ?? 0, owner }
   }
-  for (const r of await read($, reports)) {
+  for (const r of await ownReports($)) {
     const file = r.made?.code?.files?.find(one => diffPaneOf(one.path) === id)
     if (file) return { file, since: r.made?.code?.since ?? 0, owner: r.id }
   }
@@ -805,7 +805,7 @@ const diffView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   const wholeText = got?.whole ?? ''
   const wholeCut = wholeText.length > DIFF_CHARS ? wholeText.slice(0, wholeText.lastIndexOf('\n', DIFF_CHARS)) : wholeText
   const card = (await read($, todos)).find(one => one.id === owner)
-  const result = card ? undefined : (await read($, reports)).find(r => r.id === owner)
+  const result = card ? undefined : (await ownReports($)).find(r => r.id === owner)
   const folder = file.inRepo.includes('/') ? file.inRepo.slice(0, file.inRepo.lastIndexOf('/')) : file.path.slice(0, file.path.lastIndexOf('/'))
   const table = ui as Ui & { Code?: (props: { key?: string; source: string; path?: string; format?: 'source' | 'diff'; startLine?: number; wrap?: 'wrap' | 'truncate-end' }) => JSX.Element }
   const lines = (showsWhole ? wholeCut : diff.source).split('\n')

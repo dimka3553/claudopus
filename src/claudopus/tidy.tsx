@@ -3,7 +3,7 @@
 // without a window and it was stopped, 88 scratch folders of catch-up runs that were stopped (9.7 GB), browser profiles, task
 // scratch folders untouched for days (36 GB) and worktrees merged long ago (19 GB). bin/tidy removes what is left of each and
 // keeps what may matter (it says what); every chat starts it as it starts the catch-up, and again as a task ends, and it runs at
-// most every ten minutes, one at a time. The disk is looked at every half minute: under DISK_WARN the panel says so at its top,
+// most every ten minutes, one at a time. The disk is looked at every half minute or minute (lookDisk): under DISK_WARN the panel says so at its top,
 // with Free up space, and a notification says it once every few hours; under DISK_STOP a task's download, install, build,
 // render or browser command is refused at once with why
 const TIDY_AFTER = 2 * 60_000
@@ -15,6 +15,7 @@ const DISK_TOLD_EVERY = 6 * 3600_000
 type DiskKept = { at: number; free: number; total: number }
 let diskKept: DiskKept | undefined
 let diskTriedAt = -Infinity
+let isDiskForced = false
 let diskLowSince = 0
 let diskToldAt = -Infinity
 // The person's press on Free up space, and what the last run of bin/tidy freed (its tidy/last.json)
@@ -27,6 +28,10 @@ const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit
 // remove, so it is not started there, and the disk's block has no Free up space
 const startTidy = async ($: EngineInterface, flags: string[] = []) => {
   if (!dir || isOff || isWindows) return
+  // Nothing is started while bin/tidy would end at once: its own stamp says a run began under its ten minutes ago
+  const stamp = flags.length ? 0 : ((await $.fs.stat(`${dir}/tidy/stamp`).catch(() => undefined))?.mtimeMs ?? 0)
+  const at = stamp ? await $.clock.now() : 0
+  if (stamp && at >= stamp && at - stamp < TIDY_EVERY) return
   const r = await runOn($, ['/bin/sh', '-c', TIDY_START, 'sh', dir, `${pluginRoot($)}/bin/tidy`, ...flags, dir])
   if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
@@ -55,10 +60,22 @@ const lookDisk = async ($: EngineInterface) => {
   const now = await $.clock.now()
   if (now >= diskTriedAt && now - diskTriedAt < DISK_EVERY / 2) return diskKept
   diskTriedAt = now
-  const r = await runOn($, ['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+  // One chat looks for every chat on this computer, through a small file beside the usage line's: every minute while far more
+  // is free than the warning needs, as often as before once it nears it, and at once after the person's press
+  const path = (await usagePathOf($)).replace(/usage\.json$/, 'disk.json')
+  const shared = parsedOr<{ at?: unknown; out?: unknown }>(await $.fs.read(path).catch(() => ''), {}) ?? {}
+  const sharedAt = Number(shared.at) || 0
+  const every = isDiskLow(diskKept) ? DISK_EVERY / 2 : diskKept && diskKept.free > 2 * DISK_WARN ? 1.5 * DISK_EVERY : DISK_EVERY - 1000
+  let out = !isDiskForced && typeof shared.out === 'string' && now >= sharedAt && now - sharedAt < every ? shared.out : undefined
+  isDiskForced = false
+  if (out === undefined) {
+    await $.fs.write(path, JSON.stringify({ ...shared, at: now })).catch(() => undefined)
+    out = (await runOn($, ['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined))?.stdout ?? ''
+    if (out) await $.fs.write(path, JSON.stringify({ at: now, out })).catch(() => undefined)
+  }
   const was = diskKept
   const wasLast = tidyLast
-  const [disk = '', power] = (r?.stdout ?? '').split('@@POWER@@')
+  const [disk = '', power] = out.split('@@POWER@@')
   diskKept = diskOf(disk, now) ?? diskKept
   if (power !== undefined) isOnBattery = isOnBatteryLook(power, isLinux)
   if (dir) tidyLast = lastOf(await $.fs.read(`${dir}/tidy/last.json`).catch(() => '')) ?? tidyLast
@@ -84,6 +101,7 @@ const freeSpace = async ($: EngineInterface) => {
   tidyPressedAt = await $.clock.now()
   presses += 1
   diskTriedAt = -Infinity
+  isDiskForced = true
   drawAgain($)
   await log($, 'the person asked to free up disk space')
   await startTidy($, ['--now', '--deep'])
@@ -124,7 +142,7 @@ const turnLeftovers = async ($: EngineInterface, e: ToolCallInput) => {
   const input = e as { command?: unknown; description?: unknown }
   const command = String(input.command ?? '')
   const agent = e.agentId ?? ''
-  if (!command || !(await read($, todos)).some(one => one.id === agent && !one.chat)) return ''
+  if (!command || !(await ownCards($)).some(one => one.id === agent && !one.chat)) return ''
   const scripts = await scriptsRun($, command)
   const plain = command.replace(/\\ /g, ' ').replace(/["']/g, '')
   if ((CHROME_APP.test(plain) && /--headless\b/.test(plain)) || scripts.some(text => CHROME_IN_SCRIPT.test(text) || (CHROME_APP.test(text) && /--headless\b/.test(text)))) {

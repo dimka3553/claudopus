@@ -63,7 +63,7 @@ let ledgerMade = ''
 const saveLedger = async ($: EngineInterface) => {
   const { id, title } = await read($, me)
   if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
-  const list = await read($, todos)
+  const list = await ownCards($)
   const agents = await agentsFolder($, id)
   const tasks = await Promise.all(ledgerTasks(list).map(async one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${one.chatWas ? await agentsFolder($, one.chatWas) : agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) })))
   const body = { chat: id, title, folder: cwd, pid: enginePid, ...(chatFrom ? { from: chatFrom } : {}), ...(myLink ? { link: myLink } : {}), tasks }
@@ -78,15 +78,23 @@ const saveLedger = async ($: EngineInterface) => {
   ledgerSign = sign
 }
 // One write at a time; a change made while one is written is written after it
+// and at most one every LEDGER_GAP: the list changes at every call of every task, and each save builds the whole ledger to see
+// whether it differs (27 Nov: as costly as the change itself). A change that comes sooner is saved when the gap is over, so a quit
+// or a crash loses at most that long
+const LEDGER_GAP = 2000
 let isLedgerBusy = false
 let isLedgerDue = false
+let ledgerAt = 0
 const saveLedgerSoon = ($: EngineInterface) => {
   if (isLedgerBusy) return void (isLedgerDue = true)
   isLedgerBusy = true
   void (async () => {
     try {
       do {
+        const wait = isTimed ? ledgerAt + LEDGER_GAP - Date.now() : 0
+        if (wait > 0) await new Promise<void>(done => void $.clock.after(wait, done))
         isLedgerDue = false
+        ledgerAt = Date.now()
         await saveLedger($).catch(err => log($, `ledger not written: ${String(err)}`))
       } while (isLedgerDue)
     } finally {
@@ -120,7 +128,46 @@ const keptCards = (text: string, now: number): { pid: string; cards: Todo[]; sav
 // asked the person stays on it, and an answer carries it on (toEnded)
 const QUIT_WINDOW = 60_000
 const cutOff = (one: Todo, now: number): Todo => ({ ...ended(one, 'failed', now), why: WHY_APP_CLOSED, running: undefined })
-const isInterrupted = (one: Pick<Todo, 'status' | 'why'>) => one.status === 'failed' && one.why === WHY_APP_CLOSED
+const isInterrupted = (one: Pick<Todo, 'status' | 'why'>) => one.status === 'failed' && (one.why === WHY_APP_CLOSED || one.why === WHY_UNREACHABLE)
+// A task that can no longer be reached: no run of this process is behind its card, and Claude Code can't start it again, as its
+// record is in the chat a rewind came from (27 Nov: a card brought over by a rewind, written to on its card, sat at Working for
+// hours while every message to it stayed "Not read yet", and the chat said each answer "could not reach that task"). Its card ends
+// Interrupted and says it can't be reached, with Carry on and its last result kept; one that had already handed in its result goes
+// under Finished, as it had ended before. What the person wrote to it that it never read is marked so, and goes to the chat
+const lostEntry = (entry: Entry): Entry => {
+  const { isUnread: _, ...rest } = entry
+  return { ...rest, isLost: true }
+}
+const unreachable = (one: Todo, now: number): Todo => ({
+  ...ended(one, 'failed', now),
+  why: WHY_UNREACHABLE,
+  running: undefined,
+  ...(one.reportGiven || hasReport(one) || one.reportForChat ? { closedAt: now } : {}),
+  entries: one.entries.map(entry => (entry.kind === 'steer' && entry.isUnread ? lostEntry(entry) : entry)),
+})
+// (`said`: words of an answer that did not reach it, beside those its card holds as unread; false for a card already ended so)
+const cutUnreachable = async ($: EngineInterface, id: string, said: string[] = []) => {
+  const now = await $.clock.now()
+  let lost: string[] = []
+  let title = ''
+  await changeTodos($, list =>
+    ((lost = []), (title = ''), list).map(one => {
+      if (one.id !== id || one.chat || one.parentId || isInterrupted(one)) return one
+      lost = one.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
+      title = titleOf(one)
+      return unreachable(one, now)
+    }),
+  )
+  if (!title) return false
+  await log($, `task ${id} can't be reached any more: no run of this chat's is behind it, and it can't be started again`)
+  const words = [...new Set([...lost, ...said].map(text => text.trim()).filter(Boolean))]
+  if (words.length) {
+    $.ui.log(LOST_FOR_YOU(title))
+    await tellChat($, named(LOST_FOR_CHAT(title, words)))
+  }
+  redraw($)
+  return true
+}
 // As the chat starts: a command lasts only while the app is open, so what was at work when the chat's process was replaced ended
 // with it. Its card comes back from the ledger, whole, as cut off: nothing starts it again by itself, the person's Carry on does.
 // What Claude Code itself runs again in the new process is at work, and what had ended stays as it ended: a task the person or the
@@ -324,7 +371,7 @@ const carryOn = async ($: EngineInterface, id: string, answer = '') => {
   await $.fs.write(path, await carryText($, one, answer))
   const model = modelName(one.model ?? '')
   await log($, `carry on ${one.id}: the chat is asked to start a fresh task from ${path}`)
-  await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Carry on" on "${titleOf(one)}" (${one.id}), which stopped when the Claude app closed${answer ? `, and answered what it asked` : ''}. Its run is gone, so start a fresh task for it now: the Agent tool with subagent_type "${one.kind === 'claudopus:quick' ? 'claudopus:quick' : 'claudopus:task'}"${model ? `, the model it ran on (${model})` : ''}, description "${titleOf(one)}", and as its prompt exactly: ${CARRY_PROMPT(path)}`)
+  await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Carry on" on "${titleOf(one)}" (${one.id}), which ${one.why === WHY_UNREACHABLE ? "was cut off and can't be reached any more" : 'stopped when the Claude app closed'}${answer ? `, and answered what it asked` : ''}. Its run is gone, so start a fresh task for it now: the Agent tool with subagent_type "${one.kind === 'claudopus:quick' ? 'claudopus:quick' : 'claudopus:task'}"${model ? `, the model it ran on (${model})` : ''}, description "${titleOf(one)}", and as its prompt exactly: ${CARRY_PROMPT(path)}`)
 }
 // The task a fresh task's instructions carry on, by its id, from the carry file they name
 const carriedFrom = (prompt: string) => /\/ledger\/[A-Za-z0-9-]+\/([\w-]+)\.carry\.md/.exec(prompt)?.[1] ?? ''

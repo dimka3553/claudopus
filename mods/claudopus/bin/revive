@@ -44,7 +44,7 @@ log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$dir/revive
 now() { date +%s; }
 # (GNU stat where it is there: its -f reads the file system and succeeds, so the BSD form would give nonsense on Linux). Which one is
 # found once, so a look at a beat on a Mac starts one process, not a failed one first
-if stat -c %Y / >/dev/null 2>&1; then mtime() { stat -c %Y "$1" 2>/dev/null; }; else mtime() { stat -f %m "$1" 2>/dev/null; }; fi
+if stat -c %Y / >/dev/null 2>&1; then mtime() { stat -c %Y "$1" 2>/dev/null; }; mtimes() { stat -c '%Y %n' "$@" 2>/dev/null; }; else mtime() { stat -f %m "$1" 2>/dev/null; }; mtimes() { stat -f '%m %N' "$@" 2>/dev/null; }; fi
 me="$0"
 # Windows, in Git for Windows' bash: a chat's process is a Windows process, which kill and ps never see, so tasklist says which run;
 # the watchers are Git's own processes, whose command lines are in /proc
@@ -181,15 +181,39 @@ last=$(now) idle=$(now) woke=0
 # Each look starts as few processes as it can, as it runs every few seconds for days, on battery too: the time from the shell's own
 # count of seconds (by the wall clock, so a Mac that slept still shows the gap), files read and names cut by the shell itself
 base=$(( $(now) - SECONDS ))
+# The wait between two looks is the shell's own where it can be: a timed read of a pipe nobody writes to, held open by this process
+# alone (its name is removed at once), for a STEP of whole seconds, which is all the Mac's bash takes. A read that comes back early
+# is no wait at all, so it sleeps instead, and after three of those for good
+nap() { sleep "$STEP"; }
+pipe="$dir/revive.$$.wait"
+case "$STEP" in
+  ''|*[!0-9]*|0) ;;
+  *)
+    if mkfifo "$pipe" 2>/dev/null && exec 9<>"$pipe"; then
+      early=0
+      nap() {
+        local from=$SECONDS
+        read -r -t "$STEP" -u 9 _ 2>/dev/null
+        [ $((SECONDS - from)) -ge "$STEP" ] && return
+        early=$((early + 1)); [ "$early" -ge 3 ] && nap() { sleep "$STEP"; }
+        sleep "$STEP"
+      }
+    fi
+    rm -f "$pipe"
+    ;;
+esac
 while mine; do
-  sleep "$STEP"
+  nap
   t=$((base + SECONDS))
   # A Mac that slept leaves every beat quiet when it wakes: the chats get longer to write theirs again
   [ $((t - last)) -gt $((STEP * 3 + 5)) ] && woke=$t
   last=$t
   any=0
   if [ -n "$win" ]; then for b in "$dir"/*.beat; do [ -f "$b" ] && { windowsLook; break; }; done; fi
-  for beat in "$dir"/*.beat; do
+  # Every beat's time in one look: one process a pass however many chats are open, and none with no beat
+  set -- "$dir"/*.beat
+  times=''; [ -e "$1" ] && times=$(mtimes "$@")
+  while read -r -u 8 m beat; do
     [ -f "$beat" ] || continue
     sid=${beat##*/}; sid=${sid%.beat}
     # (the load on a line of its own: a watcher of an older version, still running, reads the first line as before). A beat with
@@ -199,7 +223,7 @@ while mine; do
     # A chat whose process has ended has no Claudopus to bring back
     if ! chatRuns "${pid:-}"; then rm -f "$beat" "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed" "$dir/$sid.slow"; continue; fi
     any=1
-    m=$(mtime "$beat") || continue
+    case "$m" in ''|*[!0-9]*) continue ;; esac
     quiet=$((t - m))
     # The slow mark: the load, and when it was last seen stalled
     slow='' stalled=''
@@ -248,7 +272,7 @@ while mine; do
     # (only a change made: the load it was made for, whose beating again proves that chat was never off)
     [ -n "$load" ] && printf '%s\n' "$load" > "$dir/$sid.changed"
     log "chat $sid: quiet $quiet s while its process $pid runs: the setting of $key changed, so Claude loads it again"
-  done
+  done 8<<<"$times"
   [ "$any" = 1 ] && idle=$t
   [ $((t - idle)) -ge "$IDLE" ] && { log "no chat beating for $IDLE s: ended"; break; }
 done

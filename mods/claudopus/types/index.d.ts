@@ -21,8 +21,9 @@ export type Stream = { name: string; repo: string; session: string; state: strin
 // pressed on its card ('event', Claudopus's words, never the work's). The card's line shows the last the work wrote itself.
 // In the work's chat a steer goes before the line the work wrote next
 // A message of the person's to the task (a steer from its card or the chat) is followed until the task reads it: `isUnread` from when
-// it is sent, then `readAt`, the first model step of the task's that held it; `isNow` when the person stopped the task's step to send it
-export type Entry = { at: number; kind: 'note' | 'decision' | 'steer' | 'event'; text: string; step?: number; isUnread?: boolean; readAt?: number; isNow?: boolean }
+// it is sent, then `readAt`, the first model step of the task's that held it; `isNow` when the person stopped the task's step to send it;
+// `isLost` when the task could no longer be reached, so the chat was given it instead
+export type Entry = { at: number; kind: 'note' | 'decision' | 'steer' | 'event'; text: string; step?: number; isUnread?: boolean; readAt?: number; isNow?: boolean; isLost?: boolean }
 
 // One thing the work set out to do under its to-do; `doing` is the one it is on now, at most one at a time
 export type Talk = { by: 'you' | 'task'; text: string }
@@ -330,6 +331,6 @@ export type Flow = {
 
 declare module 'claude-code' {
   interface PluginState {
-    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; figures: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; drafts: Shaped<Record<string, string>>; runs: Shaped<PressRun[]>; progress: Shaped<number>; listSeen: Shaped<string[]>; load: string }
+    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; figures: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; reportsMark: Shaped<number>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; drafts: Shaped<Record<string, string>>; runs: Shaped<PressRun[]>; progress: Shaped<number>; listSeen: Shaped<string[]>; load: string }
   }
 }

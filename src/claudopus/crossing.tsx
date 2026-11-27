@@ -182,7 +182,7 @@ const crossingOf = async ($: EngineInterface, e: { tool: string; agentId?: strin
   if (!dir || isOff || e.agentId === undefined || !(e.tool === 'Bash' || FILE_TOOLS.includes(e.tool))) return {}
   const paths = crossPaths(e)
   if (!paths.length) return {}
-  const list = await read($, todos)
+  const list = await ownCards($)
   const top = topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
   if (!card) return {}
@@ -241,7 +241,7 @@ const outputOf = (result: unknown) => {
 const crossEnded = async ($: EngineInterface, e: { tool: string; agentId?: string; command?: unknown }, crossed: Crossed, result: unknown, isError: boolean): Promise<string> => {
   if (!dir || isOff || e.agentId === undefined) return ''
   const now = await $.clock.now()
-  const list = await read($, todos)
+  const list = await ownCards($)
   const top = crossed.top ?? topOf(list, e.agentId)
   // A file tool's error wrote nothing; a command may have written before it failed
   const isThrough = !(isError && e.tool !== 'Bash')

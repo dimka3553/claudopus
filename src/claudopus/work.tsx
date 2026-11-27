@@ -285,7 +285,7 @@ const workHooks = (on: On) => {
       return { deny: crossed.deny }
     }
     // (only while it, or the work it helps, has a question of its own open to the person: a wait said for them then is that)
-    if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
+    if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await ownCards($), e.agentId)) {
       await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: NO_PERSON_WAIT(who()) }
     }
@@ -293,7 +293,7 @@ const workHooks = (on: On) => {
     // clock or for its helpers. In the background, a wait for something far away is a watch, the way to wait: let through
     if (dir && !isOff && e.agentId !== undefined && (e.tool === 'Bash' || e.tool === 'Monitor')) {
       const command = String((e as { command?: unknown }).command ?? '')
-      const card = (await read($, todos)).find(one => one.id === e.agentId)
+      const card = (await ownCards($)).find(one => one.id === e.agentId)
       if (isDetaching(e as never)) {
         await log($, `refused ${card?.parentId ? 'helper' : 'work'} ${e.agentId}'s command that detaches what it starts`)
         return { deny: NO_DETACH }
@@ -435,7 +435,7 @@ const workHooks = (on: On) => {
     if (dir && !isOff && (e.tool === 'SendMessage' || e.tool === 'Agent')) {
       const call = e as unknown as { to?: unknown; resume?: unknown; description?: unknown; prompt?: unknown; subagent_type?: unknown }
       const resume = e.tool === 'SendMessage' ? String(call.to ?? '') : String(call.resume ?? '')
-      const held = heldFor(await read($, todos), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
+      const held = heldFor(await ownCards($), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
       if (held) {
         await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
         return { deny: named(STOPPED_REFUSED(titleOf(held))) }
@@ -462,7 +462,7 @@ const workHooks = (on: On) => {
       // Their words and nothing more: else only the words quoted are told as theirs, and the rest as the chat's
       isWhole = Boolean(theirs) && isTheirsWhole(message, theirs ?? '')
       const now = await $.clock.now()
-      const list = await read($, todos)
+      const list = await ownCards($)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
       // The chat passing on an answer the person gave on the card, which reached the work from there already, sends nothing: a
       // second copy started work that had ended again, with nothing to do but say it was done
@@ -571,26 +571,26 @@ const workHooks = (on: On) => {
     // no server still runs (handbackRefused). Once it goes through, its card is done
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const agent = e.agentId
-      const refused = handbackRefused(await read($, todos), agent)
+      const refused = handbackRefused(await ownCards($), agent)
       if (refused) return (await log($, `work ${agent}'s hand-back refused: ${refused.slice(0, 60)}`), { deny: refused })
       const report = String((e as { message?: unknown }).message ?? '').trim()
       // A task's report goes to the chat as its own reply, not in Claude Code's box (REPORT_TAKEN): Claudopus answers the hand-back
       // itself, keeps the report as one that went through, and gives it to the chat with Claude Code's notice that the task ended
       // (chatHooks' prompt.submit). The task's steps after it are answered with no model (turn.step), so it ends at once
-      const taken = (await read($, todos)).find(one => one.id === agent)
+      const taken = (await ownCards($)).find(one => one.id === agent)
       if (dir && !isOff && taken && !taken.parentId && !flowAgents.has(agent)) {
         handedBack.set(agent, report)
         const now = await $.clock.now()
         // (one a safety check ended hands in only word of that: it failed, and says so)
         await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...(one.flagged ? { ...ended(one, 'failed', now), why: WHY_FLAGGED } : { ...ended(one, 'done', now), reportAt: now }), answer: report.slice(0, ANSWER_CHARS) || one.answer, reportForChat: report, reportGiven: undefined, tookReport: String(e.tool_use_id) })))
-        let card = (await read($, todos)).find(one => one.id === agent)
+        let card = (await ownCards($)).find(one => one.id === agent)
         // What its result still asks with buttons is drawn as one picture too, opened on the screen and shown with the question
         const asked = card?.ask?.isResult && card.ask.choices?.length && !card.ask.pictures?.length ? card.ask : undefined
         if (card && asked && (await wantsQuestionPictures($).catch(() => false))) {
           const drawn = await questionPicture($, card.id, titleOf(card), asked.text, asked.details ?? '', asked.choices ?? [], asked.at)
           if (drawn) {
             await changeTodos($, list => list.map(one => (one.id === agent && one.ask?.at === asked.at && one.ask.text === asked.text ? { ...one, ask: { ...one.ask, pictures: [drawn] } } : one)))
-            card = (await read($, todos)).find(one => one.id === agent)
+            card = (await ownCards($)).find(one => one.id === agent)
             await openQuestionPicture($, drawn)
             if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
           }
@@ -603,7 +603,7 @@ const workHooks = (on: On) => {
       // A helper's goes only to the task that started it, never into the chat (Claude Code draws a hand-back it delivers as a box
       // in the chat, and some came twice): Claudopus answers the hand-back itself, as a task's, and gives the result to that task
       // from this hook, once: a message to it, which it reads at its next step or which starts its next step where it has paused
-      const above = taken?.parentId ? (await read($, todos)).find(one => one.id === taken.parentId) : undefined
+      const above = taken?.parentId ? (await ownCards($)).find(one => one.id === taken.parentId) : undefined
       if (dir && !isOff && taken && above && !above.chat && !flowAgents.has(agent) && !flowAgents.has(above.id)) {
         handedBack.set(agent, report)
         const now = await $.clock.now()
@@ -703,7 +703,7 @@ const workHooks = (on: On) => {
     // A task whose report Claudopus took ends there: its step after the hand-back, and Claude Code's presses for a report that it
     // does not see delivered, are answered with no model and draw nothing (PRESS_ANSWER). A message that starts it again is a step
     // of its own, and its next report is taken afresh
-    const took = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.tookReport : undefined
+    const took = id !== undefined && dir ? (await ownCards($)).find(one => one.id === id)?.tookReport : undefined
     if (id !== undefined && took) {
       if (await isAfterTaken($, id, took)) {
         yield { kind: 'text', index: 0, text: PRESS_ANSWER }
@@ -712,14 +712,14 @@ const workHooks = (on: On) => {
       }
       await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tookReport: undefined } : one)))
     }
-    const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
+    const chosen = id !== undefined && dir ? (await ownCards($)).find(one => one.id === id)?.chosen : undefined
     // A step the app sends to an older model or to Haiku after its safeguards flag a message is not moved back past the flag: the
     // work is ended there with a report that says so (FLAGGED), so its parent starts what is left again on a current model. An agent
     // that started on an older model or on Haiku itself (its own kind's model, or an alias the settings point at an older version)
     // has its steps go to that family's newest, or to the model the person picked. An agent whose start the mod did not see is left
     // where the app sent it, and its card says so
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
-    const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
+    const card = id !== undefined && dir ? (await ownCards($)).find(one => one.id === id) : undefined
     // A task that ended its step with a question or a permission open for the person waits for them (or for a command they allowed), and Claude Code presses it for
     // a report it cannot give: each press is answered here with no model, so it costs nothing and no unfinished report is handed in
     if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id) || holdsCard(id)) && (await isPressedForReport($, id, true))) {
@@ -762,7 +762,7 @@ const workHooks = (on: On) => {
     }
     // The card says so only while it holds: not once the app sends its steps to a right model again
     const moved = isMovedByApp ? modelName(e.model) : undefined
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    if (id !== undefined && dir && (await ownCards($)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
     // A pick the engine has since passed is its family's newest
     const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
     const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
@@ -784,15 +784,15 @@ const workHooks = (on: On) => {
     const live = e.background_tasks
     if (dir && Array.isArray(live)) {
       const ids = new Set(live.map(one => one.id))
-      const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
+      const gone = ((await ownCards($)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
       if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
     }
     // What a task's commands left behind is tidied as it stops (bin/tidy itself runs at most every ten minutes)
-    if (dir && !isOff && !r.block && (await read($, todos)).some(one => one.id === e.agent_id && !one.parentId && !one.chat)) await startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`))
+    if (dir && !isOff && !r.block && (await ownCards($)).some(one => one.id === e.agent_id && !one.parentId && !one.chat)) await startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`))
     // One rule against stopping early: a task with to-dos open, nothing of its own running and nothing waiting for the person may
     // not stop here (stopRefused). Claude Code's own word that this stop follows a refused one keeps it from being asked twice
     if (!dir || r.block || (e as { stop_hook_active?: boolean }).stop_hook_active) return r
-    const why = stopRefused(await read($, todos), e.agent_id)
+    const why = stopRefused(await ownCards($), e.agent_id)
     if (why) await log($, `work ${e.agent_id} may not stop: to-dos are open and nothing of its own runs`)
     return why ? { ...r, block: why } : r
   })
@@ -801,7 +801,7 @@ const workHooks = (on: On) => {
     agentStarted($, asked.tool_use_id)
     // Nothing starts again work the person stopped, whoever asks: the chat or a work
     if (dir && !isOff && !asked.workflow) {
-      const held = heldFor(await read($, todos), asked.parentAgentId ?? helperCalls.get(asked.tool_use_id) ?? '', asked.resume?.agentId ?? '', asked.description ?? '', asked.resume ? '' : (asked.prompt ?? ''))
+      const held = heldFor(await ownCards($), asked.parentAgentId ?? helperCalls.get(asked.tool_use_id) ?? '', asked.resume?.agentId ?? '', asked.description ?? '', asked.resume ? '' : (asked.prompt ?? ''))
       if (held) {
         await log($, `refused to start again ${held.id}, which the person stopped`)
         return { deny: named(STOPPED_REFUSED(titleOf(held))) }
@@ -837,7 +837,7 @@ const workHooks = (on: On) => {
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
     // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
-    const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : ''
+    const scratch = isTold ? scratchName(await ownCards($), e.description ?? '', await $.clock.now()) : ''
     const isBackground = isHelperSpawn(e)
     // and what was set aside before in the area its words are about, with why (progress.tsx)
     const aside = isTold ? await asideTold($, e.description ?? '', e.prompt ?? '').catch(err => (void log($, `set-aside work not told: ${String(err)}`), '')) : ''
@@ -853,7 +853,7 @@ const workHooks = (on: On) => {
     const now = await $.clock.now()
     // A brief that names one result, on what that result's title is about, goes on with its work: a round of it. One that names
     // several, or one on something else, only reads them
-    const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
+    const named1 = isOwn && !fromReport && !e.resume ? (await ownReports($)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
     const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
     const from = fromReport || goesOn
     // The instructions it was started with are kept in the ledger, for a fresh task that may carry it on; one that carries on a task

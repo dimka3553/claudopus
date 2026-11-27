@@ -210,6 +210,30 @@ printf '%s\n' 'adminpw-5678' | "$here/keyring" set claudopus-admin here 'Claudop
 hidden=$(printf 'the password is adminpw-5678\n' | "$here/secret" --hide)
 n=$((n + 1))
 if [ "$hidden" = 'the password is [hidden admin password of here]' ]; then echo "ok $n - a kept admin password is hidden in what is printed"; else echo "NOT OK $n - it printed: $hidden"; failed=1; fi
+# The caller may name the admin passwords it knows are kept, so the keychain is not listed for them: the named one is hidden, and
+# none when it names none
+hidden=$(printf 'the password is adminpw-5678\n' | "$here/secret" --hide --admins here)
+plain=$(printf 'the password is adminpw-5678\n' | "$here/secret" --hide --admins '')
+n=$((n + 1))
+if [ "$hidden" = 'the password is [hidden admin password of here]' ] && [ "$plain" = 'the password is adminpw-5678' ]; then echo "ok $n - only the admin passwords the caller names are hidden when it names them"; else echo "NOT OK $n - it printed: $hidden / $plain"; failed=1; fi
+# Inside JSON only the strings change, a name's as a value's, a value escaped as a log escapes it too, and a number stays one; a
+# text that holds no value comes back as it came
+printf '%s\n' 'q"k\y-9876' | "$here/keyring" set claudopus-secret TEST_MARK 'Claudopus: TEST_MARK'
+hidden=$(printf '%s' '{"adminpw-5678":{"a":["x q\"k\\y-9876",1.5,"q\\\"k\\\\y-9876 é"]}}' | "$here/secret" --hide --json --admins here TEST_MARK)
+plain=$(printf '%s' '{ "a" : [1.50, "adminpw-567"] }' | "$here/secret" --hide --json)
+n=$((n + 1))
+if [ "$hidden" = '{"[hidden admin password of here]":{"a":["x [hidden TEST_MARK]",1.5,"[hidden TEST_MARK] é"]}}' ] && [ "$plain" = '{ "a" : [1.50, "adminpw-567"] }' ]; then echo "ok $n - values are hidden inside a JSON text's strings, and a text that holds none is left as it came"; else echo "NOT OK $n - it printed: $hidden / $plain"; failed=1; fi
+# --marks: the names, and for each value its length and a hash under the caller's base, never the value: worked out here another way
+mark() { node -e 'let h = 0n; for (const b of Buffer.from(process.argv[1])) h = (h * 1000003n + BigInt(b)) % 2147483647n; process.stdout.write(`mark\t${Buffer.byteLength(process.argv[1])}\t${h}`)' "$1"; }
+marks=$("$here/secret" --marks 1000003)
+n=$((n + 1))
+if [ "$marks" = "$(printf 'name\tTEST_MARK\n%s\n%s\nadmin\there\n%s\nend' "$(mark 'q"k\y-9876')" "$(mark 'q\"k\\y-9876')" "$(mark 'adminpw-5678')")" ]; then echo "ok $n - the marks name each key and admin password and give each value's length and hash"; else echo "NOT OK $n - the marks were not as worked out here"; failed=1; fi
+n=$((n + 1))
+if [ "$("$here/secret" --marks 1000003 --admins '' TEST_MARK | grep -c .)" = 4 ] && ! "$here/secret" --marks 1000003 | grep -q -e 9876 -e 5678; then echo "ok $n - the marks are of what the caller names, and hold no value"; else echo "NOT OK $n - the marks of a named key were not its own"; failed=1; fi
+# A value that cannot be read, or a base no caller's arithmetic holds: no marks, so the caller hides every text
+n=$((n + 1))
+if marks=$("$here/secret" --marks 1000003 TEST_MARK NOT_KEPT 2>/dev/null) || [ -n "$marks" ] || "$here/secret" --marks 5 >/dev/null 2>&1 || "$here/secret" --marks 2097152 >/dev/null 2>&1; then echo "NOT OK $n - marks were given without every value read, or under a base out of range"; failed=1; else echo "ok $n - no marks when a value cannot be read or the base is out of range"; fi
+"$here/secret" TEST_MARK --forget >/dev/null 2>&1
 "$here/keyring" delete claudopus-admin here >/dev/null 2>&1
 
 # The release runner: a release only with the person's press, and nothing of a branch's .release run

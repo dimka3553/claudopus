@@ -18,18 +18,22 @@ export const paceReserve = (cores: number) => (cores >= 8 ? 2 : 1)
 // mode, which on a Mac runs them on its efficiency cores. On 27 Nov two tasks' test runs, about 28 processes at once, had the Mac
 // draw 50 to 60 W on its battery
 export const paceBatteryRoom = (cores: number) => Math.max(2, Math.floor(cores / 4))
-// Every process with its parent, group, age, priority and program; every thread ready to run, with its priority (only those: all
-// of a Mac's threads are thousands of lines); the cores; and the chat's own engine
-export const PACE_LOOK = `echo "@@PACE@@ $PPID"; echo @@CORES@@; sysctl -n hw.ncpu; echo @@PS@@; ps -A -o pid=,ppid=,pgid=,etime=,pri=,comm=; echo @@THREADS@@; ps -M -A -c | awk '($1 ~ /^[0-9]+$/ && $3 ~ /^R/) || ($1 !~ /^[0-9]+$/ && $5 ~ /^R/)'`
+// The chat's own engine and the look's own shell; the cores, unless $1 gives them (they never change, so they are asked for
+// once); and every process with its state, parent, group, age, priority and program
+export const PACE_LOOK = `echo "@@PACE@@ $PPID $$"; [ -n "$1" ] || { echo @@CORES@@; sysctl -n hw.ncpu; }; echo @@PS@@; ps -A -o stat=,pid=,ppid=,pgid=,etime=,pri=,comm=`
+// Every thread ready to run, with its priority (only those: all of a Mac's threads are thousands of lines, and listing them is
+// the heaviest part of a look): asked for only when the processes leave something to decide (paceNeedsThreads)
+export const PACE_THREADS = `echo "@@PACE@@ $PPID"; echo @@THREADS@@; ps -M -A -c | awk '($1 ~ /^[0-9]+$/ && $3 ~ /^R/) || ($1 !~ /^[0-9]+$/ && $5 ~ /^R/)'`
 // The background mode on for those in $1, and off for those in $2 (spaces between); a process gone meanwhile is passed over
 export const PACE_SET = 'for p in $1; do taskpolicy -b -p "$p" 2>/dev/null; done; for p in $2; do taskpolicy -B -p "$p" 2>/dev/null; done; true'
 // A process or thread in the background mode runs at a priority of 4 or lower; one that is only busy stays far above it
 const LOW_PRI = 4
 
-export type PaceProc = { pid: string; ppid: string; pgid: string; age: number; pri: number; name: string }
+// (isIdle: its state says none of its threads runs or is ready to)
+export type PaceProc = { pid: string; ppid: string; pgid: string; age: number; pri: number; name: string; isIdle?: true }
 // Each process's threads ready to run: all of them, and those at full speed (above the background mode)
 export type PaceThreads = Record<string, { ready: number; full: number }>
-export type PaceLook = { self: string; cores: number; procs: PaceProc[]; threads: PaceThreads }
+export type PaceLook = { self: string; own?: string; cores: number; procs: PaceProc[]; threads: PaceThreads }
 
 // ps's elapsed time, [[days-]hours:]minutes:seconds
 const ageOf = (time: string) => {
@@ -53,13 +57,13 @@ export const threadsOf = (text: string): PaceThreads => {
 }
 export const paceLookOf = (text: string): PaceLook => {
   const part = (name: string) => text.split(`@@${name}@@`)[1]?.split(/^@@[A-Z]+@@/m)[0] ?? ''
-  const self = /^@@PACE@@ (\d+)/m.exec(text)?.[1] ?? ''
+  const [, self = '', own] = /^@@PACE@@ (\d+)(?: (\d+))?/m.exec(text) ?? []
   const cores = Number(part('CORES').trim()) || 0
   const procs = part('PS').split('\n').flatMap(line => {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([\d:-]+)\s+(\d+)\s+(.*)$/.exec(line)
-    return m ? [{ pid: m[1] ?? '', ppid: m[2] ?? '', pgid: m[3] ?? '', age: ageOf(m[4] ?? '0'), pri: Number(m[5]), name: (m[6] ?? '').trim() }] : []
+    const m = /^\s*(?:([A-Za-z+<>]+)\s+)?(\d+)\s+(\d+)\s+(\d+)\s+([\d:-]+)\s+(\d+)\s+(.*)$/.exec(line)
+    return m ? [{ pid: m[2] ?? '', ppid: m[3] ?? '', pgid: m[4] ?? '', age: ageOf(m[5] ?? '0'), pri: Number(m[6]), name: (m[7] ?? '').trim(), ...(m[1] && !m[1].startsWith('R') ? { isIdle: true as const } : {}) }] : []
   })
-  return { self, cores, procs, threads: threadsOf(part('THREADS')) }
+  return { self, ...(own ? { own } : {}), cores, procs, threads: threadsOf(part('THREADS')) }
 }
 
 // A chat's engine: this chat's own, and every claude on the Mac (the desktop app is Claude, its engines and the terminal's are claude;
@@ -87,6 +91,12 @@ export const commandsOf = (look: PaceLook) => {
   for (let n = 0; n < queue.length; n++) for (const child of children.get(queue[n] ?? '') ?? []) if (!found.has(child) && !engines.has(child)) (found.add(child), queue.push(child))
   return look.procs.filter(p => found.has(p.pid))
 }
+
+// Whether the threads must be listed to decide. They tell how many threads each command has ready and how many everything else
+// has; the first command with any ready always runs at full speed and one with none is never held, so with at most one command
+// that may have a thread ready (its state says so, or it waits in the background mode, where it counts as one) the decision is
+// the same without them: nothing is held, and one waiting comes back. The look's own shell and ps are not counted
+export const paceNeedsThreads = (look: PaceLook) => commandsOf(look).filter(p => !(p.isIdle && p.pri > LOW_PRI) && p.pid !== look.own && p.ppid !== look.own).length > 1
 
 // Which commands go into the background mode and which come out of it. The room is the cores less the reserve and less what else is
 // ready at full speed, taken as the lower of this look's count and the last one's (`before`): a burst of a moment, which the reserve

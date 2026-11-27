@@ -302,7 +302,7 @@ const setGates = async ($: EngineInterface, top: string, fn: (list: Gate[]) => G
 const clearGates = async ($: EngineInterface) => {
   looseGates = looseGates.filter(one => gateHeld.has(one.id))
   const isKept = (gate: Gate) => gateHeld.has(gate.id) || gateParked.has(gate.id)
-  if ((await read($, todos)).some(one => one.admins?.some(gate => !isKept(gate))))
+  if ((await ownCards($)).some(one => one.admins?.some(gate => !isKept(gate))))
     await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(isKept).length ? one.admins.filter(isKept) : undefined } : one)))
 }
 // Holds the call until the person presses: the wait is a promise the press resolves (answerGate), ended also by the call's
@@ -322,7 +322,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   try {
     await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
     await openList($).catch(() => undefined)
-    const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
+    const card = top ? (await ownCards($)).find(one => one.id === top) : undefined
     const text = `${gateAct(gate)}: ${cut(oneLine(gate.command), 200)}`
     await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
     const act = gateAct(gate)
@@ -386,7 +386,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
 const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string, note = '') => {
   const run = (async () => {
     const words = value.trim()
-    const one = (await read($, todos)).find(other => other.id === card)
+    const one = (await ownCards($)).find(other => other.id === card)
     const gate = one?.admins?.find(other => other.id === id)
     if (!words || !one || !gate || gatePressed.has(id) || gate.isUndone) return
     presses += 1
@@ -405,9 +405,9 @@ const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string
 // What a task is told of the person's words or press on its card when no call of its own waits for it: written in at its next step,
 // or sent to it paused, which starts it with them
 const toTask = async ($: EngineInterface, card: string, target: string, text: string, label: string, asked: string) => {
-  const one = (await read($, todos)).find(other => other.id === card)
+  const one = (await ownCards($)).find(other => other.id === card)
   if (!one) return
-  const working = (await read($, todos)).find(other => other.id === target)?.status === 'working'
+  const working = (await ownCards($)).find(other => other.id === target)?.status === 'working'
   const told = working ? await tell($, target, text) : undefined
   if (told && !told.deny) return void writtenIn($, target, card)
   await toEnded($, one, target, `${text}\n${RESUMED_BY_ANSWER}`, { text: label, ask: asked, at: await $.clock.now(), line: lineOf(one), isCard: true, isPress: true })
@@ -450,7 +450,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
   if (isWindows && calls.some(one => one.host === 'here')) return { deny: ADMIN_NOT_HERE(), grants: [] }
   const gate = await gateOf($)
   if (gate.mode === 'never') return { grants: [] }
-  const list = await read($, todos)
+  const list = await ownCards($)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
   const grants: string[] = []
@@ -579,7 +579,7 @@ const isReleased = async (git: (args: string[]) => Promise<string>, tips: string
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
   const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), pluginRoot($), cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
   if (!calls.length || !dir) return { grants: [] }
-  const list = await read($, todos)
+  const list = await ownCards($)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
   const grants: string[] = []
@@ -652,7 +652,7 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
         : Array.isArray(input.edits)
           ? input.edits.map(one => String((one as { new_string?: unknown })?.new_string ?? '')).join('\n…\n')
           : String(input.new_source ?? '')
-  const list = await read($, todos)
+  const list = await ownCards($)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
   if (card && (await takeOnce($, top, 'file', file, cut(change, 2000)))) return ''
@@ -909,7 +909,7 @@ const PERSON_UNDONE = (names: string[]) =>
 // The change undone, on the card of the work whose command made it, else at the top: Allow makes it again. One card for each file:
 // a later change to it replaces the one shown
 const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, name: string, text: string | null) => {
-  const list = await read($, todos)
+  const list = await ownCards($)
   const top = by?.agentId === undefined ? '' : topOf(list, by.agentId)
   const card = list.find(one => one.id === top)
   const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role file (${name})`
@@ -934,7 +934,7 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
   const offer = undoneOffers.get(gate.id)
   undoneOffers.delete(gate.id)
   gateHeld.delete(gate.id)
-  const list = await read($, todos)
+  const list = await ownCards($)
   await setGates($, list.some(one => one.admins?.some(g => g.id === gate.id)) ? (list.find(one => one.admins?.some(g => g.id === gate.id))?.id ?? '') : '', gates => gates.filter(one => one.id !== gate.id))
   if (said !== 'once' || !offer || !dir) return log($, `change to ${gate.host}: left undone`)
   await personWrote($, dir, offer.name, offer.text)

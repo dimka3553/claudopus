@@ -123,9 +123,11 @@ const draftDrawn = (key: string) => {
 // What a pane shows, as far as it moves while the person types: work that starts, finishes, asks, waits on an admin command, is cut
 // or stuck, or leaves after its pause, here or in another chat; workflows; boxes, gates and prompts that come or go; a Details
 // tab's own to-dos
+// (whether a card has a call running, not which: named by when it began, every call of every task was a new shape, and the
+// whole pane was drawn afresh for it)
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -136,10 +138,12 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
 const calmCard = (one: Todo) => {
-  const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
+  // (nor what only counts its calls, which no card shows: with those in, each call of each task drew the whole panel afresh;
+  // the kind of call a card names as what its task is doing now is in what the pane shows, paneContent)
+  const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
   return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, (await read($, reports)).length, (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
 const holdTimes = ($: EngineInterface) => {
   if (!isTyping) recordEvent($, 'hold')
   const made = (typing += 1)
@@ -622,17 +626,6 @@ function run(argv) {
   return data.writeToFileAtomically(argv[0], true) ? argv[0] : ''
 }`
 const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
-// On Windows, Windows PowerShell's own clipboard: the files copied in Explorer, else a picture saved where CLAUDOPUS_PASTE_TO says,
-// each path on a line of its own, in UTF-8 so a name in any language comes through whole
-const PASTE_WINDOWS = [
-  "$ErrorActionPreference = 'Stop'",
-  '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
-  'Add-Type -AssemblyName System.Windows.Forms, System.Drawing',
-  '$files = [Windows.Forms.Clipboard]::GetFileDropList()',
-  'if ($files.Count) { $files | ForEach-Object { $_ }; exit 0 }',
-  '$image = [Windows.Forms.Clipboard]::GetImage()',
-  'if ($image) { $image.Save($env:CLAUDOPUS_PASTE_TO, [Drawing.Imaging.ImageFormat]::Png); $env:CLAUDOPUS_PASTE_TO }',
-].join('; ')
 const pastePicture = async ($: EngineInterface, id: string) => {
   if (!canAttach()) return
   await runOn($, ['mkdir', '-p', attachedDir()])
@@ -658,20 +651,6 @@ const pastePicture = async ($: EngineInterface, id: string) => {
 const canAttach = () => !isRunFromAfar
 const PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose file with prompt "Attach files" with multiple selections allowed', '-e', 'set out to ""', '-e', 'repeat with f in picked', '-e', 'set out to out & POSIX path of f & linefeed', '-e', 'end repeat', '-e', 'return out']
 const PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files']
-const PICK_WINDOWS = [
-  'powershell',
-  '-NoProfile',
-  '-NonInteractive',
-  '-STA',
-  '-Command',
-  [
-    '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
-    'Add-Type -AssemblyName System.Windows.Forms',
-    '$owner = New-Object Windows.Forms.Form -Property @{ TopMost = $true }',
-    "$box = New-Object Windows.Forms.OpenFileDialog -Property @{ Multiselect = $true; Title = 'Attach files' }",
-    'if ($box.ShowDialog($owner) -eq [Windows.Forms.DialogResult]::OK) { $box.FileNames }',
-  ].join('; '),
-]
 const pickFiles = async ($: EngineInterface, id: string) => {
   if (!canAttach()) return
   // (a picker left open is the person's: it waits for them, the ten minutes a command of the mod's may run at most; cancelled, it
@@ -798,7 +777,7 @@ const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attachShape
 // whether the task has read it, a repeat of earlier words and a Stop and send said too. While some wait, one line says what they
 // wait behind: the task reads messages only between its steps
 const MESSAGES_SHOWN = 5
-const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.readAt !== undefined)
+const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.isLost || entry.readAt !== undefined)
 const sentList = (ui: Ui, one: Todo, now: number) => {
   const all = one.entries.filter(isFollowed)
   if (!all.length) return null
@@ -806,7 +785,9 @@ const sentList = (ui: Ui, one: Todo, now: number) => {
   const unread = all.filter(entry => entry.isUnread).length
   const step = one.running ? `${one.running.label ? `“${cut(one.running.label, 80)}”` : one.running.what}, has run ${took(now - one.running.at)}` : ''
   const meanwhile = !unread
-    ? ''
+    ? all.some(entry => entry.isLost) && isInterrupted(one)
+      ? "This task can't be reached any more, so the chat has your messages. Carry on starts a fresh task in its place."
+      : ''
     : one.status !== 'working'
       ? `The task starts again with ${unread === 1 ? 'your message' : 'your messages'}.`
       : needsPerson(one)
@@ -818,7 +799,7 @@ const sentList = (ui: Ui, one: Todo, now: number) => {
         {all.slice(from).map((entry, i) => {
           const n = from + i + 1
           const same = all.slice(0, n - 1).findIndex(other => plainWords(other.text) === plainWords(entry.text))
-          const state = [entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
+          const state = [entry.isLost ? "Didn't reach the task · the chat has it" : entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
           return (
             <ui.Box key={`sent-${one.id}-${entry.at}`} flexDirection="row" alignItems="flex-start" gap={1} width="100%">
               <ui.Box flexShrink={0} width={String(all.length).length + 7}>
@@ -889,7 +870,6 @@ const fileKind = (path: string) => {
 // its spaces escaped; a file:// address is a path too). Only the ones that are files on this computer. On Windows a path from a drive
 // too, with either slash (C:\x, C:/x, file:///C:/x, quoted where it has spaces), and Git's bash's /c/x, each kept as C:/x
 const PATHS_SAID = /(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g
-const PATHS_SAID_WINDOWS = /(?:file:\/\/\/?)?((?<![\w:])[A-Za-z]:[\\/][^\s'"`<>]+|\/(?:\\ |[^\s'"`<>])+)|'((?:[A-Za-z]:[\\/]|\/)[^'\n]+)'|"((?:[A-Za-z]:[\\/]|\/)[^"\n]+)"/g
 const pathsIn = async ($: EngineInterface, said: string) => {
   const found = new Set<string>()
   for (const m of said.matchAll(isWindows ? PATHS_SAID_WINDOWS : PATHS_SAID)) {
@@ -1228,12 +1208,24 @@ const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
   await changeTodos($, list => list.map(card => (card.id !== target || card.status === 'working' ? card : resumed(card, now))))
 }
+// What Claude Code says of a task it can't start again: its record is not in this chat's folder (a rewind's copy) or gone
+const UNRESUMABLE = /could not be resumed|no transcript found|no such agent/i
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
   // An ask its reply held waits on the person again, every answer back
   const ids = new Set(answers.map(({ one }) => one.id))
   await changeTodos($, list => list.map(card => (ids.has(card.id) ? mapAsks(card, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)) : card)))
+  // A task a rewind brought over (its record is in the chat it came from) that Claude Code can't start again, and that no run of
+  // this chat's is behind, can't be reached at all: its card ends so, and the chat has the words (keep.tsx). Any other answer that
+  // could not go waits in the chat for the person's next message, as below
+  const list = await read($, todos)
+  const top = list.find(card => card.id === topOf(list, target))
+  const isGone = UNRESUMABLE.test(reason) && top && !top.chat && Boolean(top.chatWas) && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
+  if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
+    for (const { one, sent } of answers) sentReplies.set(one.id, { ...sent, to: 'chat' })
+    return redraw($)
+  }
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
     const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))

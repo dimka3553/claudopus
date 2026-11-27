@@ -22,7 +22,7 @@ const THUMB_SIZES = ['640', '480', '360']
 const RASTER = /\.(png|jpe?g|gif|webp)$/i
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const reports = atom({ plugin: 'claudopus', key: 'reports' } as const, [], { shape: 'reports-1' })
-// The text of each report open in a pane, as read when it opened: a report is never rewritten
+// The text of each report open in a pane, as read when it opened: a report is never rewritten. The newest TEXTS_HELD are kept
 const reportText = new Map<string, string>()
 // The folder this session started in
 let cwd = ''
@@ -50,7 +50,19 @@ const ago = (at: number, now: number) => {
 // plain text, with nothing to press
 const waitsOf = (r: Report): { text: string }[] => r.waiting ?? (r.question ? [{ text: r.question }] : [])
 
+// What each open result found, read from its text as it is drawn (tabs.tsx): the list keeps the finding its meta.json holds
 const gists = new Map<string, string>()
+// Puts `key` in a Map as its newest and drops its oldest past `most`: what was dropped is read again when next needed
+const heldIn = <K, V>(map: Map<K, V>, key: K, value: V, most: number) => {
+  map.delete(key)
+  map.set(key, value)
+  for (const old of map.keys()) {
+    if (map.size <= most) break
+    map.delete(old)
+  }
+  return value
+}
+const TEXTS_HELD = 5
 // A file a report names is a path inside its own folder: never absolute, never one that climbs out with .., whoever wrote it (a
 // report another Mac handed over included)
 const isInside = (file: unknown): file is string =>
@@ -63,32 +75,64 @@ const isInside = (file: unknown): file is string =>
   !(isWindows && (file.includes('\\') || /^[A-Za-z]:/.test(file))) &&
   file.split('/').every(part => part !== '..' && part !== '')
 // Each result as last read, with its folder's time then: a look every 20 seconds read every meta.json again, 1744 of them on 27 Nov.
-// Now only a new folder, one whose time moved, or one a chat on this Mac changed (each change is named in reports/_changed.json) is
-// read, and every one again once in REPORTS_WHOLE (on battery REPORTS_WHOLE_BATTERY), for a change made by hand; another Mac's come
-// with a whole read (macs.tsx), as does a search of the memory
+// Now a look that finds the time of reports/ and of reports/_changed.json where they were ends there: only the two are asked.
+// When either moved, only a new folder, one whose time moved, or one a chat on this Mac changed (each change is named in
+// _changed.json) is read, and the list is written only when one of those differs. Every one is read again once in ten times
+// REPORTS_WHOLE (on battery REPORTS_WHOLE_BATTERY), for a change made by hand, and when the Results tab is drawn over a minute
+// after the last such read; another Mac's come with a whole read (macs.tsx). A disk that gives no time for the folder cannot
+// say what moved: there every look lists it, and every one is read again once in REPORTS_WHOLE
 const reportsRead = new Map<string, { mtime: number; one: Report }>()
 const REPORTS_WHOLE = 60_000
 const REPORTS_WHOLE_BATTERY = 180_000
+const REPORTS_STALE = 60_000
 const CHANGED_KEPT = 100
 let reportsWholeAt = -Infinity
+let reportsPassAt = -Infinity
+let reportsSeen = ''
 let changedSeen = ''
+// The list as this code last wrote it, never changed in place, and the mark written with each write of it: a mark that is not the
+// one kept says the list kept is not this code's (a session begun again), and it is compared whole. Whatever needs the list takes
+// it from here (ownReports), as each read of the whole list from the chat's state copies all of it; a drawing reads the mark alone
+let reportsKept: Report[] | undefined
+const ownReports = async ($: EngineInterface) => (reportsKept ? (await $.clock.now(), reportsKept) : (reportsKept = await read($, reports)))
+let reportsMarked = 0
+const reportsMark = atom({ plugin: 'claudopus', key: 'reportsMark' } as const, 0, { shape: 'reports-mark-1' })
 const changedPath = () => `${reportsDir()}/_changed.json`
+// A result to read again at the next look, whatever its folder's time
+const reportStale = (id: string) => {
+  const was = reportsRead.get(id)
+  if (was) was.mtime = NaN
+}
 // A result this chat changed: read again here, and named for the other chats
 const reportChanged = async ($: EngineInterface, id: string) => {
-  reportsRead.delete(id)
+  reportStale(id)
+  reportsSeen = ''
   const was = parsedOr<{ at: number; id: string }[]>(await readOr($, changedPath()), [])
   await $.fs.write(changedPath(), JSON.stringify([...(Array.isArray(was) ? was : []).slice(-(CHANGED_KEPT - 1)), { at: await $.clock.now(), id }])).catch(() => undefined)
 }
 const loadReports = async ($: EngineInterface, isWhole = false) => {
-  const found: Report[] = []
   const now = await $.clock.now()
-  if (isWhole || now < reportsWholeAt || now - reportsWholeAt >= (isOnBattery ? REPORTS_WHOLE_BATTERY : REPORTS_WHOLE)) (reportsRead.clear(), (reportsWholeAt = now))
+  const isFirst = !reportsRead.size
+  const [folder, log] = await Promise.all([reportsDir(), changedPath()].map(path => $.fs.stat(path).catch(() => undefined)))
+  const at = (folder as { mtimeMs?: number } | undefined)?.mtimeMs ?? 0
+  const seen = `${at}:${(log as { mtimeMs?: number } | undefined)?.mtimeMs ?? 0}:${log?.size ?? 0}`
+  let kept = reportsKept && (await read($, reportsMark)) === reportsMarked ? reportsKept : undefined
+  const whole = isWhole || !kept || now < reportsWholeAt || now - reportsWholeAt >= (at ? 10 : 1) * (isOnBattery ? REPORTS_WHOLE_BATTERY : REPORTS_WHOLE)
+  reportsPassAt = now
+  if (kept && !whole && at && seen === reportsSeen) return kept
+  reportsSeen = seen
+  if (whole) {
+    for (const one of reportsRead.values()) one.mtime = NaN
+    reportsWholeAt = now
+  }
   const changed = await readOr($, changedPath())
   if (changed !== changedSeen) {
     const list = parsedOr<{ id?: unknown }[]>(changed, [])
-    for (const one of Array.isArray(list) ? list : []) if (typeof one?.id === 'string') reportsRead.delete(one.id)
+    for (const one of Array.isArray(list) ? list : []) if (typeof one?.id === 'string') reportStale(one.id)
     changedSeen = changed
   }
+  const found: Report[] = []
+  let isMoved = false
   for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
     if (entry.kind !== 'dir' || entry.name.startsWith('_')) continue
     const mtime = (entry as { mtimeMs?: number }).mtimeMs ?? 0
@@ -100,19 +144,34 @@ const loadReports = async ($: EngineInterface, isWhole = false) => {
     try {
       const one = JSON.parse(await readOr($, `${reportsDir()}/${entry.name}/meta.json`)) as Report
       if (one.id !== entry.name || !one.title) continue
-      // A report a piece of work wrote has its finding read again from its text, once a load, as the finding is now found;
-      // one brought in by hand keeps the finding written for it
-      if (one.agent && !gists.has(one.id)) gists.set(one.id, gistOf(await readOr($, `${reportsDir()}/${entry.name}/report.md`), one.title) || one.gist)
-      const shown = { ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] }
+      const fresh = { ...one, subject: one.subject || one.title, gist: one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] }
+      // One read again and found as it was stays the one kept, so the list is written only when a result differs
+      const shown = was && JSON.stringify(was.one) === JSON.stringify(fresh) ? was.one : fresh
+      if (shown === fresh) isMoved = true
       reportsRead.set(entry.name, { mtime, one: shown })
       found.push(shown)
     } catch {
       // A folder without its meta.json is not a report yet
     }
   }
+  // (a look that began before this one and ended after it has written since: its list is the one kept)
+  kept = reportsKept === kept ? kept : undefined
+  if (kept && !isMoved && found.length === kept.length) return kept
   found.sort((a, b) => b.at - a.at)
-  if (JSON.stringify(found) !== JSON.stringify(await read($, reports))) await update($, reports, () => found)
+  // The first look of a load reads every result: the list is written only if it differs from the one kept
+  const isWritten = (kept && !isFirst) || JSON.stringify(found) !== JSON.stringify(kept ?? (await read($, reports)))
+  reportsKept = found
+  if (isWritten) await update($, reports, () => found)
+  // The mark moves with every write of the list, so a drawing that read only the mark is drawn again
+  if (isWritten || !kept) await update($, reportsMark, () => (reportsMarked = Math.max(now, reportsMarked + 1)))
   return found
+}
+// The Results tab, drawn: every result is read again when the last such read is over a minute old, outside the drawing
+let isReportsLook = false
+const reportsLooked = async ($: EngineInterface) => {
+  if (isReportsLook || (await $.clock.now()) - reportsWholeAt < REPORTS_STALE) return
+  isReportsLook = true
+  await loadReports($, true).finally(() => (isReportsLook = false))
 }
 
 // The absolute paths a report names, as written, without the punctuation after them. A folder's name may hold spaces ("FaceIQ email
@@ -263,9 +322,11 @@ const makeThumbs = async ($: EngineInterface, r: Report) => {
   }
 }
 // A small copy as an Svg the panel can draw, with its size; nothing for one too big or missing
+const DRAWN_HELD = 60
 const drawn = new Map<string, { source: string; width: number; height: number } | null>()
 const thumbOf = async ($: EngineInterface, path: string) => {
-  if (drawn.has(path)) return drawn.get(path) ?? null
+  const had = drawn.get(path)
+  if (had) return heldIn(drawn, path, had, DRAWN_HELD)
   let one: { source: string; width: number; height: number } | null = null
   try {
     const read = (await $.fs.read(path, { as: 'bytes' })) as { base64: string }
@@ -282,8 +343,8 @@ const thumbOf = async ($: EngineInterface, path: string) => {
   } catch {
     one = null
   }
-  // One not there yet is looked for again at the next drawing
-  if (one) drawn.set(path, one)
+  // One not there yet is looked for again at the next drawing; the newest DRAWN_HELD are kept, an older one read again
+  if (one) heldIn(drawn, path, one, DRAWN_HELD)
   return one
 }
 

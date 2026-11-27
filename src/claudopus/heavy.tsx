@@ -43,7 +43,7 @@ const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: s
   const command = String(input.command ?? '')
   if (!heavyOf(command, await scriptsRun($, command))) return {}
   const agent = e.agentId ?? ''
-  const list = await read($, todos)
+  const list = await ownCards($)
   if (!list.some(one => one.id === agent && !one.chat)) return {}
   const mode = heavyModeOf(await readConfig($, dir))
   if (mode.value === 'never') return {}

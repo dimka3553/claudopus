@@ -40,7 +40,10 @@ const tabHooks = (on: On) => {
   // The reports, in a pane of their own
   on('ui.render', { component: 'Pane', requestId: REPORTS_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
-    const kept = await read($, reports)
+    void reportsLooked($).catch(() => undefined)
+    // Drawn again when the list is written: its mark is read, and the list taken from the copy kept here
+    await read($, reportsMark)
+    const kept = await ownReports($)
     // What one row holds: the pane's cells less the block's padding. The app's letters are narrower than a cell
     const line = Math.max(24, Math.floor((e.props.bodyColumns - 8) * (e.surface === 'terminal' ? 1 : 1.25)))
     const now = await $.clock.now()
@@ -138,16 +141,20 @@ const tabHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (!e.requestId?.startsWith('report-')) return next(e)
     const { Box, Text } = uiOf($, e)
-    const kept = await read($, reports)
-    const r = kept.find(one => paneOf(one) === e.requestId)
-    if (!r) return <Text dimColor>This result is no longer available.</Text>
-    if (!reportText.has(r.id)) reportText.set(r.id, await readOr($, `${reportPath(r)}/report.md`))
+    // Drawn again when the list is written: its mark is read, and the list taken from the copy kept here
+    await read($, reportsMark)
+    const kept = await ownReports($)
+    const listed = kept.find(one => paneOf(one) === e.requestId)
+    if (!listed) return <Text dimColor>This result is no longer available.</Text>
+    // Its text is kept while it is among the newest drawn; what a task's result found is read from that text, as the finding is now found
+    const text = heldIn(reportText, listed.id, reportText.get(listed.id) ?? (await readOr($, `${reportPath(listed)}/report.md`)), TEXTS_HELD)
+    const r = listed.agent ? { ...listed, gist: heldIn(gists, listed.id, gists.get(listed.id) ?? (gistOf(text, listed.title) || listed.gist || ''), TEXTS_HELD) } : listed
     const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
     const file = r.files[at] ?? ''
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, reportText.get(r.id) ?? ''), e.surface)}
+        {reportShown($, uiOf($, e), r, text || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, text), e.surface)}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

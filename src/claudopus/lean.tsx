@@ -170,14 +170,6 @@ const isPlaceOf = (path: string, places: string[]) => {
     return place && (said === one || said.startsWith(`${one.replace(/\/+$/, '')}/`) || (!(isWindows ? isAbsPath(said) : said.startsWith('/')) && place === cwd))
   })
 }
-// On Windows the chat's open is Git's start (cmd's own, whose first quoted word is a window's title, here empty), Explorer, or
-// cygstart: each shows a page, a folder or a file as open does, Explorer's /select, as open's -R, and no switch of their own
-const WINDOWS_OPENS = ['start', 'explorer', 'explorer.exe', 'cygstart']
-const windowsOpenArgs = (head: string, args: string[]) => {
-  const rest = head === 'start' && args[0] === '' ? args.slice(1) : args
-  if (rest.some(one => one === '' || /^\/[A-Za-z]+$/.test(one) || (one.startsWith('/') && one.includes(',') && !one.toLowerCase().startsWith('/select,')))) return ['-x']
-  return rest.flatMap(one => (one.toLowerCase().startsWith('/select,') ? ['-R', one.slice(8).replace(/\\/g, '/')] : [one.replace(/\\/g, '/')]))
-}
 const isChatRunnable = (command: string, branch = '', places: string[] = []) => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
   // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history, outside quotes; inside double

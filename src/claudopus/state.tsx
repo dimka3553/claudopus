@@ -15,7 +15,8 @@
 // - interrupted (orange): it was at work when the app closed (or the chat's process ended), and its run ended with it, with no
 //   result. Its card says so, with Carry on, which starts a fresh task told all the ledger holds of it (keep.tsx); a question it
 //   asked still waits for the person, amber, and their answer carries it on (23 Nov, the person: "a task that was working and
-//   didn't hand in is marked 'interrupted', never 'done'")
+//   didn't hand in is marked 'interrupted', never 'done'"). A task that can no longer be reached at all (its run went with a
+//   rewind of the chat, so no message reaches it and Claude Code can't start it again) is interrupted too, and says that instead
 type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed' | 'interrupted'
 type Staged = Pick<Todo, 'status' | 'up' | 'closedAt' | 'why'> & Parameters<typeof needsPerson>[0]
 const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
@@ -46,11 +47,14 @@ const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' }
 const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error', interrupted: CUT })[stage]
 // How a card's line begins once it has ended, in its stage's colour
-// (a cut-off card with a note of its own after it says only Interrupted, so its note has the room: on a narrow panel the two cut each other short)
-const stageLine = (stage: Stage, why = '', hasNote = false) => (stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? (hasNote ? '⏸ Interrupted' : `⏸ Interrupted · ${WHY_APP_CLOSED}`) : 'Stopped')
+// (a card the app's close cut off with a note of its own after it says only Interrupted, so its note has the room: on a narrow panel
+// the two cut each other short. One that can't be reached says so whatever follows: that is what the person must know of it)
+const stageLine = (stage: Stage, why = '', hasNote = false) =>
+  stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? (why === WHY_UNREACHABLE ? `⏸ Interrupted · ${WHY_UNREACHABLE}` : hasNote ? '⏸ Interrupted' : `⏸ Interrupted · ${WHY_APP_CLOSED}`) : 'Stopped'
 // Why a card failed, where it says so
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'
+const WHY_UNREACHABLE = "Can't be reached any more"
 const WHY_ERROR = 'Ended with an error'
 const WHY_FLAGGED = 'Ended by a safety check'
 

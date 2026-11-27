@@ -3,8 +3,9 @@
 // ---- The servers on this Mac: what listens on which port, from which folder, started by which chat ----
 
 const rows = (text: string) => text.split('\n').filter(Boolean)
-// The engine process of a chat, as `ps` names it; the app itself is `Claude`. On Windows the engine is claude.exe and the app Claude.exe
-const isEngine = (path: string) => path.endsWith('/MacOS/claude') || /[\\/]claude\.exe$/.test(path)
+// The engine process of a chat, as `ps` shows its command (the program's path, then what it was given); the app itself is `Claude`.
+// On Windows the engine is claude.exe, its path quoted where it holds a space, and the app Claude.exe
+const isEngine = (args: string) => /^(?:(?! -).)*\/MacOS\/claude(?: |$)/.test(args) || /^"?(?:[^"]*[\\/])?claude\.exe"?(?:\s|$)/.test(args)
 // "node /long/path/.bin/next dev" reads as "node next dev"; on Windows a word may be quoted for its spaces, and a program's .exe goes
 const short = (args: string) =>
   isWindows
@@ -19,43 +20,6 @@ const short = (args: string) =>
         .join(' ')
         .slice(0, 50)
 
-// Windows has no lsof, and Git's ps sees none of its programs: what listens comes from netstat (a TCP row whose far end is 0.0.0.0:0
-// or [::]:0 listens, whatever language Windows writes its state in), and every process, with its parent, program and command line,
-// from PowerShell. Windows tells no process's folder: a server's is the folder its command line names under the home folder (the
-// part before node_modules, else the script's own folder), never one in AppData, where the person's apps live
-const WINDOWS_PROCS = "Get-CimInstance Win32_Process | ForEach-Object { '' + $_.ProcessId + [char]9 + $_.ParentProcessId + [char]9 + $_.ExecutablePath + [char]9 + $_.Name + [char]9 + $_.CommandLine }"
-const windowsPortsOf = (text: string) => {
-  const ports = new Map<number, string[]>()
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*TCP\s+(\S+):(\d+)\s+(?:0\.0\.0\.0|\[::\]):0\s+\S+\s+(\d+)\s*$/i.exec(line)
-    const pid = Number(m?.[3] ?? 0)
-    if (m && pid > 4 && !ports.get(pid)?.includes(m[2] ?? '')) ports.set(pid, [...(ports.get(pid) ?? []), m[2] ?? ''])
-  }
-  return ports
-}
-const windowsProcsOf = (text: string) => {
-  const table = new Map<number, { parent: number; path: string; args: string }>()
-  for (const line of text.split(/\r?\n/)) {
-    const [pid = '', parent = '', path = '', name = '', ...args] = line.split('\t')
-    if (/^\d+$/.test(pid)) table.set(Number(pid), { parent: Number(parent) || 0, path: slashed(path || name), args: args.join('\t').trim() })
-  }
-  return table
-}
-const windowsFolderOf = (args: string, home: string, scratch: string) => {
-  const lower = (one: string) => one.toLowerCase()
-  for (const m of args.matchAll(/"([^"]*)"|(\S+)/g)) {
-    const word = slashed(m[1] ?? m[2] ?? '')
-    if (!/^[A-Za-z]:\//.test(word)) continue
-    const inHome = home && lower(word).startsWith(`${lower(home)}/`) && !lower(word).startsWith(`${lower(home)}/appdata/`)
-    const inScratch = scratch && lower(word).startsWith(`${lower(scratch)}/`)
-    if (!inHome && !inScratch) continue
-    // (spelt as the home folder is, as Windows takes either case)
-    const whole = inHome ? `${home}${word.slice(home.length)}` : `${scratch}${word.slice(scratch.length)}`
-    const [before] = whole.split('/node_modules/')
-    return before !== whole ? (before ?? whole) : whole.replace(/\/[^/]*$/, '')
-  }
-  return ''
-}
 
 const scanServers = async ($: EngineInterface) => {
   scannedAt = Date.now()
@@ -76,29 +40,21 @@ const scanServers = async ($: EngineInterface) => {
   const pids = [...ports.keys()].join(',')
 
   const folders = new Map<number, string>()
-  const commands = new Map<number, string>()
-  // Every process with its parent, to find who started a server
-  let table = new Map<number, { parent: number; path: string }>()
   // (the engine's own temporary folder, where a chat's scratch folders are)
   const scratchRoot = isWindows ? slashed((await $.env.get('CLAUDE_CODE_TMPDIR').catch(() => undefined)) ?? '').replace(/\/+$/, '') || 'C:/tmp' : ''
+  // Every process with its parent and its command, to find who started a server and what it runs: one list for both
+  const table = new Map<number, { parent: number; path: string }>()
   if (isWindows) {
-    const procs = windowsProcsOf(await run([...POWERSHELL, WINDOWS_PROCS]))
-    table = procs
-    for (const [id, one] of procs) {
-      if (!ports.has(id)) continue
-      commands.set(id, one.args || one.path)
-      folders.set(id, windowsFolderOf(one.args, home, scratchRoot))
+    for (const [id, one] of windowsProcsOf(await run([...POWERSHELL, WINDOWS_PROCS]))) {
+      table.set(id, { parent: one.parent, path: one.args || one.path })
+      if (ports.has(id)) folders.set(id, windowsFolderOf(one.args, home, scratchRoot))
     }
   } else {
     for (const row of rows(await run(['lsof', '-a', '-d', 'cwd', '-Fpn', '-p', pids]))) {
       if (row.startsWith('p')) pid = Number(row.slice(1))
       else if (row.startsWith('n')) folders.set(pid, row.slice(1))
     }
-    for (const row of rows(await run(['ps', '-o', 'pid=,args=', '-p', pids]))) {
-      const m = /^\s*(\d+)\s+(.*)$/.exec(row)
-      if (m) commands.set(Number(m[1]), m[2] ?? '')
-    }
-    for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,comm=']))) {
+    for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,args=']))) {
       const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row)
       if (m) table.set(Number(m[1]), { parent: Number(m[2]), path: m[3] ?? '' })
     }
@@ -140,7 +96,7 @@ const scanServers = async ($: EngineInterface) => {
     // The chat is the engine process above it, or the one whose scratch folder it runs in
     const chat = chats.get(String(above(id, isEngine))) ?? chats.get(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/.exec(folder)?.[0] ?? '') ?? seen[`${id}:${port}`]
     if (chat) kept[`${id}:${port}`] = chat
-    const command = short(commands.get(id) ?? table.get(id)?.path ?? '')
+    const command = short(table.get(id)?.path ?? '')
     const hasPages = !NO_PAGES.test(command)
     const place = isScratch ? (folder.split('/').pop() ?? '') : folder.replace(`${home}/Documents/GitHub/`, '').replace(`${home}/`, '~/')
     found.push({
@@ -155,10 +111,15 @@ const scanServers = async ($: EngineInterface) => {
   await update($, servers, () => found)
 }
 
-// Looks at the servers again while their panel is open; each pass redraws it
+// Looks at the servers again while their panel is open, every SERVERS_EVERY (and at once as it is shown again); each look redraws it
+const SERVERS_EVERY = 10_000
+let serversAt = -Infinity
 const refresh = async ($: EngineInterface) => {
   const open = await $.ui.panes().catch(() => [])
-  if (!open.some(one => one.id === PANE && one.isShown)) return
+  if (!open.some(one => one.id === PANE && one.isShown)) return void (serversAt = -Infinity)
+  const now = await $.clock.now()
+  if (now - serversAt < SERVERS_EVERY - TICK / 2) return
+  serversAt = now
   await scanServers($)
   // Its own value, which only the Servers tab reads: the panel is not drawn again with it
   await update($, servers, list => [...list])

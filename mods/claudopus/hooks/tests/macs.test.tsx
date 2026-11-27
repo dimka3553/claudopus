@@ -1417,7 +1417,7 @@ test("a chat on the other Mac running without Claudopus, and this Mac's app havi
   files.set('ssh:fetch', `${NOW / 1000}\noff 0bcc28d2-aaaa {"customTitle":"FaceIQ email plan"}\noff bad;id\n`)
   files.set('sh:applog', "2026-11-12 13:57:59 [warn] [CCD] SSH local_x: 1 plugin(s) left to the host's own install did not load there; their copies are handed over from the next start on\n")
   await $.session.start(start)
-  await clock.advance(40_000)
+  await clock.advance(70_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: "Claudopus isn't running in some chats" }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. At 2026-11-12 13:57 .*Quit the Claude app and open it again to end this\.$/ })).toBeDefined()
@@ -1426,7 +1426,7 @@ test("a chat on the other Mac running without Claudopus, and this Mac's app havi
   // The app is quit and opened again, and the chat there has gone: the warning goes
   files.set('sh:applog', '2026-11-13 09:00:00 [info] Starting app {\n')
   files.set('ssh:fetch', `${NOW / 1000}\n`)
-  await clock.advance(40_000)
+  await clock.advance(70_000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: /^Claudopus isn't running/ })) ? undefined : true))).toBe(true)
   await list.unmount()
 })

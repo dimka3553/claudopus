@@ -95,7 +95,7 @@ const stepHooks = (on: On) => {
     const now = await $.clock.now()
     const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))
     for (const call of e.tool_calls) callStarts.delete(call.tool_use_id)
-    const card = (await read($, todos)).find(one => one.id === agent)
+    const card = (await ownCards($)).find(one => one.id === agent)
     const lines = stepLines(agent, calls, !card?.parentId)
     if (!lines.length) return r
     await log($, `work ${agent} told of its step: ${lines.map(line => line.slice(0, 40)).join(' / ')}`)
@@ -116,7 +116,7 @@ const isHelperSpawn = (e: { parentAgentId?: string; workflow?: unknown; resume?:
 
 // Work that is stopped takes the helpers it has running with it: they run in the background, and would go on spending
 const stopHelpers = async ($: EngineInterface, id: string) => {
-  const list = await read($, todos)
+  const list = await ownCards($)
   for (const one of underOf(list, id).filter(kid => kid.status === 'working')) {
     stoppedByUs.add(one.id)
     const r = await $.tool.call({ tool: 'TaskStop', task_id: one.id }).catch(err => ({ deny: String(err) }))
