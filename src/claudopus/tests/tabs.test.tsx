@@ -143,7 +143,7 @@ test('Stats keeps what it summed in files the engine reads whole, however much a
   expect(await until(async () => (files.has(`${MEMORY}/stats/engine-id.json`) ? undefined : true))).toBe(true)
 })
 
-// The progress folder of a made-up shop: a north star, two goals, three areas (one under no goal), and one area's entries: a task at
+// The progress folder of a made-up shop: a north star, two goals, three areas (one under no goal, each with steps once kept), and one area's entries: a task at
 // work, a result set aside with its reason, a milestone with its picture, and two tasks of a day
 const progressFiles = (files: Map<string, string>) => {
   const P = `${MEMORY}/progress`
@@ -172,7 +172,7 @@ const progressFiles = (files: Map<string, string>) => {
   }
 }
 
-test('the Progress tab opens from its button beside Results: a square for each task by goal under the north star, each area a row under its goal, an area opened with its next steps and timeline, a step ticked, and nothing says anything waits', async ($, on) => {
+test('the Progress tab opens from its button beside Results: one month\'s chart under the north star whose rows are the areas, a square for each result, an earlier month a press away, an area opened with its timeline and no next steps, and nothing says anything waits', async ($, on) => {
   const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
   const bytes = (path: string) => (path.includes('/thumbs/') ? 'B'.repeat(path.endsWith('.small.jpg') ? 4_000 : 30_000) : undefined)
   const { files, opened, tabs, submitted, clock } = world(on, { sips, bytes })
@@ -192,30 +192,43 @@ test('the Progress tab opens from its button beside Results: a square for each t
   expect(tabs).toContain('progress: Progress')
   const tab = await $.ui.mount({ ...LIST, requestId: 'progress', props: { ...LIST.props, title: 'Progress', bodyColumns: 104 }, surface: 'desktop' } as never)
   const texts = async () => (await tab.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  // The chart: one Svg the app draws, the north star on top and each goal's tasks as squares, the goal at work in purple
-  const chart = await until(async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds')))
-  const source = String(chart?.props.source)
-  expect(source.length).toBeLessThanOrEqual(131_072)
-  // Its rows are the areas worked on this month, the one at work in purple; the menu, last touched in October, is not among them
-  expect(source).toContain('>Bookkeeping</text>')
-  expect(source).not.toContain('>Cafe menu</text>')
-  expect(source).toMatch(/fill="#8A63F0" font-weight="600">Seed shop</)
-  expect(String(chart?.props.alt)).toContain('Seed shop: 2 done, 2 aside, 1 next, working now.')
-  // The chart is this month's; an earlier month is a press away, with its own results, and this month a press back
+  // The chart is the areas themselves: the north star on top, then a row for each area worked on this month with its results, the
+  // one at work in purple, each opened by the press beside it; the menu, last touched in October, is not among them
+  const head = async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds'))
+  expect(String((await until(head))?.props.alt)).toContain('Seed shop: 5 results in November 2023, working now.')
+  const strips = async () => (await tab.findAll({ type: 'Svg' })).map(one => String(one.props.source)).join('\n')
+  expect((await strips()).length).toBeLessThanOrEqual(131_072)
+  expect(await strips()).toMatch(/fill="#8A63F0" font-weight="600">Seed shop</)
+  expect(await strips()).toContain('>Bookkeeping</text>')
+  expect(await strips()).not.toContain('>Cafe menu</text>')
+  for (const id of ['seed-shop', 'books']) expect(await keyed(tab, `progress-area-${id}`)).toBeDefined()
+  // No list under it, no goal's name, and nothing of what is done of how much or what is next
+  for (const text of ['More gardens', 'A calm company', 'Other', '1 area', 'October books closed']) expect(await texts()).not.toContain(text)
+  expect(JSON.stringify(await tab.drawn())).not.toMatch(/\bnext\b/i)
+  // Seven more areas worked on this month: the chart keeps its first seven, and the rest are Other
+  const P = `${MEMORY}/progress`
+  const extra = [1, 2, 3, 4, 5, 6, 7].map(n => ({ id: `x${n}`, name: `Extra ${n}`, goal: '', aim: '', next: [], updated: '' }))
+  files.set(`${P}/areas.json`, JSON.stringify({ areas: [...JSON.parse(files.get(`${P}/areas.json`) ?? '{}').areas, ...extra] }))
+  for (const one of extra) files.set(`${P}/areas/${one.id}.json`, JSON.stringify({ entries: [{ task: `t-${one.id}`, title: `Did ${one.name}`, at: '2023-11-10T12:00:00Z', kind: 'task', outcome: '', report: '', pictures: [], live: '', reason: '' }] }))
+  // An earlier month is a press away, with its own areas: only the menu was worked on in October; and this month a press back
   expect(await texts()).toContain('November 2023')
   await pressed(tab, 'progress-month-earlier')
   expect(await until(async () => ((await texts()).includes('October 2023') ? true : undefined))).toBe(true)
-  const october = (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds'))
-  expect(String(october?.props.alt)).toContain('Results a day in October 2023')
-  // October has its own rows and its own list: only the menu was worked on then
-  expect(String(october?.props.source)).toContain('>Cafe menu</text>')
-  expect(String(october?.props.source)).not.toContain('>Seed shop</text>')
-  for (const text of ['Cafe menu', 'Menu printed', '1 result']) expect(await texts()).toContain(text)
-  for (const text of ['Seed shop', 'More gardens', 'Other']) expect(await texts()).not.toContain(text)
+  expect(String((await head())?.props.alt)).toContain('Results a day in October 2023')
+  expect(await strips()).toContain('>Cafe menu</text>')
+  expect(await strips()).not.toContain('>Seed shop</text>')
+  expect(await keyed(tab, 'progress-area-cafe')).toBeDefined()
   await pressed(tab, 'progress-month-later')
   expect(await until(async () => ((await texts()).includes('November 2023') ? true : undefined))).toBe(true)
-  // Under it each goal's areas, and those under no goal folded as Other
-  for (const text of ['More gardens', 'A calm company', 'Other', 'Working', 'Seed photos on every page', 'October books closed', '1 area']) expect(await texts()).toContain(text)
+  // Other names the two areas past the first seven, and only a press on it gives them their rows
+  for (const text of ['Other', 'Extra 6, Extra 7', '2 areas']) expect(await texts()).toContain(text)
+  expect(await strips()).toContain('>Extra 5</text>')
+  expect(await strips()).not.toContain('>Extra 6</text>')
+  await pressed(tab, 'progress-other-shut')
+  expect(await until(async () => ((await strips()).includes('>Extra 7</text>') ? true : undefined))).toBe(true)
+  expect(await keyed(tab, 'progress-area-x7')).toBeDefined()
+  await pressed(tab, 'progress-other-open')
+  expect(await until(async () => ((await strips()).includes('>Extra 7</text>') ? undefined : true))).toBe(true)
   // Above the chart, how far the sorting has got: the 4 past results left, the one to count again and the start of the task above
   expect(await texts()).toContain('Sorting your past results into areas: 5 of 10 done. This page fills in as it goes.')
   // Once the sorting starts, the result never counted is queued to be, once, and those with an entry are left alone
@@ -223,33 +236,28 @@ test('the Progress tab opens from its button beside Results: a square for each t
   expect(await until(async () => files.get(`${MEMORY}/progress/recounted`))).toMatch(/\n1\n$/)
   const recount = [...files].filter(([path, text]) => path.startsWith(`${MEMORY}/progress/queue/`) && text.includes('"isEntryOnly":true')).map(([, text]) => JSON.parse(text).report)
   expect(recount).toEqual(['r-more'])
-  expect((await tab.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Seed shop' && String(one.props.source).includes('base64,BBBB'))).toBe(true)
   // Nothing on the page says it waits on the person
   const said = async () => JSON.stringify(await tab.drawn())
   expect(await said()).not.toMatch(/wait/i)
   expect((await said()).length).toBeLessThan(230_000)
-  // An area opened: its aim, its next steps, and its timeline with the task at work, what was set aside and why, and the milestone
+  // An area opened: its aim, what was done in numbers, and its timeline with the task at work, what was set aside and why, and the milestone
   await pressed(tab, 'progress-area-seed-shop')
   expect(await until(async () => ((await texts()).includes('Seeds bought in two taps.') ? true : undefined))).toBe(true)
-  for (const text of ['Next', 'Card form works on phones', 'Saved addresses show first', 'Done', 'set aside', 'Good data, but not now.', 'Checkout in two taps', 'live', 'Most buyers pay in under a minute']) expect(await texts()).toContain(text)
+  for (const text of ['3 done', '1 aside', 'Done', 'set aside', 'Good data, but not now.', 'Checkout in two taps', 'live', 'Most buyers pay in under a minute']) expect(await texts()).toContain(text)
   expect((await tab.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Checkout in two taps' && String(one.props.source).includes('base64,BBBB'))).toBe(true)
   // The two other tasks of that day are folded, and open
   expect(await texts()).not.toContain('Read the old orders')
   await tab.press({ key: String((await tab.findAll({ type: 'Button' })).find(one => /^progress-day-.*-shut-\d+$/.test(one.key ?? ''))?.key) })
   expect(await until(async () => ((await texts()).includes('Read the old orders') ? true : undefined))).toBe(true)
-  // The step set aside sits under what was set aside, folded, not among the next steps
-  expect(await texts()).not.toContain('Seeds by post abroad')
-  expect((await tab.findAll({ type: 'Button' })).some(one => one.props.label === '+ 1 next step set aside')).toBe(true)
-  expect(await said()).not.toMatch(/wait/i)
-  // A next step pressed is done, by hand, in the file
-  await pressed(tab, 'progress-tick-n1-open')
-  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/progress/areas.json`) ?? '{}').areas[0].next[0].state === 'done' ? true : undefined))).toBe(true)
+  // Nothing of what is next: no step, ticked, open or set aside
+  for (const text of ['Next', 'Card form works on phones', 'Saved addresses show first', 'Seeds by post abroad']) expect(await texts()).not.toContain(text)
+  expect((await tab.findAll({ type: 'Button' })).some(one => /next/i.test(String(one.props.label ?? '')))).toBe(false)
   // Pick up again sends the chat the person's words naming what was set aside and its result
   await tab.press({ key: String((await tab.findAll({ type: 'Button' })).find(one => one.props.label === 'Pick up again')?.key) })
   expect(await until(async () => submitted.find(text => text.startsWith('Pick up again: Seed scanner tried in the shed (') && text.includes('/reports/r-scan/report.md')))).toBeDefined()
   // Back to every area
   await pressed(tab, 'progress-back')
-  expect(await until(async () => ((await texts()).includes('More gardens') ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).includes('November 2023') ? true : undefined))).toBe(true)
 })
 
 test('the leaderboard is sent the work in the records where Claude Code keeps them, CLAUDE_CONFIG_DIR when it is set, and a chat whose records were not found is looked for again a day later', async ($, on) => {

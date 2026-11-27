@@ -6,7 +6,7 @@
 export type ProgressPicture = { star: { text: string; said: string }; goals: { id: string; name: string; words: string; said: string }[]; updated: string }
 // One step of an area: a plain sentence of what will exist when it is done, open, done, or set aside
 export type ProgressNext = { id: string; text: string; state: 'open' | 'done' | 'aside'; at: string }
-// An area of work: under a goal (its id, or '' for none), one plain line of what it is for, and its next steps; `topics`, the
+// An area of work: under a goal (its id, or '' for none), one plain line of what it is for (`next`, steps once kept, is only read back as it was); `topics`, the
 // memory's topics its results were recorded under, newest first
 export type ProgressArea = { id: string; name: string; goal: string; aim: string; next: ProgressNext[]; updated: string; topics?: string[] }
 // One piece of work in an area: the task (its agent id), its result (reports/<report>/report.md, '' while the task is at work or
@@ -128,18 +128,17 @@ export const setAsideTold = (Name: string) => `Set aside: ${Name} set this aside
 export const pickUpText = (entry: ProgressEntry, reportsDir: string) => `${PICK_UP_AGAIN}: ${entry.title}${entry.report ? ` (${reportsDir}/${entry.report}/report.md)` : ''}`
 // What the chat is told of progress/ with its role, so a question of how some work stands is answered from it
 export const progressLine = (name: string, dir: string) =>
-  `Progress of ${name}'s work, kept by Claudopus: ${dir}/progress/areas.json (each area, what it is for and its next steps) and ${dir}/progress/areas/<area id>.json (what each task in it came to, newest first, with its date and result).`
+  `Progress of ${name}'s work, kept by Claudopus: ${dir}/progress/areas.json (each area and what it is for) and ${dir}/progress/areas/<area id>.json (what each task in it came to, newest first, with its date and result).`
 
 // ---- What the indexer asks: one answer of the model's for each event, given the picture, the areas and their newest entries ----
 
-export const PROGRESS_SYSTEM = `You keep a map of one person's work for a page that shows, at a glance, what was done and what is next in each area of it. You are given the person's north star and goals, the areas so far, the newest entries of each, and one event: a task starting, a task's result, a chat from before Claudopus came in, a message the person wrote, an answer the person gave to a task's question, or the person pressing Set aside on a question. Reply with one JSON object and nothing else:
-{"areas": ["<area id>", ...], "newArea": {"name": "...", "goal": "<goal id or empty>", "aim": "..."}, "state": "...", "entry": {"title": "...", "kind": "milestone" | "task", "outcome": "...", "live": "<web address where it went live, or empty>", "pictures": ["<path>", ...]}, "next": {"done": ["<step id>"], "add": ["..."], "aside": ["<step id>"], "reword": [{"id": "<step id>", "text": "..."}]}, "aside": {"task": "<task id>", "reason": "..."}, "rename": [{"id": "<area id>", "name": "...", "aim": "..."}], "merge": [{"from": "<area id>", "into": "<area id>"}]}
+export const PROGRESS_SYSTEM = `You keep a map of one person's work for a page that shows, at a glance, what was done in each area of it. You are given the person's north star and goals, the areas so far, the newest entries of each, and one event: a task starting, a task's result, a chat from before Claudopus came in, a message the person wrote, an answer the person gave to a task's question, or the person pressing Set aside on a question. Reply with one JSON object and nothing else:
+{"areas": ["<area id>", ...], "newArea": {"name": "...", "goal": "<goal id or empty>", "aim": "..."}, "state": "...", "entry": {"title": "...", "kind": "milestone" | "task", "outcome": "...", "live": "<web address where it went live, or empty>", "pictures": ["<path>", ...]}, "aside": {"task": "<task id>", "reason": "..."}, "rename": [{"id": "<area id>", "name": "...", "aim": "..."}], "merge": [{"from": "<area id>", "into": "<area id>"}]}
 Leave out every key that does not apply.
 Rules:
 - "areas": the smallest existing area that covers the whole of the work; several only when it truly spans them. Make a "newArea" only for a new direction that no area covers; its name is 1 to 3 plain words, its aim one plain line, its goal the id of the goal it serves or empty.
 - "entry", for a task's start or result, or a chat from before Claudopus: "title" at most 8 plain words of what came out of it (such as "Lawyer brief and evidence pack ready"), never the task's own title or instructions repeated; "outcome" at most 14 plain words of what came of it. No code, file names, paths, versions, ids or model names. "kind" is "milestone" only when something shipped, went live or a clear finding came out; otherwise "task". "pictures": only paths from the result's own pictures, the one or two that show it best.
 - "state", for a result: at most 6 plain words of where this line of work stands now, starting with "done" once it shipped or went live.
-- "next": an area's next steps are 1 to 5 plain sentences, each saying what will exist when it is done (an outcome, never a chore), with no owner. Change them only when the event shows it: "done" when a result delivers one; "add" when the person asks for something or a result names a clear next step; "reword" to make one clearer. Never add a step that repeats or overlaps an open one: reword that one instead. A task's start, or a chat from before Claudopus, only places the work and makes its entry: it never adds, ticks or rewords a step. "aside" only when the person's own words or press set that step aside: never because nothing happened or nobody answered.
 - "aside" (a task set aside): only when the person's own words or press set that task aside; the reason in their words, short.
 - "rename" and "merge": only when the person's words ask for it.
 - Never write that anything waits on the person or is theirs to do. Plain everyday words throughout.`
@@ -150,9 +149,8 @@ No code, file names or ids in the words. Nothing their messages do not bear out:
 
 // How much of each event the model reads
 export const EVENT_CHARS: Record<ProgressEvent['kind'], number> = { start: 4000, result: 8000, said: 3000, answer: 2000, aside: 2000, chat: 6000 }
-// The most each area keeps, and the most open steps it has
+// The most each area keeps
 export const ENTRIES_MOST = 3000
-const NEXT_OPEN_MOST = 5
 
 const dayOf = (at: number) => new Date(at).toISOString().slice(0, 10)
 // A line of the model's in plain words: no code, paths, file names or versions, at most so many words and characters
@@ -169,12 +167,6 @@ const plainLine = (value: unknown, words: number, chars: number) =>
     : ''
 const idsIn = (value: unknown) => (Array.isArray(value) ? value.filter(isText) : [])
 // A step whose words mostly match an open step's says the same: three quarters of the shorter one's words, a plural's s aside
-const stepWords = (text: string) => new Set(slug(text).split('-').filter(word => word.length >= 3).map(word => word.replace(/s$/, '')))
-export const isSameStep = (a: string, b: string) => {
-  const [one = new Set<string>(), two = new Set<string>()] = [stepWords(a), stepWords(b)].sort((x, y) => x.size - y.size)
-  return one.size >= 2 && [...one].filter(word => two.has(word)).length >= one.size * 0.75
-}
-// A result's line for its topic's state in the index
 export const topicState = (answer: Record<string, unknown>) => plainLine(answer.state, 6, 60)
 // The model's answer as JSON, whatever is around it; nothing for any other answer
 export const answerJson = (text: string): Record<string, unknown> | undefined => {
@@ -189,12 +181,11 @@ export const progressPrompt = (event: ProgressEvent, picture: ProgressPicture, a
   const goals = picture.goals.map(goal => `- ${goal.id}: ${goal.name} (${goal.words})`).join('\n')
   const shown = areas
     .map(area => {
-      const steps = area.next.map(n => `    - ${n.id} [${n.state}] ${n.text}`).join('\n')
       const newest = (entries.get(area.id) ?? [])
         .slice(0, 3)
         .map(e => `    - ${e.at.slice(0, 10)} ${e.kind}${e.task ? ` (task ${e.task})` : ''}: ${e.title}${e.outcome ? ` · ${e.outcome}` : ''}${e.reason ? ` · set aside: ${e.reason}` : ''}`)
         .join('\n')
-      return `- ${area.id}: ${area.name}${area.goal ? ` (goal ${area.goal})` : ''} · ${area.aim}\n  Next steps:\n${steps || '    (none)'}\n  Newest entries:\n${newest || '    (none)'}`
+      return `- ${area.id}: ${area.name}${area.goal ? ` (goal ${area.goal})` : ''} · ${area.aim}\n  Newest entries:\n${newest || '    (none)'}`
     })
     .join('\n')
   const placed = event.task ? [...entries].filter(([, list]) => list.some(e => e.task === event.task)).map(([id]) => id) : []
@@ -218,14 +209,8 @@ export const progressPrompt = (event: ProgressEvent, picture: ProgressPicture, a
     .join('\n\n')
 }
 
-const stepId = (at: number, taken: Set<string>) => {
-  for (;;) {
-    const id = `n${at.toString(36)}${Math.random().toString(36).slice(2, 6)}`
-    if (!taken.has(id)) return (taken.add(id), id)
-  }
-}
 // The model's answer applied to the areas and every area's entries (changed in place, by area). What only the person's own words
-// or press may do (set work or a step aside, rename, merge) is taken only from their message, answer or press. `reportsDir`: where
+// or press may do (set work aside, rename, merge) is taken only from their message, answer or press. `reportsDir`: where
 // results are; `Name`: the person, for the reason of a press
 export const applyProgress = (event: ProgressEvent, answer: Record<string, unknown>, picture: ProgressPicture, given: ProgressArea[], entries: Map<string, ProgressEntry[]>, now: number, reportsDir: string, Name: string) => {
   const at = new Date(now).toISOString()
@@ -236,7 +221,6 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
   const changedEntries = new Set<string>()
   const mark = (id: string) => (touched.add(id), changedEntries.add(id))
   const goalIds = new Set(picture.goals.map(goal => goal.id))
-  const stepIds = new Set(areas.flatMap(area => area.next.map(n => n.id)))
   // Renames and merges first, so the rest names the areas as they now stand
   if (isPersons) {
     for (const one of Array.isArray(answer.rename) ? answer.rename : []) {
@@ -316,32 +300,6 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
     }
     if (!isMarked && event.kind === 'aside') for (const id of places) put(id, { task: asideTask, title, at: happened, kind: 'aside', outcome: '', report: '', pictures: [], live: '', reason })
   }
-  // The next steps
-  const next = (answer.next ?? {}) as { done?: unknown; add?: unknown; aside?: unknown; reword?: unknown }
-  const set = (ids: string[], state: ProgressNext['state']) => {
-    const wanted = new Set(ids)
-    areas = areas.map(area => (area.next.some(n => wanted.has(n.id) && n.state !== state) ? (touched.add(area.id), { ...area, next: area.next.map(n => (wanted.has(n.id) ? { ...n, state, at } : n)) }) : area))
-  }
-  // (a start or an old chat only places work)
-  const isPlacing = event.kind === 'start' || event.kind === 'chat' || event.isEntryOnly === true
-  if (!isPlacing) set(idsIn(next.done), 'done')
-  if (isPersons) set(idsIn(next.aside), 'aside')
-  for (const one of !isPlacing && Array.isArray(next.reword) ? next.reword : []) {
-    const r = one as { id?: unknown; text?: unknown }
-    const text = plainLine(r.text, 24, 160)
-    if (text) areas = areas.map(area => (area.next.some(n => n.id === r.id && n.state === 'open') ? (touched.add(area.id), { ...area, next: area.next.map(n => (n.id === r.id ? { ...n, text } : n)) }) : area))
-  }
-  const into = areas.find(area => area.id === (picked[0] ?? places[0]))
-  if (into && event.kind !== 'aside' && !isPlacing) {
-    const added = idsIn(next.add)
-      .map(text => plainLine(text, 24, 160))
-      .filter((text, n, all) => text && !into.next.some(o => slug(o.text) === slug(text) || (o.state === 'open' && isSameStep(o.text, text))) && !all.slice(0, n).some(o => isSameStep(o, text)))
-    const room = Math.max(0, NEXT_OPEN_MOST - into.next.filter(n => n.state === 'open').length)
-    if (added.length && room) {
-      areas = areas.map(area => (area === into ? { ...area, next: [...area.next, ...added.slice(0, room).map(text => ({ id: stepId(now, stepIds), text, state: 'open' as const, at }))] } : area))
-      touched.add(into.id)
-    }
-  }
   if (event.kind === 'result' && event.topic && !event.isEntryOnly) {
     const topic = event.topic
     areas = areas.map(area => (places.includes(area.id) && area.topics?.[0] !== topic ? (touched.add(area.id), { ...area, topics: [topic, ...(area.topics ?? []).filter(one => one !== topic)].slice(0, 5) }) : area))
@@ -400,12 +358,10 @@ export const asideLines = (title: string, prompt: string, areas: ProgressArea[],
   for (const area of areas) {
     const list = entries.get(area.id) ?? []
     const asides = list.filter(e => e.kind === 'aside')
-    const steps = area.next.filter(n => n.state === 'aside')
-    if (!asides.length && !steps.length) continue
+    if (!asides.length) continue
     const shared = [...aboutWords(`${area.name} ${area.aim} ${list.slice(0, 20).map(e => e.title).join(' ')}`)].filter(word => words.has(word))
     if (shared.length < 2) continue
     lines.push(...asides.slice(0, 4).map(e => `- In ${area.name}: "${e.title}" (${e.at.slice(0, 10)}), set aside: ${e.reason || 'no reason given'}`))
-    lines.push(...steps.slice(0, 3).map(n => `- In ${area.name}, a next step set aside: ${n.text}`))
   }
   return lines.slice(0, 8)
 }

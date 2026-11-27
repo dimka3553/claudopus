@@ -591,7 +591,7 @@ test('every button of the results list and of a result takes a new key whenever 
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])
 })
 
-test("each task is sorted into an area of the work in the background: its start gives it its area while it works, its result becomes that area's entry with its own pictures and the step it delivers done, the person's words add a step; with no answer from the model the events wait and nothing changes, and a result never sets anything aside; the result's topic gets its state and the Latest block at the top of its page, and the area a log of the person's words", async ($, on) => {
+test("each task is sorted into an area of the work in the background: its start gives it its area while it works, its result becomes that area's entry with its own pictures, and no next step is added, ticked or shown to the model; with no answer from the model the events wait and nothing changes, and a result never sets anything aside; the result's topic gets its state and the Latest block at the top of its page, and the area a log of the person's words", async ($, on) => {
   const AREAS = `${MEMORY}/progress/areas.json`
   const NOSE = `${MEMORY}/progress/areas/nose.json`
   let isDown = true
@@ -624,16 +624,17 @@ test("each task is sorted into an area of the work in the background: its start 
   expect(files.has(NOSE)).toBe(false)
   expect(queued()).toEqual(['said', 'start'])
   expect(files.get(`${MEMORY}/progress/index.log`)).toContain('said failed: no answer, to try again')
-  // Answered, the person's words add a step, and the start gives the task its area while it works
+  // Answered, the start gives the task its area while it works; the steps the model names are not kept, and it is shown none
   isDown = false
   await clock.advance(5 * 60_000)
   expect(await until(async () => entries()[0])).toMatchObject({ task: 'a1', title: 'Fix the nose', kind: 'task', report: '' })
-  expect(steps().map(n => [n.text, n.state])).toEqual([['A nose that fits side faces', 'open'], ['A nose that moves with the mouth', 'open']])
-  expect(asked.at(-1)).toContain('- nose: Nose · A nose that fits every face\n  Next steps:\n    - n1 [open] A nose that fits side faces')
+  expect(steps().map(n => [n.text, n.state])).toEqual([['A nose that fits side faces', 'open']])
+  expect(asked.at(-1)).toContain('- nose: Nose · A nose that fits every face\n  Newest entries:')
+  expect(asked.join('\n')).not.toMatch(/next step/i)
   expect(queued()).toEqual([])
   // The person's words about the area are kept in its own log of them
   expect(files.get(`${MEMORY}/progress/areas/nose.said.md`)).toMatch(/^## \d{4}-\d\d-\d\dT[\d:.]+Z\nfix the nose on side faces\n\n$/)
-  // Its result takes that entry's place, with only its own pictures; the step it delivers is done, never set aside by it
+  // Its result takes that entry's place, with only its own pictures; no step is ticked or set aside by it
   await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 'u1', agentId: 'a1', name: 'Nose work', state: 'started' } as never)
   await $.turn.complete({ agentId: 'a1', answer: `The nose now fits side faces.\n\nThe picture: /private/tmp/s/scratchpad/nose.png\n`, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.advance(10)
@@ -641,10 +642,10 @@ test("each task is sorted into an area of the work in the background: its start 
   await clock.advance(5_000)
   expect(await until(async () => (entries()[0]?.report ? entries() : undefined))).toEqual([{ task: 'a1', title: 'Fixed the nose', at: expect.any(String), kind: 'milestone', outcome: 'The nose fits side faces', report: folder.split('/').pop(), pictures: [`${folder}/nose.png`], live: '', reason: '' }])
   expect(asked.at(-1)).toContain('This task is already in: nose')
-  expect(steps().map(n => n.state)).toEqual(['done', 'open'])
-  // Its topic's state line is the model's, and its page starts with the Latest block of the area: the newest entries and next steps
+  expect(steps().map(n => n.state)).toEqual(['open'])
+  // Its topic's state line is the model's, and its page starts with the Latest block of the area: the newest entries, and nothing of what is next
   expect(await until(async () => (files.get(`${MEMORY}/index.md`) ?? '').includes('- Nose work |  |  | nose fits side faces |') || undefined)).toBe(true)
   expect(files.get(`${MEMORY}/streams/nose-work.md`)).toBe(
-    `<!-- Latest: kept by Claudopus from each result; the rest of the page is the tasks' -->\n## Latest (${entries()[0]?.at.slice(0, 10)})\n- Nose: A nose that fits every face\n  - ${entries()[0]?.at.slice(0, 10)} Fixed the nose: The nose fits side faces · ${folder}/report.md\n  - Next: A nose that moves with the mouth\n<!-- End of Latest -->\n`,
+    `<!-- Latest: kept by Claudopus from each result; the rest of the page is the tasks' -->\n## Latest (${entries()[0]?.at.slice(0, 10)})\n- Nose: A nose that fits every face\n  - ${entries()[0]?.at.slice(0, 10)} Fixed the nose: The nose fits side faces · ${folder}/report.md\n<!-- End of Latest -->\n`,
   )
 })
