@@ -11,6 +11,12 @@ fails=0
 ok() { printf 'ok   %s\n' "$1"; }
 no() { printf 'FAIL %s\n' "$1"; fails=$((fails + 1)); }
 within() { local n=0; while ! eval "$1"; do sleep 0.2; n=$((n + 1)); [ "$n" -ge $(($2 * 5)) ] && return 1; done; return 0; }
+# Python 3 as pane-file finds it: python3, else python or py -3 (Windows, where python3 may be only the Store's stand-in)
+py=()
+for one in python3 python; do command -v "$one" >/dev/null 2>&1 && "$one" -c 'import sys; sys.exit(sys.version_info[0] != 3)' >/dev/null 2>&1 && { py=("$one"); break; }; done
+[ ${#py[@]} = 0 ] && command -v py >/dev/null 2>&1 && py -3 -c 'import sys' >/dev/null 2>&1 && py=(py -3)
+[ ${#py[@]} = 0 ] && { echo "pane-file: no Python 3 here, so nothing is tested"; exit 1; }
+sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi; }
 
 # A file of three parts (a part is 1.5 million characters of base64) and a small one with a space in its name
 head -c 3000000 /dev/urandom > "$tmp/big.mp4"
@@ -18,7 +24,7 @@ printf 'hello' > "$tmp/small one.txt"
 
 use=$("$here/pane-file" 2>&1); [ $? = 2 ] && case $use in "Puts files"*"sends nothing over the network itself.") true ;; *) false ;; esac && ok "with no file it says how it is used, and only that" || no "with no file it says how it is used, and only that"
 "$here/pane-file" "$tmp/none.mp4" >/dev/null 2>&1; [ $? = 1 ] && ok "a missing file stops it" || no "a missing file stops it"
-python3 -c 'import sys; open(sys.argv[1], "wb").truncate(251 * 1024 * 1024)' "$tmp/huge.mp4"
+"${py[@]}" -c 'import sys; open(sys.argv[1], "wb").truncate(251 * 1024 * 1024)' "$tmp/huge.mp4"
 "$here/pane-file" "$tmp/huge.mp4" 2>&1 | grep -q "more than the 250 MB" && ok "a file over 250 MB stops it" || no "a file over 250 MB stops it"
 rm -f "$tmp/huge.mp4"
 
@@ -29,7 +35,7 @@ big=$(grep -o '^file [0-9a-f]*: big.mp4' "$tmp/log" | cut -d' ' -f2 | tr -d :)
 small=$(grep -o '^file [0-9a-f]*: small one.txt' "$tmp/log" | cut -d' ' -f2 | tr -d :)
 grep -q "^file $big: big.mp4, 3000000 bytes, 3 parts" "$tmp/log" && ok "it names each file with its size and parts" || no "it names each file with its size and parts"
 grep -q "const ids=\[\"$big\"\]" "$tmp/log" && grep -q "const ids=\[\"$small\"\]" "$tmp/log" && ok "it prints a PUT script for each file" || no "it prints a PUT script for each file"
-[ ${#big} = 32 ] && [ "$big" != "$(shasum -a 256 "$tmp/big.mp4" | cut -c1-32)" ] && ok "a file's id is random, not from its bytes" || no "a file's id is random, not from its bytes: $big"
+[ ${#big} = 32 ] && [ "$big" != "$(sha256 "$tmp/big.mp4" | cut -c1-32)" ] && ok "a file's id is random, not from its bytes" || no "a file's id is random, not from its bytes: $big"
 grep -q "input\[type=file\]')\].find(e=>shown(e.closest(" "$tmp/log" && grep -q "w<30&&!(inp=boxed())" "$tmp/log" && grep -q "the dialog has no file input yet" "$tmp/log" && ok "the PUT script uses the file input of the dialog that shows, waits for it, and never one behind it" || no "the PUT script prefers the file input of the dialog that shows"
 grep -q "h!==meta.sha" "$tmp/log" && ok "the PUT script refuses a file whose SHA-256 differs" || no "the PUT script refuses a file whose SHA-256 differs"
 grep -q "for(const k of gone)o.delete(k)" "$tmp/log" && grep -q "if(!left)indexedDB.deleteDatabase" "$tmp/log" && ok "the PUT script clears only its own files' parts from the site once set, and the store once empty" || no "the PUT script clears only its own files' parts"
@@ -37,7 +43,7 @@ grep -q "location.replace('$base/go?id=" "$tmp/log" && ok "the CARRY script it p
 
 # Each part's page, and what its address after the # holds (read with python3: a shell's patterns take minutes on 2 MB)
 to='https://www.example.com/robots.txt'
-python3 -I - "$base" "$big" "$small" "$to" "$tmp/big.mp4" <<'PY' && ok "each part's page sends the pane to the site with the part, and the parts make the file again byte for byte" || no "each part's page sends the pane to the site with the part, and the parts make the file again byte for byte"
+"${py[@]}" -I - "$base" "$big" "$small" "$to" "$tmp/big.mp4" <<'PY' && ok "each part's page sends the pane to the site with the part, and the parts make the file again byte for byte" || no "each part's page sends the pane to the site with the part, and the parts make the file again byte for byte"
 import base64, json, re, sys, urllib.parse, urllib.request
 base, big, small, to, path = sys.argv[1:]
 def dest(fid, i):
@@ -69,8 +75,13 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: other.example' "$base/go
 curl -s -D - -o /dev/null "$base/go?id=$small&i=0&to=$to" | grep -qi '^X-Frame-Options: DENY' && ok "its pages are never shown inside another page" || no "its pages are never shown inside another page"
 page=$(curl -s "$base/go?id=$small&i=0&to=https://x.example/%3C/script%3E%3Cb%3Einjected%3C/b%3E")
 case $page in *'</script><b>'*) no "the address in its page cannot end the script" ;; *'\u003c/script>'*) ok "the address in its page cannot end the script" ;; *) no "the address in its page cannot end the script: no page" ;; esac
-# Only this Mac reaches it
-host=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | cut -d' ' -f1)
+# Only this computer reaches it, as its own address on the network does not (on Windows, which has no ipconfig getifaddr nor
+# hostname -I, the address Python's socket would leave by)
+case $(uname -s) in
+  MINGW* | MSYS* | CYGWIN*) host=$("${py[@]}" -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("10.255.255.255", 1)); print(s.getsockname()[0])' 2>/dev/null | tr -d '\r') ;;
+  *) host=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | cut -d' ' -f1) ;;
+esac
+[ "$host" = 127.0.0.1 ] && host=""
 if [ -n "$host" ]; then
   port=${base##*:}
   curl -s -m 2 -o /dev/null "http://$host:$port/go?id=$big&i=0&to=$to" && no "it answers only on 127.0.0.1" || ok "it answers only on 127.0.0.1"

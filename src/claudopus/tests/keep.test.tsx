@@ -192,6 +192,47 @@ test("a chat of this Mac that is not open and whose process is gone lists the ta
   await list.unmount()
 })
 
+// On Windows the chat's process is a Windows process, which Git's shells never name ($PPID there is 1) and Git's ps never sees: its
+// number is the parent of a PowerShell the engine starts, whether one runs is tasklist's, and the watcher starts apart by PowerShell
+const ENGINE_PARENT = /Win32_Process -Filter \('ProcessId=' \+ \$PID\)\)\.ParentProcessId/
+test('on a Windows PC the beat names the engine by its Windows process, and the watcher starts apart from the chat by PowerShell', async ($, on) => {
+  const pc = windowsPC(on, run => (ENGINE_PARENT.test(run.argv.join(' ')) ? '6120\r\n' : undefined))
+  const { files, windowsRuns } = world(pc.on, { windows: true })
+  await $.session.start(start)
+  const [first] = (files.get(`${WINDOWS_MEMORY}/keep/engine-id.beat`) ?? '').split('\n')
+  expect(first).toBe('6120\tclaudopus@inline\tC:/Users/sam/.claude/settings.json')
+  // Started by Start-Process in a hidden window of Git's bash, its words in the environment, never by a shell of the engine's own
+  const started = pc.runs.find(run => run.argv.join(' ').includes('Start-Process -WindowStyle Hidden'))
+  expect(started?.env.CLAUDOPUS_BASH).toBe('C:/Program Files/Git/bin/bash.exe')
+  expect(started?.env.CLAUDOPUS_RUN).toBe(`unset IFS; set +f; set -- '${PLUGIN}/bin/revive' '${WINDOWS_MEMORY}'; exec "$1" "$2" >/dev/null 2>&1 </dev/null`)
+  expect(started?.argv.join(' ')).not.toContain('"')
+  // in the profile, so the chat's folder is never one it holds and keeps from being removed
+  expect(started?.cwd).toBe('C:\\Users\\sam')
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('POSIX::setsid'))).toEqual([])
+  expect(files.get(`${WINDOWS_MEMORY}/log.md`)).not.toContain('was not started')
+})
+
+test("on a Windows PC a chat that is not open whose engine is gone lists its tasks as Interrupted, as tasklist says; one whose engine runs lists none", SLOW, async ($, on) => {
+  const at = KEEP_NOW - 600_000
+  const pc = windowsPC(on, run =>
+    ENGINE_PARENT.test(run.argv.join(' ')) ? '6120\r\n' : /^tasklist/i.test(run.argv[0] ?? '') ? '"claude.exe","6120","Console","1","300,000 K"\r\n"claude.exe","700","Console","1","250,000 K"\r\n' : undefined,
+  )
+  const { files, clock } = world(pc.on, { windows: true })
+  const task = (id: string, title: string) => ({ id, title, state: 'working', note: '', transcript: '', card: { id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: at, endedAt: 0, status: 'working' } })
+  const ledger = (chat: string, pid: string, title: string, tasks: object[]) => files.set(`${WINDOWS_MEMORY}/ledger/${chat}.json`, JSON.stringify({ chat, title, folder: 'C:/repo', pid, savedAt: at, link: { bridge: '', app: `local_${chat}` }, tasks }))
+  ledger('chat-b', '3131', 'Billing', [task('b1', 'Send the invoices')])
+  ledger('chat-c', '700', 'Rig', [task('c1', 'Train the splats')])
+  await $.session.start(start)
+  await clock.advance(5_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: '⏸ Interrupted · The app closed while it worked' }))).toBeDefined()
+  const said = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(said).toContain('Send the invoices')
+  expect(said.some(text => /Train the splats/.test(text))).toBe(false)
+  expect(pc.runs.some(run => /^tasklist/i.test(run.argv[0] ?? ''))).toBe(true)
+  await list.unmount()
+})
+
 test("a chat the app's rewind starts again under a new id has every card of the chat it came from, as a restart finds them: one at work Interrupted with Carry on, told its instructions and its transcript; delivered and finished ones as they ended; the person's words kept; once, and the first chat no longer listed under its own name; a copy of a chat still running takes nothing", SLOW, async ($, on) => {
   const { files, clock } = world(on)
   const at = KEEP_NOW - 600_000

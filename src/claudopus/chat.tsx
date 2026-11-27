@@ -145,7 +145,7 @@ const tidyKeptRules = async ($: EngineInterface, id: string) => {
       const text = await readOr($, path)
       if (text) await $.fs.write(path, text)
     }
-    if (entry.name !== `${id}.json` && entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await $.process.run(['rm', '-f', path]).catch(() => undefined)
+    if (entry.name !== `${id}.json` && entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await runOn($, ['rm', '-f', path]).catch(() => undefined)
   }
 }
 
@@ -162,7 +162,7 @@ const chatHooks = (on: On) => {
     // and takes nothing it knew of the person's settings and texts as sealed: the kept copy is checked again
     knownSeen = undefined
     const begun = await next(e)
-    const home = (await $.env.get('HOME')) ?? ''
+    const home = (await homeFolder($)) ?? ''
     dir = `${home}/.claude/claudopus`
     claudeDir = await configDir($)
     // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold). From the start of the load, so a
@@ -181,7 +181,7 @@ const chatHooks = (on: On) => {
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
     ;[termFrom = '', , termHere = '', termPort = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
-      const text = await readOr($, `${$.plugin.root}/art/${file}`)
+      const text = await readOr($, `${pluginRoot($)}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
@@ -190,7 +190,8 @@ const chatHooks = (on: On) => {
     await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     // and a Mac with no record of the changes seen starts one, from the version this chat moved from
     await noteSeen($).catch(err => log($, `changes seen not noted: ${String(err)}`))
-    cwd = e.cwd
+    // (on Windows as the mod keeps paths, with forward slashes)
+    cwd = slashed(e.cwd)
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
@@ -550,7 +551,7 @@ const chatHooks = (on: On) => {
 
     if (!isOff) {
       // The role goes out with the person's first message and after a compaction, each time as this chat first got it (keptRule)
-      const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
+      const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, pluginRoot($), dir, 'roles/chat.md')).text, models, lean)))
       // The topics and areas as this message finds them: what changed since the chat was last given the list is told with it
       const index = (await readIndex($)).filter(s => !isScratchTopic(s.repo))
       const areas = await readAreas($)
@@ -647,7 +648,7 @@ const chatHooks = (on: On) => {
     const files = r.instructionFiles ?? e.instructionFiles
     // The person's own copy in the memory folder when there is one, the shipped principles otherwise
     const { path, content } = await keptRule($, 'principles', async () => {
-      const now = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
+      const now = await inForce($, pluginRoot($), dir, 'rules/CLAUDE.md')
       return { path: now.path, content: now.text }
     })
     if (!files || !content.trim()) return r

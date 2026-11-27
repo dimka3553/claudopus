@@ -244,8 +244,31 @@ const sync = async ($: EngineInterface) => {
   await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 }
 
+// The folder the engine keeps a chat's records in, under its projects folder: named after the chat's folder with every character but
+// a letter or a digit as - (C:\Users\sam\repo and C:/Users/sam/repo alike are C--Users-sam-repo), and a name over 200 characters cut
+// there with a hash of the engine's own after it, so such a one is found by the chat's records in it
+const PROJECT_NAME_MOST = 200
+const projectFound = new Map<string, string>()
+const projectDirOf = async ($: EngineInterface, folder: string, chat: string) => {
+  const root = `${await configDir($)}/projects`
+  const name = folder.replace(/[^a-zA-Z0-9]/g, '-')
+  if (name.length <= PROJECT_NAME_MOST || !chat) return `${root}/${name}`
+  const key = `${root}/${chat}`
+  const known = projectFound.get(key)
+  if (known) return known
+  for (const entry of await $.fs.list(root).catch(() => [])) {
+    if (entry.kind !== 'dir' || !entry.name.startsWith(`${name.slice(0, PROJECT_NAME_MOST)}-`)) continue
+    const one = `${root}/${entry.name}`
+    if ((await $.fs.exists(`${one}/${chat}.jsonl`).catch(() => false)) || (await $.fs.exists(`${one}/${chat}`).catch(() => false))) {
+      if (projectFound.size > 50) projectFound.clear()
+      projectFound.set(key, one)
+      return one
+    }
+  }
+  return `${root}/${name.slice(0, PROJECT_NAME_MOST)}`
+}
 // The folder the engine keeps this chat's agents' records in
-const agentsFolder = async ($: EngineInterface, chat: string) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`
+const agentsFolder = async ($: EngineInterface, chat: string) => `${await projectDirOf($, cwd, chat)}/${chat}/subagents`
 // An agent's last words from the end of its record: what it handed in, or the text of its last reply, whether Claude Code pressed
 // it for a report after them, and when the record was last written
 const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, now: number) => {
@@ -253,7 +276,7 @@ const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, no
   const stat = await $.fs.stat(path).catch(() => undefined)
   const at = stat?.mtimeMs || now
   const size = stat?.size ?? 0
-  const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
+  const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await runOn($, ['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
   let answer = ''
   let isHandback = false
   const isPressed = isPressedAtEnd(tail.map(row => parsedOr<unknown>(row, {})))
@@ -657,8 +680,8 @@ const recoverEnded = async ($: EngineInterface) => {
       const text =
         (await readOr($, path)) ||
         [
-          (await $.process.run(['head', '-n', '1', path]).catch(() => undefined))?.stdout ?? '',
-          ((await $.process.run(['tail', '-c', '3000000', path]).catch(() => undefined))?.stdout ?? '').split('\n').slice(1).join('\n'),
+          (await runOn($, ['head', '-n', '1', path]).catch(() => undefined))?.stdout ?? '',
+          ((await runOn($, ['tail', '-c', '3000000', path]).catch(() => undefined))?.stdout ?? '').split('\n').slice(1).join('\n'),
         ].join('\n')
       const engine = live.find(agent => agent.id === agentId)
       const one = { id: agentId, description: meta.description ?? '', type: meta.agentType ?? '', status: engine?.status ?? (meta.finished ? 'completed' : 'killed') }

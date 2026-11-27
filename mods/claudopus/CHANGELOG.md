@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.308 · 27 November 2026
+- Claudopus installs and runs on Windows, in the Claude app's Code tab or in a terminal, with one line in PowerShell: `irm https://www.claudopus.ai/install.ps1 | iex`. Where Git for Windows or jq is missing, it installs them with winget first
+- On Windows, the panel, your tasks and their commands run through Git for Windows' bash, as Claude Code's own commands do, and the memory folder is in your profile's .claude folder
+- On Windows, keys are kept in a file on your PC that only you can read; an admin command for your PC is refused with a note to run it yourself as administrator, while one for a Mac or Linux machine over SSH still asks you first
+- On Windows, a file a task writes or a result names shows on its card however its path is written (C:\, C:/ or /c/) and opens in Explorer; Attach and Paste use Windows' own Open box and clipboard; a command for you to run comes with Copy
+- On Windows, the bar above the prompt shows memory, the processor, the disk, the network and the battery; the Servers tab lists and stops your servers; notifications come as Windows' own; stopping a command ends everything it started
+- On Windows, Claudopus doesn't clean up what tasks leave behind yet: Windows can't say which folder a running program works in, so it removes nothing rather than risk a browser that is still open
+
 ## 0.2.307 · 27 November 2026
 - A busy chat uses far less of the processor. Claudopus kept the whole list of a chat's tasks in Claude's memory and read and wrote all of it several times for every tool call of every task: with five tasks at work its own code used more than half a core. It now keeps the list at hand, writes it once or twice per call, and saves the ledger at most every two seconds.
 - A tool call of a task no longer draws the whole panel again unless what the panel shows has changed.

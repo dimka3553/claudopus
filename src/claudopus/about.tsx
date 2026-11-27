@@ -21,7 +21,7 @@ const aboutButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
 // Mac updated itself to while this chat runs the one it loaded
 let loadedVersion: Promise<string> | undefined
 const versionsOf = async ($: EngineInterface) => {
-  loadedVersion ??= readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`).then(manifest => {
+  loadedVersion ??= readOr($, `${pluginRoot($)}/.claude-plugin/plugin.json`).then(manifest => {
     try {
       return String(JSON.parse(manifest).version ?? '')
     } catch {

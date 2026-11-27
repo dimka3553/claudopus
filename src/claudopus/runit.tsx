@@ -113,7 +113,7 @@ const runnableOf = (tool: string, call: Record<string, unknown>) => {
 // Kept as its notice goes up on the card, by the hook that saw Claude Code refuse it; output files over a day old go meanwhile
 const offerRun = async ($: EngineInterface, card: string, from: string, askAt: number, runnable: NonNullable<ReturnType<typeof runnableOf>>) => {
   await saveRuns($, list => [...list.filter(one => !isSameRun(one, { card, askAt })), { card, from, askAt, ...runnable }])
-  if (dir) void $.process.run(['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15_000 }).catch(() => undefined)
+  if (dir) void runOn($, ['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15_000 }).catch(() => undefined)
 }
 // What the card and the chat say of it before the press (where and for how long are said under the command: runWhere)
 const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs once in ${shortPath(run.cwd, 60)}, for at most ${limitText(run.limitMs)}${reason ? ` · blocked as “${reason}”` : ''}.`
@@ -143,7 +143,7 @@ const startRun = async ($: EngineInterface, one: Todo, run: PressRun): Promise<s
   const logFile = `${dir}/runs/${slug(one.id) || 'work'}-${at}.log`
   const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
   const r = isLogged
-    ? await $.process.run([`${$.plugin.root}/bin/run-it`, 'start', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15_000 }).catch(err => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+    ? await runOn($, [`${pluginRoot($)}/bin/run-it`, 'start', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15_000 }).catch(err => ({ exitCode: 1, stdout: '', stderr: String(err) }))
     : { exitCode: 1, stdout: '', stderr: 'its output file could not be made' }
   const pid = r.exitCode === 0 ? /^(\d+)\s*$/.exec(r.stdout.trim())?.[1] : undefined
   if (!pid) {
@@ -217,7 +217,7 @@ const lookRun = async ($: EngineInterface, run: PressRun) => {
   runLooked.set(key, { sign, aliveAt: isAliveDue ? at : was.aliveAt })
   if (!isAliveDue) return false
   // Gone without writing its end (stopped from outside, or the Mac restarted): said so, with what it printed
-  const alive = await $.process.run([`${$.plugin.root}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
+  const alive = await runOn($, [`${pluginRoot($)}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
   if (alive && alive.exitCode !== 0) {
     const late = runOutputOf(await fileEnd($, run.log, 64_000))
     return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), ended()
@@ -225,7 +225,7 @@ const lookRun = async ($: EngineInterface, run: PressRun) => {
   return false
 }
 const stopProcess = ($: EngineInterface, run: PressRun) =>
-  run.pid && run.log ? $.process.run([`${$.plugin.root}/bin/run-it`, 'stop', run.pid, run.log], { timeoutMs: 15_000 }).catch(err => log($, `run of ${run.card} not stopped: ${String(err)}`)) : Promise.resolve()
+  run.pid && run.log ? runOn($, [`${pluginRoot($)}/bin/run-it`, 'stop', run.pid, run.log], { timeoutMs: 15_000 }).catch(err => log($, `run of ${run.card} not stopped: ${String(err)}`)) : Promise.resolve()
 // The person's Stop on its row
 const stopRun = async ($: EngineInterface, run: PressRun) => {
   presses += 1

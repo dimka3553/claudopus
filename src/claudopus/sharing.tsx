@@ -88,7 +88,7 @@ const unshare = async ($: EngineInterface, isSure = false) => {
   const { id } = await read($, me)
   if (!id || !dir || (!sharedSign && !isSure)) return
   sharedSign = ''
-  if (await $.fs.exists(ownLive(id)).catch(() => false)) await $.process.run(['rm', '-f', ownLive(id)]).catch(() => undefined)
+  if (await $.fs.exists(ownLive(id)).catch(() => false)) await runOn($, ['rm', '-f', ownLive(id)]).catch(() => undefined)
 }
 let pushedYou = ''
 let pushedLatest = ''
@@ -164,7 +164,7 @@ const readOthers = async ($: EngineInterface) => {
   // files listed at every look on 27 Nov were eleven days old
   const gone = isLiveTidied ? [] : listed.filter(entry => entry.mtimeMs && now - entry.mtimeMs > LIVE_OLD).slice(0, 500)
   isLiveTidied = true
-  if (gone.length) void $.process.run(['rm', '-f', ...gone.map(entry => `${liveDir()}/${entry.name}`)]).catch(() => undefined)
+  if (gone.length) void runOn($, ['rm', '-f', ...gone.map(entry => `${liveDir()}/${entry.name}`)]).catch(() => undefined)
   for (const entry of listed) {
     // A file not written for longer than STALE is a chat gone silent: not read at all
     if (entry.mtimeMs && now - entry.mtimeMs > STALE) continue
@@ -263,7 +263,8 @@ const writeHeldOthers = async ($: EngineInterface) => {
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
-// ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_….json, each naming the engine's id for that chat
+// ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_….json (on Windows in the app's data folder,
+// appDataFolders), each naming the engine's id for that chat
 // (`cliSessionId`, the id a chat shares as `chat`). They include the chats it runs on another Mac over SSH, which a press then opens
 // by the app's own id as its sidebar does, whatever version of the mod runs there. Listed again at most every half minute; a file is
 // read once, as the id it names never changes
@@ -279,8 +280,8 @@ const heldApp = (c: Shared) => (c.link?.app && appIds.has(c.link.app) ? c.link.a
 const readAppIds = async ($: EngineInterface, now: number) => {
   if (now - appIdsAt < 30_000) return false
   appIdsAt = now
-  const root = `${(await $.env.get('HOME')) ?? ''}/Library/Application Support/Claude/claude-code-sessions`
   const found = new Map<string, string>()
+  for (const root of (await appDataFolders($)).map(data => `${data}/claude-code-sessions`))
   for (const account of await $.fs.list(root).catch(() => []))
     for (const org of account.kind === 'dir' ? await $.fs.list(`${root}/${account.name}`).catch(() => []) : [])
       for (const one of org.kind === 'dir' ? await $.fs.list(`${root}/${account.name}/${org.name}`).catch(() => []) : []) {
@@ -356,7 +357,7 @@ const takeOpens = async ($: EngineInterface) => {
       const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
       if (now - (f.fetchedAt ?? 0) > STALE) continue
       await $.fs.write(stamp, String(now))
-      const r = await $.process.run(ssh(mac, openTake(from)), { timeoutMs: 8_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      const r = await runOn($, ssh(mac, openTake(from)), { timeoutMs: 8_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
       if (r.exitCode !== 0) continue
       for (const chat of opensOf(r.stdout)) await openTaken($, chat, mac)
     }
@@ -388,7 +389,7 @@ const answeredHere = new Set<string>()
 const leaveHere = ($: EngineInterface, folder: string, name: string, body: unknown) =>
   $.fs
     .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(body))
-    .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
+    .then(() => runOn($, ['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
 // An answer some file leaves for this chat's work, from another chat's panel here or carried from another Mac, answers nothing: a file
 // carries no proof of who wrote it, and anything running as the person on this Mac, or on a Mac named under macs, can write one. An
@@ -400,6 +401,6 @@ const readAnswers = async ($: EngineInterface) => {
   const folder = `${liveDir()}/${ANSWERS}/${id}`
   const all = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json') || entry.name.endsWith('.part'))
   if (!all.length) return
-  for (const entry of all) await $.process.run(['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
+  for (const entry of all) await runOn($, ['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
   await log($, `${all.length === 1 ? 'an answer' : `${all.length} answers`} left in a file put away unread: an ask is answered only in its own chat`)
 }

@@ -4,6 +4,24 @@
 // ---- Stats: reading Claude's records ----
 
 let jqPath = ''
+// On Windows jq is no part of Git for Windows: the one on the PATH, else where winget puts the one Claudopus's installer offers. Its
+// program goes in a file there, as Windows' own quoting of a long argument full of quotes would not reach jq.exe whole
+const jqPlaces = async ($: EngineInterface) => {
+  if (!isWindows) return ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']
+  const local = slashed(((await $.env.get('LOCALAPPDATA').catch(() => undefined)) ?? '').trim())
+  return ['jq', ...(local ? [`${local}/Microsoft/WinGet/Links/jq.exe`] : [])]
+}
+let jqProgram = ''
+const jqProgramArgs = async ($: EngineInterface) => {
+  if (!isWindows) return [SUM_JQ]
+  const file = `${dir}/stats/sum.jq`
+  if (jqProgram !== file || (await readOr($, file)) !== SUM_JQ) {
+    await runOn($, ['mkdir', '-p', `${dir}/stats`]).catch(() => undefined)
+    await $.fs.write(file, SUM_JQ)
+    jqProgram = file
+  }
+  return ['-f', file]
+}
 // No more than six jq at once, whichever chats they sum for: each is a process
 const jqLine: (() => void)[] = []
 let jqBusy = 0
@@ -11,8 +29,9 @@ async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
   if (jqBusy >= 6) await new Promise<void>(go => jqLine.push(go))
   else jqBusy += 1
   try {
-    for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
-      const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
+    const program = await jqProgramArgs($)
+    for (const jq of jqPath ? [jqPath] : await jqPlaces($)) {
+      const r = await runOn($, [jq, '-cnR', '--argjson', 'gap', String(GAP), ...program, path]).catch(() => undefined)
       if (!r || r.exitCode !== 0) continue
       jqPath = jq
       return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
@@ -145,10 +164,10 @@ const LOCK_STALE = 90_000
 async function statsLock($: EngineInterface, memory: string, now: number) {
   const lock = `${memory}/stats/lock`
   const take = () =>
-    $.process.run(['/bin/sh', '-c', 'mkdir -p "$1/chats" "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
+    runOn($, ['/bin/sh', '-c', 'mkdir -p "$1/chats" "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
   if (await take()) return true
   if (now - Number(await statsText($, `${lock}/at`)) < LOCK_STALE) return false
-  await $.process.run(['rm', '-rf', lock], { timeoutMs: 5000 }).catch(() => undefined)
+  await runOn($, ['rm', '-rf', lock], { timeoutMs: 5000 }).catch(() => undefined)
   return take()
 }
 // One transcript of a chat, as looked at: what it was is read from its meta file, a workflow's title from the mod's own note of it
@@ -179,7 +198,7 @@ async function chatCheck($: EngineInterface, memory: string, chatId: string, hin
   if (old && !head.old) ((head.old = 1), index.dirty.add(0))
   if (isThorough && head.old && index.of.size) {
     const left = await $.fs.stat(oldPath).catch(() => undefined)
-    if (left && now - left.mtimeMs > OLD_KEPT_FOR) await $.process.run(['rm', '-f', oldPath], { timeoutMs: 5000 }).catch(() => undefined)
+    if (left && now - left.mtimeMs > OLD_KEPT_FOR) await runOn($, ['rm', '-f', oldPath], { timeoutMs: 5000 }).catch(() => undefined)
     if (!left || now - left.mtimeMs > OLD_KEPT_FOR) ((head.old = undefined), index.dirty.add(0))
   }
   const mainAt = (folder: string) => (folder ? $.fs.stat(`${folder}/${chatId}.jsonl`).catch(() => undefined) : Promise.resolve(undefined))
@@ -348,7 +367,7 @@ async function refreshNow($: EngineInterface, memory: string, chatId: string, hi
     })
     return 'done'
   } finally {
-    await $.process.run(['rm', '-rf', `${memory}/stats/lock`], { timeoutMs: 5000 }).catch(() => undefined)
+    await runOn($, ['rm', '-rf', `${memory}/stats/lock`], { timeoutMs: 5000 }).catch(() => undefined)
   }
 }
 
@@ -427,7 +446,7 @@ async function loadStats($: EngineInterface, scope: Scope, memory: string, chatI
 async function loadMemorySizes($: EngineInterface, memory: string) {
   const names = async (folder: string) => (await $.fs.list(`${memory}/${folder}`).catch(() => [])).filter(e => !e.name.startsWith('.'))
   // Sizes as the disk counts them, the whole of each folder
-  const du = await $.process.run(['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
+  const du = await runOn($, ['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
   const kb = new Map((du?.stdout ?? '').split('\n').map(row => row.split('\t')).filter(([n, path]) => n && path).map(([n, path]) => [String(path).slice(memory.length + 1), Number(n) * 1024]))
   const index = await $.fs.read(`${memory}/index.md`).catch(() => '')
   const subjects = index.split('\n').filter(row => row.startsWith('- ')).length
@@ -451,7 +470,7 @@ async function loadMemorySizes($: EngineInterface, memory: string) {
 // Stats: what the work added up to, in a tab of its own, opened in front like Results
 const STATS_PANE = 'stats'
 const STATS_TITLE = 'Stats'
-const statsHint = async ($: EngineInterface) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`
+const statsHint = async ($: EngineInterface) => projectDirOf($, cwd, (await read($, me)).id)
 const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
   const { id } = await read($, me)
   await loadStats($, scope, dir, id, await statsHint($), await $.clock.now())
@@ -486,9 +505,10 @@ const boardSave = async ($: EngineInterface, file: BoardFile) => {
 }
 // One call of the board's functions: curl with the body on its standard input, the status on the last line
 const boardCall = async ($: EngineInterface, fn: string, args: Record<string, unknown>) => {
-  const r = await $.process
-    .run(['curl', '-q', '-sS', '-m', '20', '-X', 'POST', '-H', `apikey: ${BOARD_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@-', '-w', '\n%{http_code}', `${BOARD_API}/${fn}`], { stdin: JSON.stringify(args), timeoutMs: 25_000 })
-    .catch(() => ({ exitCode: 1, stdout: '' }))
+  const r = await runOn($, ['curl', '-q', '-sS', '-m', '20', '-X', 'POST', '-H', `apikey: ${BOARD_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@-', '-w', '\n%{http_code}', `${BOARD_API}/${fn}`], {
+    stdin: JSON.stringify(args),
+    timeoutMs: 25_000,
+  }).catch(() => ({ exitCode: 1, stdout: '' }))
   const text = r.stdout ?? ''
   const cut = text.lastIndexOf('\n')
   const status = Number(text.slice(cut + 1)) || 0
@@ -521,7 +541,7 @@ const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean, isHel
 const installedAt = async ($: EngineInterface) => {
   const kept = parsed<{ at?: number }>(await readOr($, `${dir}/installed.json`), {}).at
   if (typeof kept === 'number' && kept > 0) return kept
-  const born = await $.process.run(isLinux ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined)
+  const born = await runOn($, isLinux || isWindows ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined)
   const seconds = Number(born?.stdout.trim())
   const at = seconds > 0 ? seconds * 1000 : await $.clock.now()
   await $.fs.write(`${dir}/installed.json`, JSON.stringify({ at })).catch(() => undefined)

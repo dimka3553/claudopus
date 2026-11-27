@@ -7,12 +7,16 @@ const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-
 // One connection to each Mac is kept open a minute after its last use and shared by every chat here, so a trip costs a fraction
 // of a second rather than a new login each time, and a name pressed on that Mac opens here within moments. A connection gone dead,
 // as after sleep, is dropped within ten seconds and the next call logs in afresh
-const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
+// On Windows each trip logs in by itself: Git's ssh would keep a shared connection on MSYS's stand-in for a Unix socket, not known to
+// work there, and a master left running could hold the engine's pipes open
+const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', ...(isWindows ? [] : ['-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60']), '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
 // This Mac's own name, as its Sharing settings give it, read once: what it is called on the Macs it hands its chats to
 let localName = ''
 const knowLocalName = async ($: EngineInterface) => {
   if (localName) return localName
-  const r = await $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+  // (on Windows its computer name, as Windows keeps it for every program)
+  const named = isWindows ? ((await $.env.get('COMPUTERNAME').catch(() => undefined)) ?? '').trim() : ''
+  const r = named ? { exitCode: 0, stdout: named } : await runOn($, isLinux || isWindows ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
   localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
   return localName
 }
@@ -89,7 +93,7 @@ const fetchMacs = async ($: EngineInterface) => {
       const kept = { mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, acks: was.acks ?? [], seen: was.seen ?? [] }
       await $.fs.write(macPath(mac), JSON.stringify({ ...kept, triedAt: now }))
       const push = pushOf(from, keyOf(macName(mac)), now, await ownFiles($, now))
-      const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      const r = await runOn($, ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
       if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
         // Said once when the Mac stops answering, not at every try
         if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
@@ -130,11 +134,11 @@ const syncResults = async ($: EngineInterface) => {
       try {
         await syncWith($, mac, was, now, staging)
       } finally {
-        await $.process.run(['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
+        await runOn($, ['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
       }
     }
     // What a sync cut off left of its own folders goes after an hour; nothing else there is ever touched
-    if (isTried) await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
+    if (isTried) await runOn($, ['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
   } finally {
     isSyncing = false
   }
@@ -145,7 +149,7 @@ const aTrip = (ids: string[], tried: Record<string, number> = {}) =>
   ids.map((id, i) => ({ id, i, at: tried[id] ?? 0 })).sort((a, b) => a.at - b.at || a.i - b.i).slice(0, RESULTS_A_TRIP).map(one => one.id)
 const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: number, staging: string) => {
   const home = dir.slice(0, -'/.claude/claudopus'.length)
-  const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
+  const looked = await runOn($, ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
   // A list cut short is no list: what it leaves out would look missing there
   const theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined
   if (!theirs) {
@@ -167,8 +171,8 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
   const wanted = aTrip(missingHere, was.tried)
   for (const id of wanted) {
     const into = `${staging}/${id}`
-    await $.process.run(['mkdir', '-p', into])
-    const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+    await runOn($, ['mkdir', '-p', into])
+    const r = await runOn($, ['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
     // Its stream ends with an empty _end, so one cut between two files is known as cut
     const isWhole = r.exitCode === 0 && (await $.fs.exists(`${into}/_end`).catch(() => false))
     if (!isWhole || (parsedMeta(await readOr($, `${into}/${id}/meta.json`)) as { id?: unknown }).id !== id) {
@@ -179,7 +183,7 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
       const text = await readOr($, `${into}/${id}/${file}`)
       if (text) await $.fs.write(`${into}/${id}/${file}`, rehome(text, theirs.home, home))
     }
-    const moved = await $.process.run(['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }))
+    const moved = await runOn($, ['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }))
     if (moved.exitCode === 0) changed += 1
   }
   // Handed there: copied aside here with its paths moved onto that Mac's home, then sent in one stream, put in place there only
@@ -187,17 +191,17 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
   const handed = aTrip(missingThere, was.tried)
   if (handed.length) {
     const out = `${staging}-out`
-    await $.process.run(['mkdir', '-p', out])
+    await runOn($, ['mkdir', '-p', out])
     const ready: string[] = []
     for (const id of handed) {
-      if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
+      if ((await runOn($, ['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
       for (const file of ['meta.json', 'report.md']) {
         const text = await readOr($, `${out}/${id}/${file}`)
         if (text) await $.fs.write(`${out}/${id}/${file}`, rehome(text, home, theirs.home))
       }
       ready.push(id)
     }
-    const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
+    const r = ready.length ? await runOn($, ['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
     if (r.exitCode !== 0) await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`)
   }
   // What the person did to a result both have: the later of put away and brought back, every answer, on both. Each side is written
@@ -220,7 +224,7 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
       }
       const theirsNext = merged(there.text, mineNow, wasArchived)
       if (theirsNext) {
-        const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+        const r = await runOn($, ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
         if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`)
         ;(isSame &&= r.exitCode === 0), (marked += 1)
       }

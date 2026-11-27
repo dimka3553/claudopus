@@ -505,3 +505,24 @@ test("in a chat over ssh the panel's text stays the same from second to second w
   expect(await texts()).toContain('1m')
   await pane.unmount()
 })
+
+// On Windows: this PC is named by its computer name, each ssh trip logs in by itself (Git's ssh shares no connection there), no
+// chat of this PC is looked for in Git's ps, which sees none, and the app's log is read in its data folder
+test("on a Windows PC the other Mac is reached by ssh with no shared connection, this PC named by its computer name, and the app's decision read from its own log folder", async ($, on) => {
+  const { files, clock, sshed, windowsRuns } = world(on, { windows: true, env: { COMPUTERNAME: 'SAM-PC', APPDATA: 'C:\\Users\\sam\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\sam\\AppData\\Local' } })
+  files.set(`${WINDOWS_MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  files.set('ssh:fetch', `${NOW / 1000}\n`)
+  files.set('sh:applog', "2026-11-12 13:57:59 [warn] [CCD] SSH local_x: 1 plugin(s) left to the host's own install did not load there; their copies are handed over from the next start on\n")
+  await $.session.start(start)
+  await clock.advance(40_000)
+  const first = await until(async () => sshed.find(([command]) => command?.startsWith("sh -c 'L=")))
+  expect(JSON.parse((first?.[1] ?? '').split('\n')[0] ?? '{}')).toEqual({ from: 'sam-pc', you: 'm4' })
+  const trips = windowsRuns.filter(argv => argv[3] === 'ssh')
+  expect(trips.length).toBeGreaterThan(0)
+  expect(trips.filter(argv => argv.some(word => word.startsWith('Control')))).toEqual([])
+  expect(windowsRuns.filter(argv => argv[3] === 'sh' && String(argv[5]).includes('--plugin-dir'))).toEqual([])
+  expect(windowsRuns.find(argv => argv[3] === 'sh' && String(argv[5]).includes('Starting app'))?.slice(7)).toEqual(['C:/Users/sam/AppData/Roaming/Claude/logs', 'C:/Users/sam/AppData/Local/Claude-Data/logs', 'C:/Users/sam/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/logs'])
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. At 2026-11-12 13:57 this PC's Claude app decided/ }))).toBeDefined()
+  await list.unmount()
+})

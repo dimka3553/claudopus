@@ -204,3 +204,26 @@ test('work that needs the person is heard once: its notification comes as the am
   expect(own).toHaveLength(before)
   expect(played).toHaveLength(3)
 })
+
+// On Windows bin/notify raises Windows' own notification, which is silent: the mod's chime is the sound, and where Windows shows none
+// nothing else is tried (there is no macOS notification there)
+test('on a Windows PC an ask comes as the notification bin/notify raises, opening the chat, with the mod\'s own chime; where none can be shown, nothing else is tried', async ($, on) => {
+  const app = { noSurface: true, claudopus: 0, asks: 0 }
+  const { played, own, osa, files, clock } = world(on, { windows: true, app, env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the repo private', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  const ask = (id: string, text: string) => $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: id, agentId: 'a1', text } as never)
+  await ask('k1', 'Paste the code.')
+  expect(own.at(-1)?.slice(4, 6)).toEqual(['--asks', '--chime'])
+  expect(own.at(-1)).toContain('claude://code/continue?session=local_ab12-cd34')
+  expect(played).toEqual(['sounds/ready.wav'])
+  // None shown (no notifications on this PC): only the chime, and no other way is tried
+  app.asks = 3
+  app.claudopus = 3
+  await clock.advance(6_000)
+  await ask('k2', 'Type the code from the email.')
+  expect(played).toHaveLength(2)
+  expect(osa).toEqual([])
+  expect(await until(async () => (files.get(`${WINDOWS_MEMORY}/log.md`) ?? '').includes('no Windows notification on this PC') || undefined)).toBe(true)
+})

@@ -3,42 +3,61 @@
 // ---- The servers on this Mac: what listens on which port, from which folder, started by which chat ----
 
 const rows = (text: string) => text.split('\n').filter(Boolean)
-// The engine process of a chat, as `ps` shows its command (the program's path, then what it was given); the app itself is `Claude`
-const isEngine = (args: string) => /^(?:(?! -).)*\/MacOS\/claude(?: |$)/.test(args)
-// "node /long/path/.bin/next dev" reads as "node next dev"
+// The engine process of a chat, as `ps` shows its command (the program's path, then what it was given); the app itself is `Claude`.
+// On Windows the engine is claude.exe, its path quoted where it holds a space, and the app Claude.exe
+const isEngine = (args: string) => /^(?:(?! -).)*\/MacOS\/claude(?: |$)/.test(args) || /^"?(?:[^"]*[\\/])?claude\.exe"?(?:\s|$)/.test(args)
+// "node /long/path/.bin/next dev" reads as "node next dev"; on Windows a word may be quoted for its spaces, and a program's .exe goes
 const short = (args: string) =>
-  args
-    .split(' ')
-    .map(part => (part.startsWith('/') ? (part.split('/').pop() ?? part) : part))
-    .join(' ')
-    .slice(0, 50)
+  isWindows
+    ? [...args.matchAll(/"([^"]*)"|(\S+)/g)]
+        .map(m => m[1] ?? m[2] ?? '')
+        .map(part => (isAbsPath(part) ? (part.split(/[\\/]/).pop() ?? part).replace(/\.exe$/i, '') : part))
+        .join(' ')
+        .slice(0, 50)
+    : args
+        .split(' ')
+        .map(part => (part.startsWith('/') ? (part.split('/').pop() ?? part) : part))
+        .join(' ')
+        .slice(0, 50)
+
 
 const scanServers = async ($: EngineInterface) => {
   scannedAt = Date.now()
-  const home = (await $.env.get('HOME')) ?? ''
-  const run = async (argv: string[]) => (await $.process.run(argv).catch(() => undefined))?.stdout ?? ''
+  const home = (await homeFolder($)) ?? ''
+  const run = async (argv: string[]) => (await runOn($, argv).catch(() => undefined))?.stdout ?? ''
 
   // lsof -F prints one field a line: p<pid>, then n<address:port> for each socket of that process
-  const ports = new Map<number, string[]>()
+  let ports = new Map<number, string[]>()
   let pid = 0
-  for (const row of rows(await run(['lsof', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn']))) {
-    if (row.startsWith('p')) pid = Number(row.slice(1))
-    const port = row.startsWith('n') ? row.slice(row.lastIndexOf(':') + 1) : ''
-    if (port && !ports.get(pid)?.includes(port)) ports.set(pid, [...(ports.get(pid) ?? []), port])
-  }
+  if (isWindows) ports = windowsPortsOf(await run(['netstat', '-ano']))
+  else
+    for (const row of rows(await run(['lsof', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn']))) {
+      if (row.startsWith('p')) pid = Number(row.slice(1))
+      const port = row.startsWith('n') ? row.slice(row.lastIndexOf(':') + 1) : ''
+      if (port && !ports.get(pid)?.includes(port)) ports.set(pid, [...(ports.get(pid) ?? []), port])
+    }
   if (!ports.size) return update($, servers, () => [])
   const pids = [...ports.keys()].join(',')
 
   const folders = new Map<number, string>()
-  for (const row of rows(await run(['lsof', '-a', '-d', 'cwd', '-Fpn', '-p', pids]))) {
-    if (row.startsWith('p')) pid = Number(row.slice(1))
-    else if (row.startsWith('n')) folders.set(pid, row.slice(1))
-  }
+  // (the engine's own temporary folder, where a chat's scratch folders are)
+  const scratchRoot = isWindows ? slashed((await $.env.get('CLAUDE_CODE_TMPDIR').catch(() => undefined)) ?? '').replace(/\/+$/, '') || 'C:/tmp' : ''
   // Every process with its parent and its command, to find who started a server and what it runs: one list for both
   const table = new Map<number, { parent: number; path: string }>()
-  for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,args=']))) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row)
-    if (m) table.set(Number(m[1]), { parent: Number(m[2]), path: m[3] ?? '' })
+  if (isWindows) {
+    for (const [id, one] of windowsProcsOf(await run([...POWERSHELL, WINDOWS_PROCS]))) {
+      table.set(id, { parent: one.parent, path: one.args || one.path })
+      if (ports.has(id)) folders.set(id, windowsFolderOf(one.args, home, scratchRoot))
+    }
+  } else {
+    for (const row of rows(await run(['lsof', '-a', '-d', 'cwd', '-Fpn', '-p', pids]))) {
+      if (row.startsWith('p')) pid = Number(row.slice(1))
+      else if (row.startsWith('n')) folders.set(pid, row.slice(1))
+    }
+    for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,args=']))) {
+      const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row)
+      if (m) table.set(Number(m[1]), { parent: Number(m[2]), path: m[3] ?? '' })
+    }
   }
   // The nearest process above this one that the test accepts; 0 for none
   const above = (from: number, test: (path: string) => boolean) => {
@@ -68,9 +87,11 @@ const scanServers = async ($: EngineInterface) => {
   const found: Server[] = []
   for (const [id, list] of ports) {
     const folder = folders.get(id) ?? ''
-    const isScratch = folder.startsWith('/private/tmp/') || folder.startsWith('/tmp/')
-    // A server of mine runs from one of my folders or a chat's scratch folder; the apps and the chats themselves listen too
-    if (!(folder.startsWith(`${home}/`) || isScratch) || folder.startsWith(`${home}/Library`) || isEngine(table.get(id)?.path ?? '')) continue
+    const isScratch = folder.startsWith('/private/tmp/') || folder.startsWith('/tmp/') || Boolean(scratchRoot && folder.toLowerCase().startsWith(`${scratchRoot.toLowerCase()}/`))
+    // A server of mine runs from one of my folders or a chat's scratch folder; the apps and the chats themselves listen too. On
+    // Windows one a chat started counts too, whatever its command line names
+    const isChats = isWindows && Boolean(above(id, isEngine))
+    if (!(folder.startsWith(`${home}/`) || isScratch || isChats) || folder.startsWith(`${home}/Library`) || isEngine(table.get(id)?.path ?? '')) continue
     const port = list[0] ?? ''
     // The chat is the engine process above it, or the one whose scratch folder it runs in
     const chat = chats.get(String(above(id, isEngine))) ?? chats.get(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/.exec(folder)?.[0] ?? '') ?? seen[`${id}:${port}`]
@@ -105,7 +126,8 @@ const refresh = async ($: EngineInterface) => {
 }
 
 const stopServer = async ($: EngineInterface, pid: number) => {
-  await $.process.run(['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
+  // (on Windows with every process it started: Windows has no gentle stop for a program without a window)
+  await runOn($, isWindows ? ['taskkill', '/PID', String(pid), '/T', '/F'] : ['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
   await $.clock.sleep(700)
   await scanServers($)
 }

@@ -667,3 +667,24 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('npm run slow') && one.includes('was stopped at its limit of 1 min')))).toBeDefined()
   await list.unmount()
 })
+
+// On Windows no Terminal opens: the command that lets a connector's action through is one for Git Bash, which the person copies
+test("on a Windows PC a connector's tool Claude Code refuses a task is asked with the command for Git Bash to copy, Try again and Don't allow, and nothing to open", async ($, on) => {
+  const { files, clock } = world(on, { windows: true, agents: { a1: 'running' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the leaderboard', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Make the leaderboard', prompt: 'make the leaderboard' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const TOOL = 'mcp__5a3e9d85-c502-4788-adea-8783a1c00ccc__confirm_cost'
+  files.set('auto-refuse', TOOL)
+  await $.tool.call({ tool: TOOL, agentId: 'a1', tool_use_id: 'c1', amount: 10 } as never)
+  files.delete('auto-refuse')
+  await clock.advance(1000)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code blocked this action. Let your tasks do it?' }))).toBeDefined()
+  const said = (await list.findAll({ type: 'Markdown' } as never)).map(one => String(one.props.text ?? '')).join('\n')
+  expect(said).toContain(`Copy the command, paste it in Git Bash and press Return: it adds ${TOOL} to your Claude Code settings`)
+  const labels = (await list.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith('ask-a1')).map(b => String(b.props.label))
+  expect(labels.filter(one => ['Try again', "Don't allow", 'Copy', 'Open in Terminal'].includes(one)).sort()).toEqual(['Copy', "Don't allow", 'Try again'])
+  expect([...(await textsOf(list)), said].join('\n')).toContain(`bash '${PLUGIN}/bin/allow-tool' ${TOOL}`)
+  await list.unmount()
+})

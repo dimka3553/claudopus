@@ -8,8 +8,12 @@ import { timelineRows } from '../stats'
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
 const HOME = '/home/sam'
+// The same person's profile on a Windows PC, and Git for Windows' bash there
+const WINDOWS_HOME = 'C:\\Users\\sam'
+const GIT_BASH = 'C:/Program Files/Git/bin/bash.exe'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
-const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
+// (on Windows a file URL's path is /D:/..., which names D:/...)
+const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '').replace(/^\/(?=[A-Za-z]:\/)/, '')
 // Every test may take three minutes, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's
 // runner (two to three times as slow as a Mac) the longest scenarios passed or failed by the machine's load, not by the mod. Those
 // that run the clock through hours fire the mod's timers each second of it, as in a chat: 10 to 20 seconds alone on a Mac, 30 to 60
@@ -65,7 +69,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; pace?: (argv: string[]) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
+const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; pace?: (argv: string[]) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -136,7 +140,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
   // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
-  mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
+  // `windows`: a Windows PC, as the Claude app runs the engine there: no HOME, the person's profile, and Git for Windows' bash where
+  // Claude Code finds it. Each command the mod runs is kept as it was sent (`windowsRuns`) and answered as the command it carries
+  if (options.windows) files.set(GIT_BASH, '')
+  mock.env(on, { ...(options.windows ? { OS: 'Windows_NT', USERPROFILE: WINDOWS_HOME, HOME: '', SHELL: GIT_BASH.replace(/\//g, '\\') } : { HOME }), CLAUDOPUS_TIMING: 'test', ...options.env })
   const kitClock = mock.clock(on, { now: 1_700_000_000_000 })
   // A hook of the mod follows each move of the clock, as in the app, where a drawing or a step of some task is never far: what the
   // mod's timers leave for a hook to send (sendHeld) goes then. A test that names `unseen` moves the clock bare, and brings the
@@ -167,7 +174,18 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     const { Text } = $.ui.resolve(e)
     return <Text>the engine's own</Text>
   })
-  on('fs.read', (_, e) => {
+  // Each path as the mod asked for it, on whichever system the kit runs. The kit on Windows gives it with backslashes and from a
+  // drive: /home/sam/x comes as D:\home\sam\x, and the plugin's own files as D:\a\...\mods\claudopus\x, which stay whole (by
+  // the checkout's folder, as the kit's own plugin.root there is a copy in the temp folder). On a Mac or Linux a Windows PC's path
+  // from a drive (C:/Users/sam/...) comes under the folder the kit runs in
+  const inProfile = <T extends { path: string }>($: { plugin: { root: string } }, e: T): T => {
+    const path = /^[A-Za-z]:\\/.test(e.path) ? e.path.replace(/\\/g, '/') : e.path
+    if (options.windows) return { ...e, path: path.replace(/^.*?\/(?=[A-Za-z]:\/)/, '').replace(/^[a-z](?=:)/, d => d.toUpperCase()) }
+    const tops = [$.plugin.root, PLUGIN].map(one => one.replace(/\\/g, '/').replace(/\/mods\/claudopus\/?$/, '').toLowerCase())
+    return { ...e, path: /^[A-Za-z]:\//.test(path) && !tops.some(top => path.toLowerCase().startsWith(top)) ? path.slice(2) : path }
+  }
+  on('fs.read', (_, raw) => {
+    const e = inProfile(_, raw)
     // A picture's bytes, as base64, where the test gives them
     const bytes = options.bytes?.(e.path)
     if (bytes !== undefined) return { value: { base64: bytes } as never }
@@ -192,19 +210,21 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (text.length > FS_READ_MOST) throw new Error(`${e.path} refused: the file is over the ${FS_READ_MOST}-byte limit`)
     return { value: text }
   })
-  on('fs.write', (_, e) => {
+  on('fs.write', (_, raw) => {
+    const e = inProfile(_, raw)
     files.set(e.path, e.text)
     return { value: undefined }
   })
-  on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
+  on('fs.exists', (_, e) => ({ value: files.has(inProfile(_, e).path) }))
   // What a folder holds: its files, and the folders its deeper files are in
-  on('fs.list', (_, e) => (events.push(`list ${e.path}`), {
+  on('fs.list', (_, raw) => { const e = inProfile(_, raw); return (events.push(`list ${e.path}`), {
     value: [...new Set([...files.keys()].filter(path => path.startsWith(`${e.path}/`)).map(path => path.slice(e.path.length + 1)))]
       // A file's time is 0 unless the test lays it as mtime:<path>
       .map(rest => ({ name: rest.split('/')[0] ?? rest, kind: rest.includes('/') ? 'dir' : 'file', size: 1, mtimeMs: Number(files.get(`mtime:${e.path}/${rest}`) ?? 0), isLink: false }))
       .filter((one, i, all) => all.findIndex(other => other.name === one.name) === i) as never,
-  }))
-  on('fs.stat', (_, e) => {
+  }) })
+  on('fs.stat', (_, raw) => {
+    const e = inProfile(_, raw)
     const kind = files.has(e.path) ? 'file' : [...files.keys()].some(path => path.startsWith(`${e.path}/`)) ? 'dir' : ''
     if (!kind) throw new Error(`ENOENT ${e.path}`)
     return { value: { kind, size: 1, mtimeMs: Number(files.get(`mtime:${e.path}`) ?? 0), isLink: false } as never }
@@ -276,8 +296,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     return { value: undefined }
   })
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
+  const windowsRuns: string[][] = []
   on('process.run', (_, e) => {
-    const [tool, ...rest] = e.argv
+    if (options.windows) windowsRuns.push([...e.argv])
+    const [tool, ...rest] = options.windows && e.argv[0] === GIT_BASH && e.argv[1] === '-c' && e.argv[2] === 'exec "$0" "$@"' ? e.argv.slice(3) : e.argv
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
     // The end or the first line of a file, as tail and head give them
@@ -361,6 +383,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       const to = String(e.argv.at(-1))
       if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\n`))
       return ok(files.get('clipboard:files') ?? '')
+    }
+    // On Windows the same through Windows PowerShell: its Open box, and its clipboard, a picture saved where CLAUDOPUS_PASTE_TO says
+    // (each line ends as Windows ends lines)
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('OpenFileDialog'))) return files.has('picker:chosen') ? ok((files.get('picker:chosen') ?? '').replace(/\n/g, '\r\n')) : ok('')
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('GetFileDropList'))) {
+      const to = String(e.init?.env?.CLAUDOPUS_PASTE_TO ?? '')
+      if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\r\n`))
+      return ok((files.get('clipboard:files') ?? '').replace(/\n/g, '\r\n'))
     }
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
@@ -519,6 +549,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool?.endsWith('bin/keyring')) {
       const key = `keyring:${rest[1]}/${rest[2]}`
       if (rest[0] === 'get') return files.has(key) ? ok(files.get(key)) : ok('', 1)
+      if (rest[0] === 'has') return ok('', files.has(key) ? 0 : 1)
       if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
@@ -572,14 +603,16 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       // hold:<fn> keeps the call on its way until the test lets it go: held.get(fn)?.('')
       return files.has(`hold:${fn}`) ? (new Promise(done => held.set(fn, () => done(answer()))) as never) : answer()
     }
+    // jq:missing: none on the PATH (as on Windows, where Git for Windows has none), only one at its own full path
+    if (tool === 'jq' && files.has('jq:missing')) return ok('', 127)
     // hold:jq keeps every chat's records being read, as they are for half a minute after a reload, until the test lets them go
-    if (tool?.endsWith('jq') && files.has('hold:jq')) {
+    if (/jq(?:\.exe)?$/.test(tool ?? '') && files.has('hold:jq')) {
       const sum = files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}'
       return new Promise(done => held.set(`jq:${String(e.argv.at(-1))}`, () => done(ok(sum)))) as never
     }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
-    const stdout = tool?.endsWith('jq')
+    const stdout = /jq(?:\.exe)?$/.test(tool ?? '')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
@@ -751,7 +784,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     return { messages: e.messages }
   })
 
-  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, boarded, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { windowsRuns, files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, boarded, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -788,6 +821,39 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
+// The memory folder on the Windows PC of world(on, { windows: true })
+const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
+// A Windows PC's own programs, as a test gives them, for world(windowsPC(on, answer).on, { windows: true }). Each command the mod
+// runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
+// handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
+// no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
+type WindowsRun = { argv: string[]; env: Record<string, string>; cwd: string }
+const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
+  const runs: WindowsRun[] = []
+  const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const wrapped = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string>; cwd?: string } }) => unknown]
+      if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string>; cwd?: string } }) => {
+        const argv = [...e.argv]
+        const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
+        const tool = String(inBash ? argv[3] : argv[0])
+        if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
+        if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
+        if (!inBash) {
+          const one = { argv, env: { ...(e.init?.env ?? {}) }, cwd: e.init?.cwd ?? '' }
+          runs.push(one)
+          const out = answer(one)
+          if (out !== undefined) return said(out)
+        }
+        return handle(c, e)
+      }
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: wrapped, runs }
+}
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
@@ -1111,6 +1177,47 @@ test("a chat of this Mac that is not open and whose process is gone lists the ta
   expect(String(open?.key)).toMatch(/^carry-there-/)
   await list.press({ key: String(open?.key) })
   expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/chat chat-b opened: claude:\/\/code\/continue\?session=local_chat-b/)?.[0])).toBeDefined()
+  await list.unmount()
+})
+
+// On Windows the chat's process is a Windows process, which Git's shells never name ($PPID there is 1) and Git's ps never sees: its
+// number is the parent of a PowerShell the engine starts, whether one runs is tasklist's, and the watcher starts apart by PowerShell
+const ENGINE_PARENT = /Win32_Process -Filter \('ProcessId=' \+ \$PID\)\)\.ParentProcessId/
+test('on a Windows PC the beat names the engine by its Windows process, and the watcher starts apart from the chat by PowerShell', async ($, on) => {
+  const pc = windowsPC(on, run => (ENGINE_PARENT.test(run.argv.join(' ')) ? '6120\r\n' : undefined))
+  const { files, windowsRuns } = world(pc.on, { windows: true })
+  await $.session.start(start)
+  const [first] = (files.get(`${WINDOWS_MEMORY}/keep/engine-id.beat`) ?? '').split('\n')
+  expect(first).toBe('6120\tclaudopus@inline\tC:/Users/sam/.claude/settings.json')
+  // Started by Start-Process in a hidden window of Git's bash, its words in the environment, never by a shell of the engine's own
+  const started = pc.runs.find(run => run.argv.join(' ').includes('Start-Process -WindowStyle Hidden'))
+  expect(started?.env.CLAUDOPUS_BASH).toBe('C:/Program Files/Git/bin/bash.exe')
+  expect(started?.env.CLAUDOPUS_RUN).toBe(`unset IFS; set +f; set -- '${PLUGIN}/bin/revive' '${WINDOWS_MEMORY}'; exec "$1" "$2" >/dev/null 2>&1 </dev/null`)
+  expect(started?.argv.join(' ')).not.toContain('"')
+  // in the profile, so the chat's folder is never one it holds and keeps from being removed
+  expect(started?.cwd).toBe('C:\\Users\\sam')
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('POSIX::setsid'))).toEqual([])
+  expect(files.get(`${WINDOWS_MEMORY}/log.md`)).not.toContain('was not started')
+})
+
+test("on a Windows PC a chat that is not open whose engine is gone lists its tasks as Interrupted, as tasklist says; one whose engine runs lists none", SLOW, async ($, on) => {
+  const at = KEEP_NOW - 600_000
+  const pc = windowsPC(on, run =>
+    ENGINE_PARENT.test(run.argv.join(' ')) ? '6120\r\n' : /^tasklist/i.test(run.argv[0] ?? '') ? '"claude.exe","6120","Console","1","300,000 K"\r\n"claude.exe","700","Console","1","250,000 K"\r\n' : undefined,
+  )
+  const { files, clock } = world(pc.on, { windows: true })
+  const task = (id: string, title: string) => ({ id, title, state: 'working', note: '', transcript: '', card: { id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: at, endedAt: 0, status: 'working' } })
+  const ledger = (chat: string, pid: string, title: string, tasks: object[]) => files.set(`${WINDOWS_MEMORY}/ledger/${chat}.json`, JSON.stringify({ chat, title, folder: 'C:/repo', pid, savedAt: at, link: { bridge: '', app: `local_${chat}` }, tasks }))
+  ledger('chat-b', '3131', 'Billing', [task('b1', 'Send the invoices')])
+  ledger('chat-c', '700', 'Rig', [task('c1', 'Train the splats')])
+  await $.session.start(start)
+  await clock.advance(5_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: '⏸ Interrupted · The app closed while it worked' }))).toBeDefined()
+  const said = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(said).toContain('Send the invoices')
+  expect(said.some(text => /Train the splats/.test(text))).toBe(false)
+  expect(pc.runs.some(run => /^tasklist/i.test(run.argv[0] ?? ''))).toBe(true)
   await list.unmount()
 })
 

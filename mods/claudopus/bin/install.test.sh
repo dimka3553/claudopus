@@ -8,6 +8,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
 script=$repo/site/install.sh
 ENGINE=${ENGINE:-${CLAUDE_CODE_EXECPATH:-$(command -v claude 2>/dev/null)}}
+# (Windows installs with its PowerShell line, site/install.ps1, which install.test.ps1 tests)
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) echo "ok   skipped: Windows installs with install.ps1, which install.test.ps1 tests"; exit 0 ;; esac
 [ -n "$ENGINE" ] && [ -x "$ENGINE" ] || { echo "ok   skipped: no Claude Code here to install with"; exit 0; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-install-test.XXXXXX") || exit 1
 trap '[ -n "${INSTALL_TEST_KEEP:-}" ] || rm -rf "$tmp"' EXIT

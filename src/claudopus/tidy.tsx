@@ -24,13 +24,15 @@ let tidyLast: { at: number; freed: number } | undefined
 
 // In a session of its own, at a low priority, as the catch-up: it outlives the chat, and its log is set aside past a megabyte
 const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+// On Windows nothing lists the commands that run with the folders they run in, which bin/tidy needs to know what is safe to
+// remove, so it is not started there, and the disk's block has no Free up space
 const startTidy = async ($: EngineInterface, flags: string[] = []) => {
-  if (!dir || isOff) return
+  if (!dir || isOff || isWindows) return
   // Nothing is started while bin/tidy would end at once: its own stamp says a run began under its ten minutes ago
   const stamp = flags.length ? 0 : ((await $.fs.stat(`${dir}/tidy/stamp`).catch(() => undefined))?.mtimeMs ?? 0)
   const at = stamp ? await $.clock.now() : 0
   if (stamp && at >= stamp && at - stamp < TIDY_EVERY) return
-  const r = await $.process.run(['/bin/sh', '-c', TIDY_START, 'sh', dir, `${$.plugin.root}/bin/tidy`, ...flags, dir])
+  const r = await runOn($, ['/bin/sh', '-c', TIDY_START, 'sh', dir, `${pluginRoot($)}/bin/tidy`, ...flags, dir])
   if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
 
@@ -68,7 +70,7 @@ const lookDisk = async ($: EngineInterface) => {
   isDiskForced = false
   if (out === undefined) {
     await $.fs.write(path, JSON.stringify({ ...shared, at: now })).catch(() => undefined)
-    out = (await $.process.run(['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined))?.stdout ?? ''
+    out = (await runOn($, ['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined))?.stdout ?? ''
     if (out) await $.fs.write(path, JSON.stringify({ at: now, out })).catch(() => undefined)
   }
   const was = diskKept
@@ -91,7 +93,7 @@ const tellDisk = async ($: EngineInterface, d: DiskKept, now: number) => {
   const told = dir ? Number(await $.fs.read(`${dir}/tidy/told`).catch(() => '0')) || 0 : 0
   if (now >= told && now - told < DISK_TOLD_EVERY) return
   if (dir) await $.fs.write(`${dir}/tidy/told`, String(now)).catch(() => undefined)
-  await alertPerson($, 'disk', 'Your Mac is almost out of disk space', `${gbText(d.free)} GB left. Free up space from the Claudopus panel.`, 'disk-low')
+  await alertPerson($, 'disk', `Your ${machineWord()} is almost out of disk space`, isWindows ? `${gbText(d.free)} GB left.` : `${gbText(d.free)} GB left. Free up space from the Claudopus panel.`, 'disk-low')
 }
 
 // The person's press: bin/tidy at once, with the download caches too; the block says it frees space until its run ends
@@ -117,12 +119,14 @@ const diskNeeds = ($: EngineInterface): Need[] => {
       id: 'disk-low',
       kind: 'disk',
       at: diskLowSince || d.at,
-      text: `Your Mac has ${gbText(d.free)} GB of disk space left. Free up space?`,
+      text: `Your ${machineWord()} has ${gbText(d.free)} GB of disk space left.${isWindows ? '' : ' Free up space?'}`,
       details: [
         isDiskFull(d) ? `Tasks' downloads, installs, builds, renders and browser commands wait until more than ${stop} GB is free.` : `Below ${stop} GB, tasks' downloads, installs, builds, renders and browser commands wait.`,
-        'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
+        isWindows
+          ? "Free up space isn't on Windows yet. Remove what tasks left behind yourself: their scratch folders, browser profiles and code copies whose work is merged."
+          : 'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
       ].join('\n\n'),
-      buttons: isFreeing ? [] : [{ key: `disk-free-${tidyPressedAt}-${presses}`, label: 'Free up space', onPress: () => void freeSpace($).catch(err => log($, `space not freed: ${String(err)}`)) }],
+      buttons: isFreeing || isWindows ? [] : [{ key: `disk-free-${tidyPressedAt}-${presses}`, label: 'Free up space', onPress: () => void freeSpace($).catch(err => log($, `space not freed: ${String(err)}`)) }],
       ...(isFreeing ? { line: 'Freeing up space' } : isDone && tidyLast ? { line: `Freed ${gbText(tidyLast.freed)} GB` } : {}),
     },
   ]
@@ -133,7 +137,7 @@ const CHROME_APP = /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome(?![\w ]
 const CHROME_IN_SCRIPT = /executablePath\s*[:=]\s*[^\n]*\/Google Chrome\.app\b|\bchannel\s*[:=]\s*['"]chrome(?:-beta|-dev|-canary)?['"]/
 const CHROME_COPIED = `Not run: this starts your own Google Chrome app without a window. Each start makes a copy of the whole app on the disk, and a start that is stopped leaves it there. Use Playwright's own Chromium instead (chromium.launch() with no channel or executablePath, after npx playwright install chromium), start it once for every page the script needs, and close it in a finally block.`
 const DISK_FULL = (what: string, d: DiskKept) =>
-  named(`Not run: the Mac has ${gbText(d.free)} GB of disk space left, and "${what}" can fill it. Remove what you made that is no longer needed (your scratch folder, temporary files), run heavy work in the cloud, and send the same command again once more than ${gbText(DISK_STOP)} GB is free. {Name} can free up space from the Claudopus panel.`)
+  named(`Not run: the ${machineWord()} has ${gbText(d.free)} GB of disk space left, and "${what}" can fill it. Remove what you made that is no longer needed (your scratch folder, temporary files), run heavy work in the cloud, and send the same command again once more than ${gbText(DISK_STOP)} GB is free.${isWindows ? '' : ' {Name} can free up space from the Claudopus panel.'}`)
 const turnLeftovers = async ($: EngineInterface, e: ToolCallInput) => {
   const input = e as { command?: unknown; description?: unknown }
   const command = String(input.command ?? '')

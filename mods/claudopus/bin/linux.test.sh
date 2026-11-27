@@ -1,10 +1,15 @@
 #!/bin/bash
 # Tests what stands in on Linux for what only a Mac has: bin/keyring's files for the keychain, bin/sips for macOS's sips, and
-# bin/notify with no desktop. Everything runs under a home folder of its own. On a Mac it is skipped: there the keychain and sips
-# are the Mac's own, which admin.test.sh and the plugin's tests cover.
+# bin/notify with no desktop. Everything runs under a home folder of its own. Windows takes the same ways in Git's bash, so it runs
+# there too, but for what a file's mode says: NTFS keeps none (the profile's own rights keep the files the person's). On a Mac it is
+# skipped: there the keychain and sips are the Mac's own, which admin.test.sh and the plugin's tests cover.
 #   bash mods/claudopus/bin/linux.test.sh
 set -u
-[ "$(uname)" = Linux ] || { echo "linux.test.sh: skipped, it tests what stands in for a Mac's own tools on Linux"; exit 0; }
+case $(uname -s) in
+  Linux) windows= ;;
+  MINGW* | MSYS* | CYGWIN*) windows=1 ;;
+  *) echo "linux.test.sh: skipped, it tests what stands in for a Mac's own tools on Linux and Windows"; exit 0 ;;
+esac
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-linux-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
@@ -28,7 +33,8 @@ ok 'nothing kept: get ends 1' '! "$k" get test-service one >/dev/null'
 ok 'a value is kept from stdin' 'printf "%s\n" "s3cret value" | "$k" set test-service one "Test"'
 ok 'and read back as it was' '[ "$("$k" get test-service one)" = "s3cret value" ]'
 ok 'has says it is kept' '"$k" has test-service one'
-ok 'its file only this user reads' '[ "$(stat -c %a "$store/test-service/one")" = 600 ] && [ "$(stat -c %a "$store")" = 700 ] && [ "$(stat -c %a "$store/test-service")" = 700 ]'
+if [ -z "$windows" ]; then ok 'its file only this user reads' '[ "$(stat -c %a "$store/test-service/one")" = 600 ] && [ "$(stat -c %a "$store")" = 700 ] && [ "$(stat -c %a "$store/test-service")" = 700 ]'
+else echo "ok - its file's mode skipped: NTFS keeps none, the profile's own rights keep it the person's"; fi
 ok 'a second value replaces it' 'printf "%s\n" other | "$k" set test-service one "Test" && [ "$("$k" get test-service one)" = other ]'
 printf '%s\n' two | "$k" set test-service two Test
 ok 'list names the accounts, never values' '[ "$("$k" list test-service | tr "\n" " ")" = "one two " ]'
@@ -64,12 +70,19 @@ ok 'a response instead of a key ends 4 and runs nothing' '[ "$said" = 4 ] && [ !
 ok 'and its words reach the caller, with nothing kept' 'grep -q "in their own words: it is in the other repo" "$tmp/err" && grep -q "NEW_KEY was not given" "$tmp/err" && ! "$k" has claudopus-secret NEW_KEY'
 ok 'and leaves nothing beside the requests' '[ -z "$(ls -A "$asked")" ]'
 
-# bin/notify with no desktop: 3, and its status says so
-ok 'notify with no desktop ends 3' '"$here/notify" --title T --text X; [ $? = 3 ]'
-ok 'notify --status says unavailable' '[ "$("$here/notify" --status)" = unavailable ]'
+# bin/notify with no desktop: 3, and its status says so. On Windows it is Windows PowerShell's toast, there on every Windows: its
+# status says on, and one sent is shown (0), or ends 3 where Windows shows none, as on a server with no one signed in
+if [ -z "$windows" ]; then
+  ok 'notify with no desktop ends 3' '"$here/notify" --title T --text X; [ $? = 3 ]'
+  ok 'notify --status says unavailable' '[ "$("$here/notify" --status)" = unavailable ]'
+else
+  ok "notify by Windows' toast ends 0, or 3 where none is shown, whatever its words hold" '"$here/notify" --title "T \"q\" <a> & '"'"'s" --text "X \$HOME %PATH%"; r=$?; [ $r = 0 ] || [ $r = 3 ]'
+  ok 'notify --status says on' '[ "$("$here/notify" --status)" = on ]'
+fi
 
 # bin/sips: the calls the mod makes, answered with ImageMagick where it is installed
-if command -v convert >/dev/null 2>&1 || command -v magick >/dev/null 2>&1; then
+# (convert alone is no ImageMagick: Windows has a convert of its own, for disks, so there it is magick only, as bin/sips takes it)
+if command -v magick >/dev/null 2>&1 || { [ -z "$windows" ] && command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; }; then
   im=$(command -v magick || command -v convert)
   "$im" -size 300x120 xc:red "$tmp/wide.png"
   "$im" -size 40x40 xc:none -fill blue -draw "circle 20,20 20,5" "$tmp/clear.png"

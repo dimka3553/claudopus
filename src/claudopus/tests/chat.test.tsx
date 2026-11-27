@@ -236,9 +236,10 @@ test("the work's rules name where the admin runner is, the one way work uses a M
   await $.prompt.submit({ text: 'clear the disk', wait: false, origin: composer })
 
   await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
-  expect(prompts[0]).toMatch(/an admin command runs through `\/\S*mods\/claudopus\/bin\/admin`/)
+  // (the plugin's folder, from a drive where the kit runs on Windows)
+  expect(prompts[0]).toMatch(/an admin command runs through `(?:[A-Za-z]:)?\/\S*mods\/claudopus\/bin\/admin`/)
   expect(prompts[0]).not.toContain('{admin}')
-  expect(prompts[0]).toMatch(/a file goes into a page through `\/\S*mods\/claudopus\/bin\/pane-file`/)
+  expect(prompts[0]).toMatch(/a file goes into a page through `(?:[A-Za-z]:)?\/\S*mods\/claudopus\/bin\/pane-file`/)
   expect(prompts[0]).not.toContain('{pane-file}')
 })
 
@@ -370,7 +371,7 @@ test("work reaches main only through the release runner: its rules name it, and 
   await $.session.start(start)
   await $.prompt.submit({ text: 'ship it', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
-  expect(prompts[0]).toMatch(/main is reached through `\/\S*mods\/claudopus\/bin\/release`/)
+  expect(prompts[0]).toMatch(/main is reached through `(?:[A-Za-z]:)?\/\S*mods\/claudopus\/bin\/release`/)
   expect(prompts[0]).not.toContain('{release}')
 
   const refused = [
@@ -518,6 +519,22 @@ test("tasks of one chat don't cross each other's files: each has its own scratch
   expect(told).toContain('./src/Button.tsx:1:1')
   expect(told).toContain('Your change may have caused it')
   expect(appended.filter(one => one.startsWith('a1: From Claudopus')).length).toBe(1)
+})
+
+// On Windows the engine's scratchpad is under C:\tmp (its "/tmp" taken as it is), with no uid: C:\tmp\claude-0\<project>\<session>,
+// which a task writes as C:\, C:/ or Git's bash's /c/; its top is refused as on a Mac, and another chat's scratchpad is not this one
+test("on Windows a chat's scratchpad is known however its path is written, and its top is refused to a task", async ($, on) => {
+  world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE' } as never)
+  const call = async (id: string, input: Record<string, unknown>) => ((await $.tool.call({ tool_use_id: id, agentId: 'a1', ...input } as never)) as { deny?: string }).deny
+  expect(await call('w1', { tool: 'Write', file_path: 'C:\\tmp\\claude-0\\C--Users-sam-repo\\engine-id\\scratchpad\\shot.mjs', content: 'x' })).toContain("the scratchpad's top is shared by every task of this chat")
+  expect(await call('w2', { tool: 'Write', file_path: 'C:/tmp/claude-0/C--Users-sam-repo/engine-id/scratchpad/page.png', content: 'x' })).toContain("the scratchpad's top")
+  expect(await call('w3', { tool: 'Bash', command: 'echo hi > /c/tmp/claude-0/C--Users-sam-repo/engine-id/scratchpad/shot.mjs' })).toContain("the scratchpad's top")
+  // its own folder there, and another chat's scratchpad, are written as they are
+  expect(await call('w4', { tool: 'Write', file_path: 'C:\\tmp\\claude-0\\C--Users-sam-repo\\engine-id\\scratchpad\\fix-the-nose\\shot.mjs', content: 'x' })).toBeUndefined()
+  expect(await call('w5', { tool: 'Write', file_path: 'C:\\tmp\\claude-0\\C--Users-sam-repo\\other-chat\\scratchpad\\shot.mjs', content: 'x' })).toBeUndefined()
 })
 
 test('a long build a task runs in the background that fails on another running task\'s half-done file tells both tasks as it ends, as a build held open does; one in its own worktree tells nobody', SLOW, async ($, on) => {

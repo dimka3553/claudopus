@@ -77,7 +77,7 @@ const toolHooks = (on: On) => {
     const within = input.area?.trim() ? await recallWithin($, input.area.trim()) : undefined
     if (within && !within.length) return { result: `No area or topic is named "${input.area}". The areas: ${(await readAreas($)).map(one => one.name).join(', ') || 'none yet'}.` }
     const isWithin = (line: string) => !within || within.some(one => line.startsWith(`${dir}/${one}`))
-    const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
+    const grep = async (phrase: string) => (await runOn($, ['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
     // The phrase as given; when nothing holds it whole, the lines that hold each of its words in any order, by their stems
     const words = recallStems(query)
     const said = (line: string) => line.slice(line.indexOf(':', dir.length + 1))
@@ -174,29 +174,31 @@ const toolHooks = (on: On) => {
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
       if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
       await log($, `key ${keyName} asked for with its box on ${card?.id ?? e.agentId}`)
-      return { result: named(KEY_ASK_SHOWN($.plugin.root, keyName, Boolean(same), like?.name)) }
+      return { result: named(KEY_ASK_SHOWN(pluginRoot($), keyName, Boolean(same), like?.name)) }
     }
     if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
-    const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
+    // (a folder as Windows writes it, C:\x, is kept with forward slashes, which every shell there takes)
+    const givenCwd = typeof input.cwd === 'string' ? slashed(input.cwd.trim()) : ''
+    const hasFolder = isAbsPath(givenCwd)
     // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
     // path relative to a folder never named is refused, since the person types it somewhere else
     if (given0 && !hasFolder && /^(?:\.{1,2}\/|[\w-][\w.-]*\/)/.test(given0)) {
       return { result: 'Not shown: the command starts with a path relative to a folder it does not name. Give `cwd`, the full path of the folder it runs in, or a full path, so it runs as it is wherever it is typed.' }
     }
-    const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(String(input.cwd))} && ${given0}` : given0
+    const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(givenCwd)} && ${given0}` : given0
     // Copy is for text pasted elsewhere: a sentence of instructions, or the ask's own words, gets none
     const given = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
     const isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given)
     const copy = command || (isProse || flat(text).includes(flat(given)) ? '' : given)
-    const folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd
+    const folder = hasFolder ? givenCwd : cwd
     // Every button is an answer that reaches the task: a choice that would only leave the question open is left out, as not
     // pressing does that
     const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].filter(one => !LEAVES_OPEN.test(plainWords(one))).slice(0, 4)
     // Pictures the ask is about, by full path; one that is not a picture file on this Mac is left out
-    const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : []).filter((one): one is string => typeof one === 'string').map(one => one.trim()).filter(one => IMAGE.test(one)))].slice(0, 8)
+    const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : []).filter((one): one is string => typeof one === 'string').map(one => slashed(one.trim())).filter(one => IMAGE.test(one)))].slice(0, 8)
     const pictures: string[] = []
-    for (const path of givenPics) if (path.startsWith('/') && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
+    for (const path of givenPics) if (isAbsPath(path) && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
@@ -230,8 +232,8 @@ const toolHooks = (on: On) => {
       await askAloud($, own, text).catch(err => log($, `answer not told: ${String(err)}`))
       return { result: `Shown inside the permission on your card, under ${who()}'s words. It keeps Allow and Don't allow until ${who()} presses one, and that press comes back to you as a message. Don't run it again before then. With nothing else to do, end your step.` }
     }
-    const releaseGiven = typeof input.release === 'string' ? input.release.trim() : ''
-    const release = releaseGiven.startsWith('/') && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
+    const releaseGiven = typeof input.release === 'string' ? slashed(input.release.trim()) : ''
+    const release = isAbsPath(releaseGiven) && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
     // A new question goes beside every other one still open on the card, each answered on its own. Only the asker's own earlier
     // question it now asks again takes its place: the same words, one the person replied to in words (asked again once acted on), or
     // what its result asked. Empty text clears the asker's own questions, never a helper's or its task's
@@ -256,8 +258,8 @@ const toolHooks = (on: On) => {
     if (wantsPicture && !isSameAsk && pictures[0]) await openQuestionPicture($, pictures[0])
     if (card) await askInChat($, card)
     // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
-    const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : isLinux ? ` Do not open a terminal for it: on Linux the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
-    const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `${choices.length ? `the buttons ${choices.join(', ')} and ` : ''}Answer in words`].filter(Boolean).join(' and ')
+    const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to ${thisMac()}, and nothing opens a terminal here.` : isLinux || isWindows ? ` Do not open a terminal for it: ${isWindows ? 'on Windows' : 'on Linux'} the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
+    const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar || isLinux || isWindows ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `${choices.length ? `the buttons ${choices.join(', ')} and ` : ''}Answer in words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
     // An ask that points at an explanation it does not carry: the person sees the ask before the work's report, so it is said back
     const long = text === asked ? '' : ` The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.`

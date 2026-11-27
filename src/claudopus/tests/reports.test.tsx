@@ -225,6 +225,27 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect((await after.findAll({ type: 'Button' })).some(b => /^dismiss-/.test(b.key ?? ''))).toBe(false)
 })
 
+// On Windows a result names its files as Windows writes them (C:\Users\sam\...), with forward slashes, or as Git's bash does
+// (/c/tmp/...): each is found, its picture copied beside the result and shown with it, kept with forward slashes
+test('on a Windows PC a result that names its pictures by Windows paths and by Git bash paths keeps a copy of each and shows them', async ($, on) => {
+  const { files, copied, clock } = world(on, { windows: true })
+  const NEW = '9999999999999'
+  for (const path of ['C:/Users/sam/Pictures/Revenue charts/chart.png', 'C:/tmp/claude-0/C--Users-sam-repo/s1/scratchpad/shot.png', 'C:/Users/sam/out/table.png']) (files.set(path, 'PNG'), files.set(`mtime:${path}`, NEW))
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'how is revenue doing', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Weekly revenue', prompt: 'how is revenue doing' } as never)
+  const report = 'Revenue rose 12% this week to $4,210.\n\nThe chart:\nC:\\Users\\sam\\Pictures\\Revenue charts\\chart.png\n\nThe screenshot: /c/tmp/claude-0/C--Users-sam-repo/s1/scratchpad/shot.png, and the table at `C:/Users/sam/out/table.png`.'
+  await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(10)
+  const metaPath = await until(async () => [...files.keys()].find(path => path.startsWith('C:/Users/sam/.claude/claudopus/reports/') && path.endsWith('/meta.json')))
+  const folder = (metaPath ?? '').replace('/meta.json', '')
+  const meta = JSON.parse(files.get(metaPath ?? '') ?? '{}') as { files: string[]; made?: { made: { path: string }[] }; folder: string }
+  expect(meta.files).toEqual(['chart.png', 'shot.png', 'table.png'])
+  expect(copied).toEqual([`${folder}/chart.png`, `${folder}/shot.png`, `${folder}/table.png`])
+  expect((meta.made?.made ?? []).map(one => one.path)).toEqual(['C:/Users/sam/Pictures/Revenue charts/chart.png', 'C:/tmp/claude-0/C--Users-sam-repo/s1/scratchpad/shot.png', 'C:/Users/sam/out/table.png'])
+  expect(meta.folder).toBe('C:/Users/sam/repo')
+})
+
 test('work started from a report keeps its own report linked to it, beside the older one on the same subject', async ($, on) => {
   const { files, clock, opened } = world(on)
   const old = { id: '20261101-0900-revenue', title: 'Revenue', subject: 'Revenue', at: 1_600_000_000_000, chat: 'c', chatId: 'c', folder: '/repo', gist: 'Revenue was flat.', files: [], agent: '' }

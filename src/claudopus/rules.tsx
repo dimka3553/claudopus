@@ -10,7 +10,11 @@ const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
-const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
+const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus[\\/]keyring\b/
+// On Windows also what reads the system's own saved passwords: its Credential Manager (cmdkey, vaultcmd, PowerShell's
+// Get-StoredCredential, CredRead, the PasswordVault) and what opens a value Windows locked to this user (ProtectedData)
+const KEYCHAIN_READ_WINDOWS = /\bcmdkey(?:\.exe)?\s+\/+list\b|\bvaultcmd\b|\bGet-StoredCredential\b|\bCredRead\w*|\bPasswordVault\b|\bProtectedData\b/i
+const isKeychainRead = (text: string) => KEYCHAIN_READ.test(text) || (isWindows && KEYCHAIN_READ_WINDOWS.test(text))
 const NO_READ = 'A saved key or password is never read or printed. Use it as an environment variable through the secret runner the task rules name; it hides the value in anything the command prints.'
 // A push or merge to main or master by hand: git's own push naming main or master, a push that skips the repo's hooks, the release
 // runner's own pass given by hand, or a pull request merged on GitHub. The command is read as the shell splits it, so words inside
@@ -41,7 +45,7 @@ const pushesMain = (command: string): boolean =>
     // What runs a command it is handed: env and its settings, command, sudo, nohup, time, exec, and a shell's -c
     for (;;) {
       while (i < words.length && /^\w+=/.test(words[i]!)) if (/^RELEASE_PUSH=/.test(words[i++]!)) return true
-      const head = (words[i] ?? '').split('/').pop() ?? ''
+      const head = progName(words[i] ?? '')
       if (['env', 'command', 'sudo', 'nohup', 'time', 'exec'].includes(head)) {
         i++
         // a flag and, for those that take one, its value: env -u NAME, -C dir, -S text, -P path; sudo -u user and the like
@@ -49,7 +53,7 @@ const pushesMain = (command: string): boolean =>
         while (head === 'env' && i < words.length && /^\w+=/.test(words[i]!)) if (/^RELEASE_PUSH=/.test(words[i++]!)) return true
       } else break
     }
-    const tool = (words[i] ?? '').split('/').pop()
+    const tool = progName(words[i] ?? '')
     if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') return pushesMain(words[i + 2] ?? '')
     if (tool === 'gh') return (words[i + 1] === 'pr' && words[i + 2] === 'merge') || (words[i + 1] === 'api' && words.slice(i + 2).some(one => /\/pulls\/\d+\/merge\b/.test(one)))
     if (tool !== 'git') return false
@@ -73,11 +77,7 @@ const pushesMain = (command: string): boolean =>
 // that commit, and Update called it a test copy
 const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch', 'rm', 'mv', 'symbolic-ref']
 const changesOf = (command: string, start: string, home: string): string[] => {
-  const at = (here: string, path: string) =>
-    (path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home).startsWith('/') ? path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home) : `${here}/${path}`)
-      .split('/')
-      .reduce<string[]>((kept, part) => (part === '..' ? kept.slice(0, Math.max(1, kept.length - 1)) : part === '.' || (part === '' && kept.length) ? kept : [...kept, part]), [])
-      .join('/') || '/'
+  const at = (here: string, path: string) => pathOf(path, home, here)
   let here = start
   let before = start
   // A copy of one output onto another (2>&1, >&2) is taken out first, and &> made a plain >, as the shell splits at their &
@@ -90,10 +90,10 @@ const changesOf = (command: string, start: string, home: string): string[] => {
       .filter(Boolean)
     let i = commandAt(words)
     // env -C <folder> or --chdir=<folder>: commandAt stops at -C's folder, as it takes no value for env's flags
-    const isEnv = words.slice(0, i).some(one => one.split('/').pop() === 'env')
+    const isEnv = words.slice(0, i).some(one => progName(one) === 'env')
     let envFolder = isEnv ? words.slice(0, i).find(one => one.startsWith('--chdir='))?.slice(8) : undefined
     if (isEnv && (words[i - 1] === '-C' || words[i - 1] === '--chdir')) (envFolder = words[i]), (i += 1 + commandAt(words.slice(i + 1)))
-    const tool = (words[i] ?? '').split('/').pop()
+    const tool = progName(words[i] ?? '')
     if (tool === 'cd' || tool === 'pushd') {
       const to = words.slice(i + 1).find(one => !one.startsWith('-') || one === '-')
       const next = to === undefined ? home : to === '-' ? before : at(here, to)
@@ -164,14 +164,15 @@ const commandAt = (words: string[]) => {
   let i = 0
   for (;;) {
     while (i < words.length && /^\w+=/.test(words[i]!)) i++
-    const head = (words[i] ?? '').split('/').pop() ?? ''
+    const head = progName(words[i] ?? '')
     if (!BOX_WRAPPERS.includes(head)) return i
     i++
     // its own flags and numbers (nice's -n 5, timeout's duration), and the value sudo's -u and the like take
     while (i < words.length && (words[i]!.startsWith('-') || /^\d[\d.]*[smhd]?$/.test(words[i]!))) i += head === 'sudo' && /^-[ugCchpUrt]$/.test(words[i]!) ? 2 : 1
   }
 }
-const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
+// (on Windows a backslash parts a path's names, as C:\Users\x\.claude is written, rather than being taken out with the quotes)
+const BOX_WORDS = (text: string) => (isWindows ? text.replace(/\\/g, '/') : text).replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
 const wordIs = (word: string, name: string) => {
   // A list's brackets around a word, as a program's code writes it, are not part of it
   const bare = word.replace(/^\[+(?=[^\]]*$)/, '').replace(/(?<=^[^[]*)\]+$/, '')
@@ -199,7 +200,7 @@ const touchesBoxes = (text: string): boolean => {
   const kept = shellWords(text.toLowerCase())
     .map(words => {
       const part = words.join(' ')
-      if (!BOX_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+      if (!BOX_READERS.includes(progName(words[commandAt(words)] ?? ''))) return part
       return part.includes('>') ? part.slice(part.indexOf('>')) : ''
     })
     .join('\n')
@@ -209,6 +210,8 @@ const touchesBoxes = (text: string): boolean => {
 // path, what a shell, source or another language's program is handed to run or reads on its stdin, and a file cat pipes into a
 // shell. The system's own programs are not read
 const RUNNERS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'source', '.', 'python', 'python3', 'node', 'bun', 'deno', 'perl', 'ruby', 'php', 'osascript', 'swift', 'tsx', 'ts-node']
+// and on Windows its own: PowerShell's -File, cmd's /c (written //c in Git's bash), Windows Script Host's script, Python's launcher
+const WINDOWS_RUNNERS = ['powershell', 'pwsh', 'cmd', 'wscript', 'cscript', 'py']
 const filesRun = (command: string, home: string, from: string): string[] => {
   let folder = from
   const found: string[] = []
@@ -216,9 +219,23 @@ const filesRun = (command: string, home: string, from: string): string[] => {
   parts.forEach((words, n) => {
     const i = commandAt(words)
     const head = words[i] ?? ''
-    const name = head.split('/').pop() ?? ''
+    const name = progName(head)
     if ((name === 'cd' || name === 'pushd') && words[i + 1]) return void (folder = pathOf(words[i + 1]!, home, folder))
     const take = (path: string) => found.push(pathOf(path, home, folder))
+    if (isWindows && WINDOWS_RUNNERS.includes(name)) {
+      const rest = words.slice(i + 1)
+      if (name === 'cmd') {
+        const c = rest.findIndex(word => /^\/\/?[ck]$/i.test(word))
+        if (c >= 0) found.push(...filesRun(rest.slice(c + 1).join(' '), home, folder))
+      } else if (name === 'powershell' || name === 'pwsh') {
+        const f = rest.findIndex(word => /^-(?:f|file)$/i.test(word))
+        if (f >= 0 && rest[f + 1]) take(rest[f + 1]!)
+      } else {
+        const at = rest.findIndex(word => !word.startsWith('-') && !word.startsWith('//'))
+        if (at >= 0) take(rest[at]!)
+      }
+      return
+    }
     if (RUNNERS.includes(name) || /^python3(?:\.\d+)?$/.test(name)) {
       const rest = words.slice(i + 1).filter(word => word !== 'run')
       const fed = rest.findIndex(word => word.startsWith('<'))
@@ -230,23 +247,41 @@ const filesRun = (command: string, home: string, from: string): string[] => {
       if (['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'].includes(name) && at >= 0 && rest[at - 1] === '-c') found.push(...filesRun(rest[at]!, home, folder))
       // Nothing to run named: what it reads is what the command before it gives, such as a file cat prints
       const before = parts[n - 1] ?? []
-      if (at < 0 && fed < 0 && (before[commandAt(before)] ?? '').split('/').pop() === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
+      if (at < 0 && fed < 0 && progName(before[commandAt(before)] ?? '') === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
       return
     }
-    if (head.includes('/') && !/^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head)) take(head)
+    // (on Windows a path by either separator, and Windows' own folder is the system's too)
+    const isSystem = /^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head) || (isWindows && /^[A-Z]:\/Windows\//i.test(pathOf(head, home, folder)))
+    if ((head.includes('/') || (isWindows && head.includes('\\'))) && !isSystem) take(head)
   })
   return found
 }
-// A path as written, with ~ and $HOME read and . and .. taken out, against the folder given
+// A path as written, with ~ and $HOME read and . and .. taken out, against the folder given. On Windows the profile's own names are
+// home too ($USERPROFILE, %USERPROFILE%, PowerShell's $env:USERPROFILE), and the path is Windows' own (windowsPath): C:/Users/x
+// whether written C:\Users\x or /c/Users/x as Git's bash names it, its drive kept
+const HOME_WORD = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/
+const WINDOWS_HOME_WORD = /^(?:~|\$HOME|\$\{HOME\}|\$USERPROFILE|\$\{USERPROFILE\}|%USERPROFILE%|\$env:USERPROFILE)(?=[\\/]|$)/i
+const windowsPath = (path: string) => {
+  const forward = path.replace(/\\/g, '/')
+  const m = /^(?:([A-Za-z]):|\/([A-Za-z]))(?=\/|$)(.*)$/.exec(forward)
+  return m ? `${(m[1] ?? m[2] ?? '').toUpperCase()}:${m[3] || '/'}` : forward
+}
 const pathOf = (path: string, home: string, folder: string) => {
-  const full = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
+  const full = isWindows ? windowsPath(path.replace(WINDOWS_HOME_WORD, home)) : path.replace(HOME_WORD, home)
+  const whole = isWindows ? (isAbsPath(full) ? full : `${windowsPath(folder)}/${full}`) : full.startsWith('/') ? full : `${folder}/${full}`
+  const drive = isWindows ? (/^[A-Z]:/.exec(whole)?.[0] ?? '') : ''
   const parts: string[] = []
-  for (const part of (full.startsWith('/') ? full : `${folder}/${full}`).split('/')) {
+  for (const part of whole.slice(drive.length).split('/')) {
     if (part === '..') parts.pop()
     else if (part && part !== '.') parts.push(part)
   }
-  return `/${parts.join('/')}`
+  return `${drive}/${parts.join('/')}`
 }
+// A program's name as a command names it: the last part of its path; on Windows by either separator, in small letters (BASH.EXE is
+// bash there) and without .exe
+const progName = (word: string) => (isWindows ? (word.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.exe$/, '') : (word.split('/').pop() ?? ''))
+// A runner's path as a command is told it: in double quotes where it holds a space, as a profile on Windows often does
+const runnerAt = (root: string, name: string) => (/\s/.test(root) ? `"${root}/bin/${name}"` : `${root}/bin/${name}`)
 // Files of the memory folder that only the mod writes: what chats share and answer one another through (live/), every task's ledger
 // and the instructions a task carrying one on is given (ledger/), the update's lock
 // and stamps, the reloads' marks; and the person's own settings and texts there (config.json, rules/, roles/), which work changes only
@@ -267,7 +302,7 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
   const kept = shellWords(text.toLowerCase())
     .map(words => {
       const part = words.join(' ')
-      if (!MEMORY_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+      if (!MEMORY_READERS.includes(progName(words[commandAt(words)] ?? ''))) return part
       return part.includes('>') ? part.slice(part.indexOf('>')) : ''
     })
     .join('\n')

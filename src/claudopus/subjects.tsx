@@ -46,7 +46,11 @@ const pageOf = (name: string) => `${dir}/streams/${slug(name)}.md`
 const historyOf = (name: string) => `${dir}/streams/${slug(name)}.log.md`
 // A topic in a temporary folder or inside the memory folder (where test runs and notes live) is a test's, not the person's work:
 // it is kept out of the index every chat is given
-const isScratchTopic = (repo: string) => /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
+// (on Windows the engine's own C:/tmp and the person's %TEMP% too, a folder named with either slash)
+const isScratchTopic = (given: string) => {
+  const repo = slashed(given)
+  return /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || /^[A-Za-z]:\/(?:tmp|Users\/[^/]+\/AppData\/Local\/Temp)\//i.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
+}
 // A history entry: dated, headed by who added it
 const historyEntry = (at: number, by: string, text: string) => `## ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} ${oneLine(by) || 'A task'}\n\n${hideKeys(text.trim())}\n\n`
 // An entry added to a topic's history; one grown past HISTORY_MOST has its older half moved to streams/<slug>.log.<n>.md, once,
@@ -128,16 +132,16 @@ const shortenPages = async ($: EngineInterface) => {
   if (!grown.length) return
   const lock = `${dir}/locks/pages`
   const now = await $.clock.now()
-  const take = () => $.process.run(['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
+  const take = () => runOn($, ['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
   if (!(await take())) {
     if (now - Number((await readOr($, `${lock}/at`)) || now) < SHORTEN_STALE) return
-    await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+    await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
     if (!(await take())) return
   }
   try {
     for (const one of grown) await shortenPage($, one.name).catch(err => log($, `page of ${one.name} not made short: ${String(err)}`))
   } finally {
-    await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+    await runOn($, ['rm', '-rf', lock]).catch(() => undefined)
   }
 }
 
@@ -157,7 +161,7 @@ const tidyIndex = async ($: EngineInterface) => {
       for (const one of await $.fs.list(`${dir}/streams`).catch(() => [])) {
         if (one.name !== `${slug(from)}.md` && !one.name.startsWith(`${slug(from)}.log.`)) continue
         await $.fs.write(`${dir}/streams/${slug(to)}${one.name.slice(slug(from).length)}`, await readOr($, `${dir}/streams/${one.name}`))
-        await $.process.run(['rm', '-f', `${dir}/streams/${one.name}`]).catch(() => undefined)
+        await runOn($, ['rm', '-f', `${dir}/streams/${one.name}`]).catch(() => undefined)
       }
       for (const [key, value] of Object.entries(aliases)) if (value === from) aliases[key] = to
       aliases[slug(from)] = to

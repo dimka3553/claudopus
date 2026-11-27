@@ -20,7 +20,7 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
   const lock = `${dir}/update.lock`
   const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
   const take = async () =>
-    (await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+    (await runOn($, ['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
   if (!(await take())) {
     const now = await $.clock.now()
     const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
@@ -28,24 +28,24 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
     if (now - at < UPDATE_LOOK && at - now <= LOCK_SKEW) return UPDATE_BUSY
     const seen = await readOr($, lock)
     const aside = `${lock}.${token.split(' ')[1]}`
-    if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
+    if ((await runOn($, ['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
     // Another chat took the stale lock over in between: what was moved is its fresh lock, put back where it was
-    if ((await readOr($, aside)) !== seen) return ((await $.process.run(['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
-    await $.process.run(['rm', '-f', aside]).catch(() => undefined)
+    if ((await readOr($, aside)) !== seen) return ((await runOn($, ['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
+    await runOn($, ['rm', '-f', aside]).catch(() => undefined)
     if (!(await take())) return UPDATE_BUSY
   }
   try {
     return await act()
   } finally {
     // Only this chat's own lock is removed: one taken over meanwhile is the other chat's
-    if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
+    if ((await readOr($, lock)) === token) await runOn($, ['rm', '-f', lock]).catch(() => undefined)
   }
 }
 // The Mac, as one step needs it
 const lookIo = ($: EngineInterface): LookIo => ({
   read: path => readOr($, path),
   write: (path, text) => $.fs.write(path, text),
-  run: (argv, timeoutMs) => $.process.run(argv, { timeoutMs }),
+  run: (argv, timeoutMs) => runOn($, argv, { timeoutMs }),
   page: () =>
     Promise.race([
       $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
@@ -59,12 +59,38 @@ const lookIo = ($: EngineInterface): LookIo => ({
 // (seen on Linux, in tmux started over ssh) has no ~/.local/bin on its PATH, else claude on the PATH
 const engineOf = async ($: EngineInterface) => {
   const named = await $.env.get('CLAUDE_CODE_EXECPATH')
-  if (named) return named
+  if (named) return slashed(named)
+  if (isWindows) return (await windowsEngine($)) || 'claude'
   // The PATH first, as the shell would find it, so an install by npm or another copy earlier on it is still the one used
   const onPath = ((await $.env.get('PATH')) ?? '').split(':').filter(one => one.startsWith('/')).map(one => `${one.replace(/\/+$/, '')}/claude`)
-  for (const one of [...onPath, `${(await $.env.get('HOME')) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
+  for (const one of [...onPath, `${(await homeFolder($)) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
     if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
   return 'claude'
+}
+// The Claude app's own data folders, those that are there: on a Mac ~/Library/Application Support/Claude, on Windows those
+// windowsAppData finds (hooks/update.ts)
+const folderIo = ($: EngineInterface) => ({ exists: (path: string) => $.fs.exists(path).catch(() => false), list: (path: string) => $.fs.list(path) })
+const windowsPlaces = async ($: EngineInterface) => {
+  const read = (value: string | undefined) => (value ?? '').trim()
+  return {
+    path: read(await $.env.get('PATH').catch(() => undefined)) || read(await $.env.get('Path').catch(() => undefined)),
+    profile: await homeFolder($),
+    appData: read(await $.env.get('APPDATA').catch(() => undefined)),
+    localAppData: read(await $.env.get('LOCALAPPDATA').catch(() => undefined)),
+  }
+}
+const appDataFolders = async ($: EngineInterface) => (isWindows ? windowsAppData(folderIo($), await windowsPlaces($)) : [`${await homeFolder($)}/Library/Application Support/Claude`])
+// On Windows the engine as windowsEngine finds it (hooks/update.ts)
+const windowsEngine = async ($: EngineInterface) => windowsEngineOf(folderIo($), await windowsPlaces($))
+// Claude Code's own records name folders as Windows writes them there (C:\Users\...): read with forward slashes, as the mod keeps
+// paths. Elsewhere, and in what is written back, they stay as they are
+const recordRead = (text: string) => {
+  if (!isWindows || !text.includes('\\')) return text
+  try {
+    return JSON.stringify(JSON.parse(text, (_, value: unknown) => (typeof value === 'string' ? slashed(value) : value)))
+  } catch {
+    return text
+  }
 }
 
 // ---- Looking: the version page only ----
@@ -154,11 +180,11 @@ const pageFor = async ($: EngineInterface, version: string) => {
 let sourceKnown: { src: Source; cannot?: { what: string; why: string }; where: string } | undefined
 const knowSource = async ($: EngineInterface, isAgain = false) => {
   if (sourceKnown && !isAgain) return sourceKnown
-  const root = $.plugin.root.replace(/\/+$/, '')
+  const root = pluginRoot($).replace(/\/+$/, '')
   const from = installedFrom(root)
   const io = lookIo($)
   const plugins = from?.plugins ?? dir.replace(/\/claudopus$/, '/plugins')
-  const known = await readOr($, `${plugins}/known_marketplaces.json`)
+  const known = recordRead(await readOr($, `${plugins}/known_marketplaces.json`))
   const entryOf = (name: string) => {
     try {
       return (JSON.parse(known) as Record<string, { source?: { source?: string; path?: string; repo?: string }; installLocation?: string }>)?.[name]
@@ -166,7 +192,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return undefined
     }
   }
-  const installed = await readOr($, `${plugins}/installed_plugins.json`)
+  const installed = recordRead(await readOr($, `${plugins}/installed_plugins.json`))
   const done = (one: NonNullable<typeof sourceKnown>) => (sourceKnown = one)
   if (from) {
     const entry = entryOf(from.marketplace)
@@ -178,7 +204,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
         cannot: ready.ok ? undefined : { what: `Claude Code's copy is made from ${ready.what}`, why: ready.why },
-        where: ready.ok ? "Claude Code's copy of the released code on this Mac" : `Claude Code's copy of ${ready.what}`,
+        where: ready.ok ? `Claude Code's copy of the released code on ${thisMac()}` : `Claude Code's copy of ${ready.what}`,
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -197,7 +223,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
     return done({ src: { kind: 'none', why: 'its marketplace is not one Claudopus can check a download in' }, cannot: { what: 'This chat runs a copy of Claudopus installed another way', why: 'update it with /plugin in Claude Code' }, where: "Claude Code's installed copy" })
   }
   // Run from a folder of the code: the folder is what a release has to reach
-  const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim()
+  const top = slashed((await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim())
   const ready = top ? await folderReady(io, top) : ({ ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" } as const)
   const marketplace = folderMarketplace(known, root)
   const scopes = (() => {
@@ -208,11 +234,13 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
     }
   })()
   const scope = scopes.includes('user') ? 'user' : (scopes.find(one => typeof one === 'string' && /^(user|project|local)$/.test(one)) as string | undefined)
-  const sub = top && root.startsWith(`${top}/`) ? root.slice(top.length + 1) : 'mods/claudopus'
+  // (Windows names a folder the same in capitals or not)
+  const isUnder = isWindows ? root.toLowerCase().startsWith(`${top.toLowerCase()}/`) : root.startsWith(`${top}/`)
+  const sub = top && isUnder ? root.slice(top.length + 1) : 'mods/claudopus'
   return done({
     src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
     cannot: ready.ok ? undefined : { what: `This chat runs ${ready.what}`, why: ready.why },
-    where: ready.ok ? 'the released code on this Mac' : ready.what,
+    where: ready.ok ? `the released code on ${thisMac()}` : ready.what,
   })
 }
 
@@ -336,7 +364,7 @@ const installStep = async ($: EngineInterface, version: string, commit: string) 
   const beat = (): unknown =>
     $.clock.after(20_000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())))
   beat()
-  const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false))
+  const got = await install(lookIo($), src, page, commit, await engineOf($), isWindows).finally(() => (isOn = false))
   const at = await $.clock.now()
   Object.assign(stepSaid, { version, detail: '', dirty: got.ok && got.dirty })
   if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
@@ -371,7 +399,7 @@ const isDownloadHeld = async ($: EngineInterface, src: Source, steps: Steps) => 
   const key = `${src.repo}|${steps.commit}|${steps.tree}`
   const known = heldChecked.get(key)
   if (known !== undefined) return known
-  const git = (args: string[]) => $.process.run(['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+  const git = (args: string[]) => runOn($, ['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
   const held = (await git(['rev-parse', '--verify', '-q', 'refs/claudopus/update^{commit}'])).stdout.trim()
   const tree = held === steps.commit ? (await git(['rev-parse', '--verify', '-q', `${steps.commit}:${src.sub}`])).stdout.trim() : ''
   const isHeld = tree === steps.tree
@@ -517,7 +545,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus v${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = `Install puts v${v} on this Mac in place of v${loaded}. Then type /reload-plugins to use it.`
+    const replaces = `Install puts v${v} on ${thisMac()} in place of v${loaded}. Then type /reload-plugins to use it.`
     return box(
       'downloaded',
       [title(`Claudopus v${v} downloaded`), line('replaces', replaces), track(1)],
@@ -561,18 +589,18 @@ const configUpdateBox = async ($: EngineInterface, ui: Ui) => {
 // run from a folder of its code, the version that folder has now, which a reload loads
 const installedNow = async ($: EngineInterface) => (await installedCopy($))?.version ?? ''
 const installedCopy = async ($: EngineInterface) => {
-  const from = installedFrom($.plugin.root)
+  const from = installedFrom(pluginRoot($))
   if (!from) {
     // Only a main checkout (its .git a folder, not a worktree's file) follows its folder: a worktree's version rises as work merges
     // main or a release numbers it, mid-build, and a chat loaded from it is reloaded by hand
-    const root = $.plugin.root.replace(/\/+$/, '')
+    const root = pluginRoot($).replace(/\/+$/, '')
     if (!(await readOr($, `${root}/../../.git/HEAD`)).trim()) return undefined
     const version = versionOnPage(await readOr($, `${root}/.claude-plugin/plugin.json`))
     return version ? { version, installPath: root } : undefined
   }
-  const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
+  const installed = recordRead(await readOr($, `${from.plugins}/installed_plugins.json`))
   const id = `${from.plugin}@${from.marketplace}`
-  return copyOf(installed, id, $.plugin.root, cwd)
+  return copyOf(installed, id, pluginRoot($), cwd)
 }
 
 // A /reload-plugins run from afar loads the new copy but leaves the old one's timers running in the same chat, and copies before
@@ -588,7 +616,7 @@ let heldAt = -Infinity
 let heldRecord = 0
 const holdOldCopies = async ($: EngineInterface) => {
   if (!dir) return
-  const from = installedFrom($.plugin.root)
+  const from = installedFrom(pluginRoot($))
   const record = from ? ((await $.fs.stat(`${from.plugins}/installed_plugins.json`).catch(() => undefined))?.mtimeMs ?? 0) : 0
   const due = await $.clock.now()
   if (record === heldRecord && due >= heldAt && due - heldAt < HOLD_WHOLE - 500) return
@@ -664,13 +692,11 @@ const playUpdated = async ($: EngineInterface, version: string) => {
   }
   if (config.sound === false) return
   const played = `${dir}/updated/${version}`
-  const made = await $.process
-    .run(['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played])
-    .catch(() => ({ exitCode: 1 }))
+  const made = await runOn($, ['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played]).catch(() => ({ exitCode: 1 }))
   if (made.exitCode !== 0) return
   // A sound that could not play leaves the version free for the next chat that moves to it
   await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {
-    await $.process.run(['rm', '-f', played]).catch(() => undefined)
+    await runOn($, ['rm', '-f', played]).catch(() => undefined)
     await log($, `updated sound not played: ${String(err)}`)
   })
 }

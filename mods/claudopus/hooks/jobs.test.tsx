@@ -336,6 +336,10 @@ test('a row is named by what it does and its kind by its own program; time left 
   expect(labelOf('cd /w/review3 && ~/.venvs/ct/bin/python rc.py > rc.log 2>&1', 'cd /w/review3 && ~/.venvs/ct/bin/python rc.py > rc.log 2>&1')).toBe('python rc.py')
   expect(commandName('S=/x && cd $S; CUDA=1 nohup python3 -m train --epochs 4 > t.log 2>&1 & echo $!')).toBe('python3 train')
   expect(labelOf('Redraw all pictures', 'bash figs.sh')).toBe('Redraw all pictures')
+  // On Windows a program and its file by their whole Windows paths are named the same, without folders or .exe
+  expect(commandName('"C:\\Program Files\\Python312\\python.exe" C:\\Users\\sam\\repo\\train.py --epochs 4')).toBe('python train.py')
+  expect(labelOf('', 'C:/Users/sam/.venvs/ct/Scripts/python.exe C:/w/rc.py')).toBe('python rc.py')
+  expect(jobKindOf('"C:\\Windows\\System32\\curl.exe" -L -o a.zip https://e.com/a.zip', 'Fetch the archive')).toBe('download')
   // A wait led by `cd <folder>;` is a wait, named by what it waits for
   expect(waitOf('cd /private/tmp/s; until grep -qE "exit [0-9]" vsd-sheet.log && grep -qE "exit [0-9]" idc-thin.log; do sleep 15; done; tail -2 vsd-sheet.log idc-thin.log; ls /d/sheets/')).toEqual({ what: 'exit [0-9] in vsd-sheet.log', file: '/private/tmp/s/vsd-sheet.log' })
   // Time left, as each tool says it

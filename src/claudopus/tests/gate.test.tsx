@@ -971,3 +971,26 @@ test("a short answer the person types in the chat is their press on the newest b
   expect(await list.find({ type: 'Text', text: 'Claude Code blocked this command. Run it anyway?' })).toBeDefined()
   await list.unmount()
 })
+
+// On Windows there is no sudo for bin/admin to hand a command to: one for this PC is refused at once, saying how to run it, by any
+// spelling of the runner's path (backslashes, the profile's drive, Git's bash.exe), with nothing held and no grant; one for a Mac
+// reached over SSH waits for the press as anywhere
+test('on Windows an admin command for this PC is refused at once, saying to run it in a terminal opened as administrator; one for another Mac is asked', async ($, on) => {
+  const { press, bash, held, files } = await gated($, on, {}, { windows: true })
+  let n = 0
+  for (const command of [
+    `${ADMIN} here 'id -u'`,
+    `"C:\\Users\\sam\\.claude\\plugins\\cache\\claudopus\\claudopus\\0.2.300\\bin\\admin" here 'id -u'`,
+    `/c/Users/sam/.claude/plugins/cache/claudopus/claudopus/0.2.300/bin/admin here 'id -u'`,
+    `"C:/Program Files/Git/bin/bash.exe" -c "${ADMIN} here 'id -u'"`,
+  ]) {
+    const r = (await bash(`win${(n += 1)}`, command)) as { deny?: string }
+    expect(r.deny).toContain('Windows has no admin runner')
+    expect(r.deny).toContain('in a terminal opened as administrator')
+  }
+  expect([...files.keys()].filter(path => path.includes('/admin-grants/'))).toEqual([])
+  const afar = bash('win-m4', `${ADMIN} m4 'id -u'`)
+  expect(await held('win-m4')).toBeDefined()
+  await press('gate-win-m4-0-deny')
+  expect(((await afar) as { deny?: string }).deny).toContain("pressed Don't allow")
+})

@@ -17,15 +17,17 @@ const lookAfar = async ($: EngineInterface, now: number) => {
   if (now - afarAt < every) return false
   afarAt = now
   const failed = { exitCode: -1, stdout: '' }
+  // On Windows no chat of this PC is looked for: what the look finds are chats another computer's app runs here over SSH, which
+  // reach a Mac or Linux, and Git's ps never sees an engine there. The app's log is in its data folder there
   const path = (await usagePathOf($)).replace(/usage\.json$/, 'afar.json')
   let kept = parsedOr<AfarKept>(await $.fs.read(path).catch(() => ''), {})
   if (!kept || typeof kept !== 'object') kept = {}
   if (!(kept.here && typeof kept.at === 'number' && now >= kept.at && now - kept.at < every - 1000)) {
     await $.fs.write(path, JSON.stringify({ ...kept, at: now })).catch(() => undefined)
-    const ran = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-    const stat = await $.fs.stat(`${(await $.env.get('HOME')) ?? ''}/Library/Logs/Claude/main.log`).catch(() => undefined)
+    const ran = isWindows ? failed : await runOn($, ['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+    const stat = isWindows ? undefined : await $.fs.stat(`${await homeFolder($)}/Library/Logs/Claude/main.log`).catch(() => undefined)
     const log = stat?.mtimeMs ? `${stat.size}:${stat.mtimeMs}` : ''
-    const app = log && log === kept.log && typeof kept.app === 'string' ? kept.app : (await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)).stdout
+    const app = log && log === kept.log && typeof kept.app === 'string' ? kept.app : (await runOn($, isWindows ? ['sh', '-c', APP_LOG_LOOK_IN, 'sh', ...(await appLogFolders($))] : ['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)).stdout
     kept = { at: now, here: { exitCode: ran.exitCode, stdout: ran.stdout }, app, log }
     await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
   }
@@ -42,6 +44,13 @@ const lookAfar = async ($: EngineInterface, now: number) => {
   stuckAt = stuck
   return isChanged
 }
+// The Claude app's log folders on Windows, as each of its builds keeps its data: the installer's in APPDATA, another's in
+// LOCALAPPDATA, the Store's in its package's own copy of APPDATA
+const appLogFolders = async ($: EngineInterface) => {
+  const roaming = slashed((await $.env.get('APPDATA').catch(() => undefined)) ?? '')
+  const local = slashed((await $.env.get('LOCALAPPDATA').catch(() => undefined)) ?? '')
+  return [...(roaming ? [`${roaming}/Claude/logs`] : []), ...(local ? [`${local}/Claude-Data/logs`, `${local}/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/logs`] : [])]
+}
 // A chat's name for the panel: its own title, else the one this Mac's app gives it, else a word
 const offName = (one: Off) => one.title || appTitles.get(one.chat) || (one.chat === 'new' ? 'A chat just started' : 'A chat')
 
@@ -51,8 +60,8 @@ const afarPart = (ui: Ui) => {
   if (!stuckAt && !offChats.length) return null
   const there = macs.length === 1 ? macName(macs[0] ?? '') : 'the Mac it runs chats on over SSH'
   const lines = [
-    ...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} this Mac's Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
-    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
+    ...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} ${thisMac()}'s Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
+    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ` on ${thisMac()}`} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
   ]
   return (
     <ui.Box key="afar" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -73,7 +82,7 @@ const AFAR_FRESH = 3 * 60_000
 const toldDir = () => `${liveDir()}/${MACS}/told`
 const tellOnce = async ($: EngineInterface, key: string, tell: () => Promise<unknown>) => {
   const path = `${toldDir()}/${key.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 150)}`
-  const r = await $.process.run(['sh', '-c', 'mkdir -p "$1" && mkdir "$2" 2>/dev/null', 'sh', toldDir(), path]).catch(() => ({ exitCode: -1 }))
+  const r = await runOn($, ['sh', '-c', 'mkdir -p "$1" && mkdir "$2" 2>/dev/null', 'sh', toldDir(), path]).catch(() => ({ exitCode: -1 }))
   if (r.exitCode === 0) await tell().catch(err => log($, `${key} not told: ${String(err)}`))
 }
 let toldSwept = -Infinity
@@ -81,7 +90,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
   if (!list.length) return
   if (now - toldSwept > 3_600_000) {
     toldSwept = now
-    await $.process.run(['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined)
+    await runOn($, ['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined)
   }
   let config: { notifications?: unknown } = {}
   try {

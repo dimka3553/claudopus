@@ -915,7 +915,7 @@ const panelHooks = (on: On) => {
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {jobLines(t, `twig-lines-${key}`, job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            {/* A press shows its output whole in a Terminal window, where this Mac can open one */}
+            {/* A press opens its log in a tab of the panel */}
             {isMore(job) && owner ? (
               <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
             ) : canOpenJob(job) ? (

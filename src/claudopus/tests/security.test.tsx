@@ -188,6 +188,24 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
   void files
 })
 
+// On Windows a command names the memory folder from its drive, C:/Users/..., or as Git's bash does, /c/Users/...: a write into it by
+// either is no command that only reads, and is refused as on a Mac; a read still runs
+test('F-007 · on a Windows PC a command that writes into the memory folder by a Windows path or a Git bash path is refused, and a read of it runs', async ($, on) => {
+  world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'tidy the config', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'tidy it' } as never)
+  for (const [i, command] of [
+    'echo x > C:/Users/sam/.claude/claudopus/config.json',
+    'echo x > /c/Users/sam/.claude/claudopus/config.json',
+    'cd /c/Users/sam/.claude && echo x > claudopus/config.json',
+  ].entries()) {
+    const said = ((await $.tool.call({ tool: 'Bash', tool_use_id: `w${i}`, agentId: 'a1', command } as never)) as { deny?: string }).deny ?? ''
+    expect([command, said.includes('only with the Edit or Write tool')]).toEqual([command, true])
+  }
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'cat C:/Users/sam/.claude/claudopus/config.json' } as never)) as { result?: unknown }).result).toBe('ran')
+})
+
 test("F-007 F-008 F-014 F-021 · a command that writes the person's settings or texts by a path no reading of it finds has the change undone as it ends; Allow on the card makes it again", async ($, on) => {
   const { list, press, files, bash, holding } = await gated($, on)
   const config = `${MEMORY}/config.json`
@@ -655,4 +673,51 @@ test('F-022 · a file a report names outside its own folder is never read: no sm
   await until(async () => opened.includes('report-d') || undefined)
   await until(async () => read.length || undefined)
   expect([...new Set(read)]).toEqual([`${MEMORY}/reports/d/shots/ok.png`])
+})
+
+// On Windows bin/keyring's files are under the profile, and a path to them comes written many ways: C:\ with backslashes, C:/, or
+// Git's bash's /c/. Each is refused by any tool, as is what reads Windows' own saved passwords; a look elsewhere runs
+test("F-007 · on Windows the saved keys are never read: their files by any spelling of the path, and Windows' own saved passwords", async ($, on) => {
+  world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'deploy it' } as never)
+  let n = 0
+  const deny = async (input: Record<string, unknown>) => ((await $.tool.call({ tool_use_id: `wk${(n += 1)}`, agentId: 'w1', ...input } as never)) as { deny?: string }).deny
+  for (const command of [
+    'cat "C:\\Users\\sam\\.local\\share\\claudopus\\keyring\\claudopus-secret\\API_KEY"',
+    'powershell -c "[Security.Cryptography.ProtectedData]::Unprotect($b, $null, \'CurrentUser\')"',
+    'cmdkey //list',
+    'powershell -c "Get-StoredCredential -Target github"',
+  ])
+    expect(await deny({ tool: 'Bash', command })).toContain('never read')
+  for (const [tool, field, path] of [
+    ['Read', 'file_path', 'C:\\Users\\sam\\.local\\share\\claudopus\\keyring\\claudopus-secret\\API_KEY'],
+    ['Grep', 'path', '/c/Users/sam/.local'],
+    ['Grep', 'path', 'C:/Users/sam/.local/share'],
+    ['Glob', 'path', 'c:\\users\\sam\\.local'],
+  ] as const)
+    expect(await deny({ tool, [field]: path, ...(tool === 'Read' ? {} : { pattern: '.' }) })).toContain('never read')
+  expect(await deny({ tool: 'Bash', command: 'ls C:/Users/sam/repo' })).toBeUndefined()
+  expect(await deny({ tool: 'Grep', path: 'C:/Users/sam/repo', pattern: '.' })).toBeUndefined()
+})
+
+// On Windows the memory folder's own files are written by a command with backslashes too, quoted or escaped as Git's bash takes them:
+// refused as the C:/ and /c/ forms are; reading one runs
+test("F-007 F-014 · on Windows a command that writes the person's settings or what chats share through a backslashed path is refused", async ($, on) => {
+  world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'fix it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  let n = 0
+  const deny = async (command: string) => ((await $.tool.call({ tool: 'Bash', tool_use_id: `wm${(n += 1)}`, agentId: 'a1', command } as never)) as { deny?: string }).deny
+  for (const command of [
+    `echo '{"admin":"never"}' > "C:\\Users\\sam\\.claude\\claudopus\\config.json"`,
+    `sed -i s/a/b/ "C:\\Users\\sam\\.claude\\claudopus\\roles\\work.md"`,
+    `cp x "C:\\\\Users\\\\sam\\\\.claude\\\\claudopus\\\\rules\\\\CLAUDE.md"`,
+    `echo '{}' > 'C:\\Users\\sam\\.claude\\claudopus\\config.json'`,
+  ])
+    expect(await deny(command)).toContain('only with the Edit or Write tool')
+  expect(await deny(`echo x > "C:\\Users\\sam\\.claude\\claudopus\\live\\engine-id.json"`)).toContain('Only Claudopus writes the files chats share')
+  expect(await deny(`cat "C:\\Users\\sam\\.claude\\claudopus\\config.json"`)).toBeUndefined()
 })

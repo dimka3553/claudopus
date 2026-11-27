@@ -15,9 +15,22 @@
 set -u
 [ $# -ge 1 ] || { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 for f in "$@"; do [ -f "$f" ] && [ -r "$f" ] || { echo "pane-file: no file $f" >&2; exit 1; }; done
-py=$(command -v python3) || { echo "pane-file: needs python3" >&2; exit 1; }
-exec "$py" -I -u - "$@" <<'PY'
+# Python 3: python3, else (on Windows) python or the py launcher. Windows' own python3 and python are only a stand-in for the Store's
+# until Python is installed, which says so and runs nothing, so each is tried before it is used
+py='' pyargs=()
+for one in python3 python py; do
+  p=$(command -v "$one") || continue
+  if [ "$one" = py ]; then "$p" -3 -c 'import sys' >/dev/null 2>&1 && { py=$p pyargs=(-3); break; }
+  else "$p" -c 'import sys; sys.exit(sys.version_info[0] != 3)' >/dev/null 2>&1 && { py=$p; break; }; fi
+done
+[ -n "$py" ] || { echo "pane-file: needs python3" >&2; exit 1; }
+exec "$py" ${pyargs[@]+"${pyargs[@]}"} -I -u - "$@" <<'PY'
 import base64, hashlib, http.server, json, mimetypes, os, secrets, socketserver, sys, threading, time, urllib.parse
+
+# What it prints is UTF-8 with plain line ends on every system (Windows' own code page would stop at a file's name in another
+# script, and its line ends would end each line read with a stray \r)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace', newline='\n')
 
 PART = 1_500_000          # characters of base64 in one address: Chromium takes addresses up to 2 MB
 IDLE = 10 * 60            # stops when no part was asked for this long
@@ -93,7 +106,9 @@ PUT = ("(async()=>{const ids=IDS,sel=null;" + OPEN
 
 CLEAR = "indexedDB.deleteDatabase('claudopus-files')"
 
-print('pane-file: serving on %s, process %d (stop it with: kill %d)' % (base, os.getpid(), os.getpid()))
+# (on Windows its process is Windows' own, which Git's bash stops with taskkill: //PID is /PID there)
+stop = ('taskkill //PID %d //F' if os.name == 'nt' else 'kill %d') % os.getpid()
+print('pane-file: serving on %s, process %d (stop it with: %s)' % (base, os.getpid(), stop))
 for fid, f in files.items():
     print('file %s: %s, %d bytes, %d parts, sha256 %s' % (fid, f['name'], f['size'], len(f['parts']), f['sha'][:12]))
 print("""

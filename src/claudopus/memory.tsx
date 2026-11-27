@@ -7,7 +7,8 @@ const MEMORY_PANE = 'memory-'
 const MEMORY_PANES = 3
 // What a memory path is in a reply: the folder spelled in full or from ~, up to a space, a quote, a bracket, a backtick or markup
 const memoryPathIn = () => new RegExp(`(?:${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|~/\\.claude/claudopus)/[^\\s\`()\\[\\]<>"'*|~]+`, 'g')
-const memoryHref = (path: string) => `file://${encodeURI(path.replace(/^~\/\.claude\/claudopus/, dir))}`
+// (a Windows path from its drive, C:/Users/x, as file:///C:/Users/x)
+const memoryHref = (path: string) => `file://${/^[A-Za-z]:\//.test(dir) ? '/' : ''}${encodeURI(path.replace(/^~\/\.claude\/claudopus/, dir))}`
 // A reply's memory paths made links of the mod's: a link to one, a code span that is one path and a bare path. Other code stays as
 // it is, a fence still open to the end too
 const memoryLinked = (text: string) => {
@@ -39,7 +40,7 @@ const memoryLinked = (text: string) => {
 }
 // Which memory file a pressed link is, or '' for any other link
 const memoryPressed = (href: string) => {
-  let path = href.replace(/^file:\/\//, '')
+  let path = href.replace(/^file:\/\//, '').replace(/^\/(?=[A-Za-z]:\/)/, '')
   try {
     path = decodeURI(path)
   } catch {}
@@ -99,7 +100,10 @@ const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
 const CATCH_UP_AFTER = 60_000
 const CATCH_UP_EVERY = 10 * 60_000
 // Its log is added to, and set aside once it passes a megabyte
-const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+const CATCH_UP_LOG = 'd=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; '
+const CATCH_UP_START = `${CATCH_UP_LOG}nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+// (on Windows started apart by PowerShell, as the watcher is: startOnWindows)
+const CATCH_UP_WINDOWS = `${CATCH_UP_LOG}exec nice -n 10 "$@" >> "$l" 2>&1 < /dev/null`
 // (not started at all while its own stamp says it ran lately: every open chat asked every ten minutes, and each ask started five
 // programs that left at once. The stamp is bin/catch-up's own, caught/last-<the start of the projects folder's md5>, good for 540 s)
 let catchUpStamp = ''
@@ -107,13 +111,14 @@ const startCatchUp = async ($: EngineInterface) => {
   if (!dir) return
   const projects = `${await configDir($)}/projects`
   if (!catchUpStamp) {
-    const r = await $.process.run(['/usr/bin/perl', '-MDigest::MD5=md5_hex', '-e', 'print substr(md5_hex($ARGV[0]), 0, 12)', projects]).catch(() => undefined)
+    const r = await runOn($, ['/usr/bin/perl', '-MDigest::MD5=md5_hex', '-e', 'print substr(md5_hex($ARGV[0]), 0, 12)', projects]).catch(() => undefined)
     if (r?.exitCode === 0 && /^[0-9a-f]{12}$/.test(r.stdout)) catchUpStamp = `${dir}/caught/last-${r.stdout}`
   }
   const stamp = catchUpStamp ? ((await $.fs.stat(catchUpStamp).catch(() => undefined))?.mtimeMs ?? 0) : 0
   const now = stamp ? await $.clock.now() : 0
   if (stamp && now >= stamp && now - stamp < 540_000) return
-  const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, projects])
+  const words = [dir, `${pluginRoot($)}/bin/catch-up`, dir, projects]
+  const r = isWindows ? await startOnWindows($, CATCH_UP_WINDOWS, words) : await runOn($, ['/bin/sh', '-c', CATCH_UP_START, 'sh', ...words])
   if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
 }
 

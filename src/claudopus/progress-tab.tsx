@@ -10,7 +10,7 @@ type ProgressRef = ProgressPictureRef & { report: Report; thumb: string }
 const progressPictures = (data: ProgressRead, entry: ProgressEntry): ProgressRef[] =>
   entry.pictures.flatMap(path => {
     const r = data.reports.get(path.startsWith(`${reportsDir()}/`) ? (path.slice(reportsDir().length + 1).split('/')[0] ?? '') : entry.report)
-    const full = !r ? '' : path.startsWith('/') ? path : `${reportPath(r)}/${path}`
+    const full = !r ? '' : isAbsPath(path) ? slashed(path) : `${reportPath(r)}/${path}`
     const thumb = full && RASTER.test(full) && isInside(full.slice(reportPath(r as Report).length + 1)) ? entryThumb(full) : ''
     return r && thumb ? [{ key: full, report: r, thumb }] : []
   })
@@ -36,7 +36,7 @@ const smallThumbOf = async ($: EngineInterface, ref: ProgressRef): Promise<Progr
   const small = ref.thumb.replace(/\.jpg$/, '.small.jpg')
   if (await $.fs.exists(small)) return thumbOf($, small)
   if (!(await $.fs.exists(ref.thumb))) return (askThumbs($, ref.report), null)
-  await $.process.run([sips($), '-Z', '160', '-s', 'format', 'jpeg', '-s', 'formatOptions', '50', ref.thumb, '--out', small]).catch(() => undefined)
+  await runOn($, [sips($), '-Z', '160', '-s', 'format', 'jpeg', '-s', 'formatOptions', '50', ref.thumb, '--out', small]).catch(() => undefined)
   return (await $.fs.exists(small)) ? thumbOf($, small) : null
 }
 const largeThumbOf = async ($: EngineInterface, ref: ProgressRef): Promise<ProgressThumb> => ((await $.fs.exists(ref.thumb)) ? thumbOf($, ref.thumb) : (askThumbs($, ref.report), null))

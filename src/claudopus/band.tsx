@@ -78,7 +78,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
     const sendWords = (value: string) => {
       if (!one) return
       const files = takeAttached(open.id)
-      const shown = [value.trim(), ...files.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+      const shown = [value.trim(), ...files.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join(' ')
       if (!shown) return
       ;((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($))
       void wordsOnGate($, one.id, open.id, shown, filesNote(files))
@@ -374,7 +374,7 @@ const bandHooks = (on: On) => {
 
     const marker = await waitMarker($, ui, e.surface)
     const isListHere = e.surface !== 'terminal' && (await isListPlaced($))
-    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures, usageHistory(), machineWord(), FILL) : null
     const drawing = (spacers: JSX.Element | null) => {
       const row = (
         <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">

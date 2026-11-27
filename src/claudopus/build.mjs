@@ -204,7 +204,7 @@ if (process.argv.includes('--notes')) {
   }
   console.log(
     [
-      '**Claude Code, with eight arms.** One chat runs many jobs at once, on your own Mac, with a panel beside it that shows each one.',
+      '**Claude Code, with eight arms.** One chat runs many jobs at once, on your own computer, with a panel beside it that shows each one.',
       '',
       `## What changed in ${version}`,
       '',
@@ -212,10 +212,16 @@ if (process.argv.includes('--notes')) {
       '',
       'Every version and what it changed: [the changelog](https://www.claudopus.ai/changelog.html).',
       '',
-      'Install it with one line in Terminal:',
+      'Install it with one line in Terminal on a Mac or Linux:',
       '',
       '```',
       'curl -fsSL https://www.claudopus.ai/install.sh | sh',
+      '```',
+      '',
+      'or in PowerShell on Windows:',
+      '',
+      '```',
+      'irm https://www.claudopus.ai/install.ps1 | iex',
       '```',
       '',
       'A newer version shows in the panel: press Download, then Install, then type /reload-plugins. See the [README](https://github.com/dimka3553/claudopus#readme) and the [full guide](https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/docs/guide.md).',
@@ -251,19 +257,27 @@ const treeOf = () => {
   const scratch = mkdtempSync(join(tmpdir(), 'claudopus-tree-'))
   try {
     const git = args => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_INDEX_FILE: join(scratch, 'index') }, encoding: 'utf8' }).trim()
-    git(['read-tree', '--empty'])
+    // From the commit's own modes: a Windows checkout has no executable bit, and git there keeps the index's mode of a file it adds
+    try {
+      git(['read-tree', 'HEAD'])
+    } catch {
+      git(['read-tree', '--empty'])
+    }
     git(['add', '-A', '--', 'mods/claudopus'])
     const tree = git(['write-tree', '--prefix=mods/claudopus/'])
-    const size = git(['ls-tree', '-r', '-l', tree]).split('\n').reduce((n, line) => n + (Number(line.split(/\s+/)[3]) || 0), 0)
-    return { tree, size }
+    const rows = git(['ls-tree', '-r', '-l', tree]).split('\n')
+    const size = rows.reduce((n, line) => n + (Number(line.split(/\s+/)[3]) || 0), 0)
+    // The files the tree marks executable, so a copy on Windows, whose files carry no such mark, makes the same tree (update.ts)
+    const exec = rows.filter(line => line.startsWith('100755 ')).map(line => line.split('\t')[1]).filter(Boolean)
+    return { tree, size, exec }
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
 }
 const versionPage = () => {
-  const { tree, size } = treeOf()
+  const { tree, size, exec } = treeOf()
   const versions = versionsIn(changelog).slice(0, PAGE_VERSIONS).map(v => ({ version: v.version, line: v.changes[0] ? lineOf(v.changes[0]) : '', more: Math.max(0, v.changes.length - 1) }))
-  return `${JSON.stringify({ version: JSON.parse(read(join(hooks, '../.claude-plugin/plugin.json'))).version, tree, size, versions })}\n`
+  return `${JSON.stringify({ version: JSON.parse(read(join(hooks, '../.claude-plugin/plugin.json'))).version, tree, size, versions, exec })}\n`
 }
 
 const files = [

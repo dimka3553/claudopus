@@ -10,8 +10,9 @@ let paceFile = ''
 let paceCores = 0
 const pacePathOf = async ($: EngineInterface) => {
   if (paceFile) return paceFile
-  const tmp = ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
-  paceFile = `${tmp || (await $.env.get('HOME')) || ''}/claudopus-pace.json`
+  // (on Windows the person's own temporary folder, TEMP, in their profile)
+  const tmp = slashed((isWindows ? await $.env.get('TEMP') : await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
+  paceFile = `${tmp || (await homeFolder($)) || ''}/claudopus-pace.json`
   return paceFile
 }
 // What the last look on the Mac left: when, how many commands it left waiting, and how many other threads were ready at full speed
@@ -25,8 +26,9 @@ const pacedOf = (text: string): { at: number; held: number; others?: number } =>
 }
 
 // A look when one is due: the processes and their threads, then the background mode put on or taken off only where it changes
+// (only on a Mac, whose taskpolicy puts a process in the background mode: Linux and Windows have none to put it in)
 const paceWork = async ($: EngineInterface) => {
-  if (isLinux || isPacing) return
+  if (isLinux || isWindows || isPacing) return
   const now = await $.clock.now()
   const every = PACE_EVERY * (isOnBattery ? 2 : 1)
   if (now >= pacedAt && now - pacedAt < every - 500) return
@@ -38,7 +40,7 @@ const paceWork = async ($: EngineInterface) => {
   pacedAt = now
   try {
     await $.fs.write(path, JSON.stringify({ ...last, at: now })).catch(() => undefined)
-    const run = async (script: string) => (await $.process.run(['sh', '-c', script, 'pace', paceCores ? String(paceCores) : ''], { timeoutMs: 5000 }).catch(() => undefined))?.stdout ?? ''
+    const run = async (script: string) => (await runOn($, ['sh', '-c', script, 'pace', paceCores ? String(paceCores) : ''], { timeoutMs: 5000 }).catch(() => undefined))?.stdout ?? ''
     let text = await run(PACE_LOOK)
     let look = paceLookOf(text)
     paceCores = look.cores || paceCores
@@ -48,7 +50,7 @@ const paceWork = async ($: EngineInterface) => {
     if (isThreads && !text.includes('@@THREADS@@')) look = paceLookOf((text += `\n${await run(PACE_THREADS)}`))
     look.cores = paceCores
     const paced = paceOf(look, isThreads && now - last.at < 30_000 ? last.others : undefined, isOnBattery)
-    if (paced.lower.length || paced.lift.length) await $.process.run(['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
+    if (paced.lower.length || paced.lift.length) await runOn($, ['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
     await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, ...(isThreads ? { others: paced.others } : {}) })).catch(() => undefined)
     if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)
     if (!paced.held && last.held) await log($, "every one of Claude's commands runs at full speed again")

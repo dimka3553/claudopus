@@ -29,18 +29,21 @@ const closeWelcome = async ($: EngineInterface) => {
   await $.fs.write(`${dir}/welcome.json`, `${JSON.stringify({ shownIn: stored?.shownIn ?? '', isOpen: false })}\n`)
   await redraw($)
 }
-// What the chat is sent when the person presses Index my old chats: the two onboarding steps the mod ships, then the subjects recorded
+// What the chat is sent when the person presses Index my old chats: the two onboarding steps the mod ships, then the subjects recorded.
+// On Windows python3 is often missing or only the Store's stand-in, which opens the Store: there Python is `python`, or `py -3`
 const indexAsk = (root: string) =>
   [
     'Bring in my old chats (pressed in the Claudopus panel).',
-    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it writes digests of your past chats, one or more per project, into ${dir}/onboard (Claudopus saves each chat's words under ${dir}/words itself).`,
-    'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
+    `Run ${isWindows ? 'python' : 'python3'} "${root}/onboard/extract.py" "${dir}/onboard"${isWindows ? ' (or py -3 in its place)' : ''}: it writes digests of your past chats, one or more per project, into ${dir}/onboard (Claudopus saves each chat's words under ${dir}/words itself).`,
+    isWindows
+      ? 'If neither python nor py runs (or python only says to get it from the Microsoft Store), say so with the command winget install Python.Python.3.12 and stop.'
+      : 'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
     `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
     'Last, record each stream found as a topic with the `update` tool (its name, folder, state and summary, and its section as `brief`), and list the topics you found in a few lines.',
   ].join(' ')
 const indexOldChats = async ($: EngineInterface) => {
   await closeWelcome($)
-  await sendForPerson($, indexAsk($.plugin.root))
+  await sendForPerson($, indexAsk(pluginRoot($)))
 }
 const welcomeCard = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="welcome" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>

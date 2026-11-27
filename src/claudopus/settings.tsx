@@ -77,7 +77,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   // Each copy put back is kept under a name of its own, so a second Reset never loses the first
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
   await personWrote($, memory, path, null)
-  const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = await runOn($, ['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   return r.exitCode === 0 ? '' : r.stderr || "Claudopus couldn't move your copy aside"
 }
 
@@ -106,8 +106,8 @@ const SAME_MAX = 200_000
 const knowKept = async ($: EngineInterface, isNow = false) => {
   const now = await $.clock.now()
   if (now - secrets.at < SECRETS_MS && !isNow) return secrets
-  const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
-  const marked = await run([`${$.plugin.root}/bin/secret`, '--marks', String(MARK_BASE)])
+  const run = (argv: string[]) => runOn($, argv).catch(() => undefined)
+  const marked = await run([`${pluginRoot($)}/bin/secret`, '--marks', String(MARK_BASE)])
   const lines = marked?.exitCode === 0 && !marked.isStdoutTruncated ? marked.stdout.split('\n').filter(Boolean) : []
   if (lines.at(-1) === 'end') {
     const names: string[] = []
@@ -124,8 +124,8 @@ const knowKept = async ($: EngineInterface, isNow = false) => {
     if (isRead) return (secrets = { at: now, names, admins, marks, same: [] })
   }
   // No marks (a value that cannot be read, a runner that fails): the names alone, as before, and every text goes through the runner
-  const listed = await run([`${$.plugin.root}/bin/secret`, '--list'])
-  const admins = await run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin'])
+  const listed = await run([`${pluginRoot($)}/bin/secret`, '--list'])
+  const admins = await run([`${pluginRoot($)}/bin/keyring`, 'list', 'claudopus-admin'])
   if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), admins: admins?.exitCode === 0 ? admins.stdout.split('\n').filter(Boolean) : secrets.admins, marks: undefined, same: [] }
   return secrets
 }
@@ -201,7 +201,7 @@ const hiddenJson = async ($: EngineInterface, text: string) => {
   const { names, admins, marks, same } = await knowKept($)
   if (!names.length && !admins?.length) return text
   if (same.includes(text) || (marks && !mayHoldKept(text, marks))) return text
-  const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...(admins ? ['--admins', admins.join(',')] : []), ...names], { stdin: text }).catch(() => undefined)
+  const hidden = await runOn($, [`${pluginRoot($)}/bin/secret`, '--hide', '--json', ...(admins ? ['--admins', admins.join(',')] : []), ...names], { stdin: text }).catch(() => undefined)
   if (!hidden || hidden.exitCode !== 0 || hidden.isStdoutTruncated || !hidden.stdout.trim()) return undefined
   if (hidden.stdout === text && text.length <= SAME_MAX && same.push(text) > 8) same.shift()
   return hidden.stdout
@@ -209,7 +209,7 @@ const hiddenJson = async ($: EngineInterface, text: string) => {
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
   const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
   if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
-  const { names, admins } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
+  const { names, admins } = await knowKept($, /bin[\\/](?:secret|admin)/.test(command))
   if (!names.length && !admins?.length) return r
   try {
     const text = JSON.stringify({ result: r.result, context: r.context })
@@ -254,7 +254,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   })(),
   texts: await Promise.all(
     TEXTS.map(async text => {
-      const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
+      const { isOwn, isStale, path, text: body } = await inForce($, pluginRoot($), dir, text.path)
       return { text, isOwn, isStale, path, body }
     }),
   ),
@@ -296,13 +296,13 @@ const configActs = ($: EngineInterface) => ({
   open: (text: (typeof TEXTS)[number]) =>
     configAct($, `Couldn't open ${text.name}`, async () => {
       Object.assign(editing, { key: '', draft: '' })
-      return editText($, $.plugin.root, dir, text.path)
+      return editText($, pluginRoot($), dir, text.path)
     }),
   // Edit opens the text in the tab itself; Save makes it the person's own copy
   edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
   save: (text: (typeof TEXTS)[number], body: string) =>
     configAct($, `Couldn't save ${text.name}`, async () => {
-      const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
+      const failed = body.trim() ? await saveText($, pluginRoot($), dir, text.path, body) : 'the text was empty, so nothing changed'
       Object.assign(editing, { key: '', draft: '' })
       return failed
     }),

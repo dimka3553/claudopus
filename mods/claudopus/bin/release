@@ -29,24 +29,32 @@ set -uo pipefail
 # Nothing of the caller's environment decides what runs here or in what it starts (git, perl, gh, the build and checks): -p above
 # reads no BASH_ENV and takes no function from it, and a run with anything beyond the few it needs starts itself again with only
 # those, so no PERL5OPT, XDG_CONFIG_HOME, GIT_ or BASH_FUNC_ setting reaches git, perl or a child shell
-KEPT_ENV="HOME USER LOGNAME LANG LC_ALL LC_CTYPE TERM TMPDIR SSH_AUTH_SOCK PATH CLAUDECODE CLAUDE_CODE_EXECPATH GH_TOKEN GITHUB_TOKEN RELEASE_LOCKS RELEASE_BARRIER RELEASE_CHECK_WAIT RELEASE_CHECK_EVERY PWD OLDPWD SHLVL _"
+KEPT_ENV="HOME USER LOGNAME LANG LC_ALL LC_CTYPE TERM TMPDIR SSH_AUTH_SOCK PATH CLAUDECODE CLAUDE_CODE_EXECPATH GH_TOKEN GITHUB_TOKEN RELEASE_LOCKS RELEASE_BARRIER RELEASE_CHECK_WAIT RELEASE_CHECK_EVERY RELEASE_ENV_KEPT PWD OLDPWD SHLVL _"
+# On Windows, in Git's bash, also what Windows' own programs (git, gh, node) need to start at all, by each spelling Windows gives them
+windows=
+case $(/usr/bin/uname -s) in MINGW* | MSYS* | CYGWIN*) windows=1 KEPT_ENV="$KEPT_ENV SYSTEMROOT SystemRoot WINDIR windir USERPROFILE APPDATA LOCALAPPDATA TEMP TMP COMSPEC ComSpec PROGRAMFILES ProgramFiles HOMEDRIVE HOMEPATH MSYSTEM PATHEXT" ;; esac
 extra=
 for v in $(compgen -e); do case " $KEPT_ENV " in *" $v "*) ;; *) extra=1 ;; esac; done
 [ -z "$(/usr/bin/env | /usr/bin/sed -n '/^BASH_FUNC_/p')" ] || extra=1
-if [ -n "$extra" ]; then
-  kept=()
-  for v in $KEPT_ENV; do [ "$v" = _ ] || [ -z "${!v+x}" ] || kept+=("$v=${!v}"); done
+if [ -n "$extra" ] && [ -n "${RELEASE_ENV_KEPT:-}" ]; then
+  # Started afresh already, and the system put back what it gives every program (as Windows can): taken out here instead, so it
+  # never starts itself again and again
+  for v in $(compgen -e); do case " $KEPT_ENV " in *" $v "*) ;; *) unset "$v" 2>/dev/null ;; esac; done
+elif [ -n "$extra" ]; then
+  kept=(RELEASE_ENV_KEPT=1)
+  for v in $KEPT_ENV; do [ "$v" = _ ] || [ "$v" = RELEASE_ENV_KEPT ] || [ -z "${!v+x}" ] || kept+=("$v=${!v}"); done
   exec /usr/bin/env -i "${kept[@]}" /bin/bash -p "$0" "$@"
 fi
-# The system's own tools come before anything the caller's PATH adds
-PATH=/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}
+unset RELEASE_ENV_KEPT
+# The system's own tools come before anything the caller's PATH adds (on Windows Git's own, with git, curl and openssl)
+PATH=/usr/bin:/bin:/usr/sbin:/sbin${windows:+:/mingw64/bin}${PATH:+:$PATH}
 export PATH
 unset CDPATH
 say() { echo "release: $*" >&2; }
 die() { say "$1"; exit "${2:-1}"; }
 # The home folder is the one the user database names for this user, never $HOME, which whoever runs this can set to a folder of
-# their own (with a key and grants made there)
-own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null)
+# their own (with a key and grants made there); on Windows the profile Windows names for this user, as bin/keyring finds it
+own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null); case $(uname -s) in MINGW* | MSYS* | CYGWIN*) p=$(cygpath -F 40 2>/dev/null); own_home=$(cygpath -u "${p:-${USERPROFILE:-}}" 2>/dev/null) ;; esac
 [ -n "$own_home" ] || own_home=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
 [ -n "$own_home" ] && [ -d "$own_home" ] || die "this user has no home folder"
 HOME=$own_home
@@ -73,7 +81,7 @@ if [ -z "$MAIN" ]; then
   [ -n "$MAIN" ] || MAIN=main
 fi
 locks=${RELEASE_LOCKS:-$HOME/.claude/claudopus/locks}
-lock="$locks/$(printf %s "$url" | shasum | cut -c1-12).lock"
+lock="$locks/$(printf %s "$url" | { shasum 2>/dev/null || sha1sum; } | cut -c1-12).lock"
 
 if [ "${1:-}" = --status ]; then
   if [ -d "$lock" ] && kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then echo "releasing now: $(cat "$lock/who" 2>/dev/null)"; else echo "no release running for $(basename "$top")"; fi
@@ -174,7 +182,10 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/claudopus-release.XXXXXX")/release"
 cref=
 drop_candidate() { [ -n "$cref" ] && git -C "$top" push -q "$REMOTE" --delete "$cref" >/dev/null 2>&1; cref=; return 0; }
 lpid=
-cleanup() { [ -n "$lpid" ] && kill -KILL -- "-$lpid" 2>/dev/null; drop_candidate; git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err" "$tmp.check" "$tmp.check.rc"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
+# On Windows a program the checks start may be Windows' own (node, a build tool), which a signal to their group never reaches: their
+# whole tree is ended by Windows too
+kill_tree() { [ -n "$windows" ] && [ -r "/proc/$1/winpid" ] && taskkill //T //F //PID "$(cat "/proc/$1/winpid")" >/dev/null 2>&1; return 0; }
+cleanup() { [ -n "$lpid" ] && { kill_tree "$lpid"; kill -KILL -- "-$lpid" 2>/dev/null; }; drop_candidate; git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err" "$tmp.check" "$tmp.check.rc"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
@@ -186,6 +197,10 @@ gained() { [ -n "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN" 2>/dev/nul
 # gh as installed, never one the caller's PATH puts first, with nothing of the caller's that sends it to another server, account
 # folder or proxy; and no call to it hangs the release while it holds the lock
 gh_bin=$(for g in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do [ -x "$g" ] && { echo "$g"; break; }; done)
+# (on Windows where its installer puts it, else the one Git's bash finds)
+if [ -z "$gh_bin" ] && [ -n "$windows" ]; then
+  for g in "$(cygpath -u "${PROGRAMFILES:-${ProgramFiles:-C:/Program Files}}" 2>/dev/null)/GitHub CLI/gh.exe" "$(cygpath -u "${LOCALAPPDATA:-}" 2>/dev/null)/Programs/GitHub CLI/gh.exe" "$(command -v gh 2>/dev/null)"; do [ -n "$g" ] && [ -x "$g" ] && { gh_bin=$g; break; }; done
+fi
 ghq() { env -u GH_HOST -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_CONFIG_DIR -u XDG_CONFIG_HOME -u GH_REPO -u GH_DEBUG \
   -u HTTPS_PROXY -u HTTP_PROXY -u ALL_PROXY -u https_proxy -u http_proxy -u all_proxy -u SSL_CERT_FILE -u SSL_CERT_DIR \
   /usr/bin/perl -e 'my $p = fork // exit 127; if (!$p) { setpgrp(0, 0); exec @ARGV; exit 127 } $SIG{ALRM} = sub { kill "KILL", -$p }; alarm 60; waitpid $p, 0; exit($? & 127 ? 124 : $? >> 8)' "$gh_bin" "$@"; }
@@ -270,7 +285,7 @@ for try in 1 2 3 4 5; do
     [ -n "$CHECK" ] || return 0
     set -m
     bash -c 'bash -c "$1" >"$2" 2>&1 & c=$!
-      while kill -0 $c 2>/dev/null; do kill -0 "$3" 2>/dev/null || kill -KILL 0; sleep 1; done
+      while kill -0 $c 2>/dev/null; do kill -0 "$3" 2>/dev/null || { [ -r /proc/$$/winpid ] && taskkill //T //F //PID "$(cat /proc/$$/winpid)" >/dev/null 2>&1; kill -KILL 0; }; sleep 1; done
       wait $c; echo $? >"$2.rc"' sh "$CHECK" "$tmp.check" "$$" &
     lpid=$!
     set +m
@@ -279,6 +294,7 @@ for try in 1 2 3 4 5; do
   stop_checks() {
     [ -n "${lpid:-}" ] || return 0
     local n=0
+    kill_tree "$lpid"
     while kill -0 -- "-$lpid" 2>/dev/null; do
       if [ $n -lt 25 ]; then kill -TERM -- "-$lpid" 2>/dev/null; else kill -KILL -- "-$lpid" 2>/dev/null; fi
       sleep 0.2; n=$((n + 1))

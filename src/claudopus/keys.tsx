@@ -13,12 +13,8 @@ type SbosKind = 'database' | 'login'
 type KeyEntry = { name: string; store: KeyStore; where?: string; label?: string; kind?: SbosKind; isPresent: boolean; added: number; seen: number }
 type SbosName = { name: string; label?: string; kind?: SbosKind; isPresent: boolean }
 type KeysState = { at: number; sbosAt?: number; entries: KeyEntry[] }
-const STORE_NAMES: Record<KeyStore, string> = {
-  claudopus: "Claudopus's keychain",
-  keychain: "this Mac's keychain",
-  sbos: 'SBOS secrets',
-  env: 'a .env file',
-}
+// (the rest of the system's keychain by what this computer is called: on Windows and Linux nothing is listed there)
+const storeName = (store: KeyStore) => ({ claudopus: "Claudopus's keychain", keychain: `${thisMac()}'s keychain`, sbos: 'SBOS secrets', env: 'a .env file' })[store]
 // A name as it is kept: plain marks only, and short, so no text that is not a name can pass for one
 const plainName = (text: string) => (/^[\w .:@/+|-]{1,80}$/.test(text) ? text : '')
 // The words a key's name is made of, less those every key's name has: ELEVENLABS_API_KEY and elevenlabs-key are both "elevenlabs"
@@ -59,7 +55,7 @@ const keysRead = async ($: EngineInterface): Promise<KeysState> => {
 // keychain is read from the same listing as the rest, which fails as a whole when the keychain does not answer, so a locked keychain
 // never reads as an empty one
 const localNames = async ($: EngineInterface) => {
-  const all = await $.process.run([`${$.plugin.root}/bin/keyring`, 'entries']).catch(() => undefined)
+  const all = await runOn($, [`${pluginRoot($)}/bin/keyring`, 'entries']).catch(() => undefined)
   const pairs = all?.exitCode === 0 && !all.isStdoutTruncated ? all.stdout.split('\n').filter(Boolean).map(line => line.split('\t')) : undefined
   const claudopus = pairs?.filter(([service]) => service === 'claudopus-secret').map(([, account = '']) => plainName(account)).filter(Boolean)
   // Another app's account is shown only when it is a name such as ELEVENLABS_API_KEY: any other account (an email, an id, a token
@@ -70,12 +66,13 @@ const localNames = async ($: EngineInterface) => {
     .filter(one => one.name && one.where)
   // The top of each subject's folder: its .env files (plain files only), read for the names before each = and nothing after it
   const env: { name: string; where: string }[] = []
-  const folders = [...new Set((await readIndex($).catch(() => [] as Stream[])).map(one => one.repo).filter(one => one.startsWith('/')))]
+  const folders = [...new Set((await readIndex($).catch(() => [] as Stream[])).map(one => slashed(one.repo)).filter(one => isAbsPath(one)))]
   for (const folder of folders) {
     const files = (await $.fs.list(folder).catch(() => [])).filter(one => one.kind === 'file' && !one.isLink).map(one => one.name).filter(name => /^\.env(?:\.[\w-]+)?$/.test(name) && !/\.(?:example|sample|template|dist)$/.test(name))
     for (const file of files) {
-      const r = await $.process.run(['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
-      for (const line of (r?.stdout ?? '').split('\n')) {
+      const r = await runOn($, ['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
+      // (a file written on Windows ends its lines with a carriage return too)
+      for (const line of (r?.stdout ?? '').split(/\r?\n/)) {
         const name = line.replace(/^\s*(?:export\s+)?/, '').replace(/\s*=$/, '')
         if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && isKeyVariable(name)) env.push({ name, where: `${folder}/${file}` })
       }
@@ -116,12 +113,12 @@ const refreshKeys = async ($: EngineInterface, sbos?: SbosName[], isListed = tru
     entries: entries.map((one, i) => ({ ...one, name: seen[i * 3] ?? '', ...(one.where ? { where: seen[i * 3 + 1] } : {}), ...(one.label ? { label: seen[i * 3 + 2] } : {}) })),
   }
   await $.fs.write(`${dir}/${KEYS_STATE}`, `${JSON.stringify(keys, null, 2)}\n`)
-  await $.fs.write(`${dir}/${KEYS_FILE}`, keysText($.plugin.root, keys))
+  await $.fs.write(`${dir}/${KEYS_FILE}`, keysText(pluginRoot($), keys))
   return keys
 }
 // The text with every kept value hidden, as bin/secret hides a command's output; undefined when it could not be checked
 const keysHidden = async ($: EngineInterface, text: string) => {
-  const r = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
+  const r = await runOn($, [`${pluginRoot($)}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
   return r && r.exitCode === 0 && !r.isStdoutTruncated && r.stdout.trim() ? r.stdout : undefined
 }
 const keysFresh = async ($: EngineInterface) => {
@@ -134,7 +131,7 @@ const dayOf = (at: number) => (at ? new Date(at).toISOString().slice(0, 10) : ''
 // How work uses a key, by its store's own route; the value never passes through the work
 const routeOf = (root: string, one: KeyEntry) =>
   one.store === 'claudopus'
-    ? `\`${root}/bin/secret ${one.name} here '<command using $${one.name}>'\``
+    ? `\`${runnerAt(root, 'secret')} ${one.name} here '<command using $${one.name}>'\``
     : one.store === 'sbos' && one.kind === 'database'
       ? `SBOS's \`query\` and \`tables\` with db ${one.name}`
       : one.store === 'sbos' && one.kind === 'login'
@@ -149,7 +146,7 @@ const routeOf = (root: string, one: KeyEntry) =>
 const keysText = (root: string, state: KeysState) => {
   const rows = [...state.entries]
     .sort((a, b) => Number(b.isPresent) - Number(a.isPresent) || a.store.localeCompare(b.store) || a.name.localeCompare(b.name))
-    .map(one => `| ${one.name} | ${one.label ? oneLine(one.label).replace(/\|/g, '/').slice(0, 80) : ''} | ${STORE_NAMES[one.store]} | ${one.isPresent ? 'present' : 'asked, not given'} | ${dayOf(one.added)} | ${dayOf(one.seen)} | ${named(routeOf(root, one)).replace(/\|/g, '/')} |`)
+    .map(one => `| ${one.name} | ${one.label ? oneLine(one.label).replace(/\|/g, '/').slice(0, 80) : ''} | ${storeName(one.store)} | ${one.isPresent ? 'present' : 'asked, not given'} | ${dayOf(one.added)} | ${dayOf(one.seen)} | ${named(routeOf(root, one)).replace(/\|/g, '/')} |`)
   return [
     '# Keys',
     '',
@@ -187,7 +184,7 @@ const sbosListed = (result: unknown) => {
 const usable = (one: KeyEntry) => one.isPresent && one.kind !== 'database' && (one.store === 'claudopus' || one.store === 'sbos')
 const KEY_KEPT = (root: string, one: KeyEntry, asked: string, again: string) =>
   named(
-    `Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${STORE_NAMES[one.store]}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
+    `Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${storeName(one.store)}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
   )
 // Asked again on purpose: the ask names the kept key exactly, as it is written, and says why it does not do
 const AGAIN_IN = (one: KeyEntry, field: string) => `If it no longer works, ask again with its name, ${one.name}, written as it is here, and why it does not do, in \`${field}\`.`
@@ -202,9 +199,11 @@ const ASK_KEY_FIELD =
   'Not shown: a question that asks {name} for a key has no box to paste it in. Ask again with `key` set to the name the key is saved under (such as SENTRY_READ_TOKEN) and `from` saying where {name} gets it (the full link of the page and what to press there): the box shows with your question on your card at once, and replaces a saved key of that name. A password for an admin command is asked by the admin runner itself.'
 // What a task is told once its question for a key is on its card
 const KEY_ASK_SHOWN = (root: string, name: string, isSaved: boolean, beside?: string) =>
-  `Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${root}/bin/secret ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`
+  `Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${runnerAt(root, 'secret')} ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`
 // A name the secret runner takes for a key (bin/secret, valid)
-const isKeyName = (name: string) => /^[A-Za-z_][A-Za-z0-9_]{0,199}$/.test(name) && !/^(?:PATH|IFS|HOME|USER|SHELL|ENV|BASH_ENV|PS4|SHELLOPTS|BASHOPTS|CDPATH|TMPDIR|LD_.*|DYLD_.*|CLAUDOPUS_.*)$/.test(name)
+// (and what Windows itself reads, in any case, as Windows does)
+const isKeyName = (name: string) =>
+  /^[A-Za-z_][A-Za-z0-9_]{0,199}$/.test(name) && !/^(?:PATH|IFS|HOME|USER|SHELL|ENV|BASH_ENV|PS4|SHELLOPTS|BASHOPTS|CDPATH|TMPDIR|LD_.*|DYLD_.*|CLAUDOPUS_.*)$/.test(name) && !/^(?:USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|PATHEXT|PROGRAMFILES|HOMEDRIVE|HOMEPATH|MSYSTEM)$/i.test(name)
 // What the key's box says under the task's question: why, where to get it, and what it does to a key saved already
 const keyAskDetails = (why: string, from: string, name: string, same?: KeyEntry, like?: KeyEntry) =>
   [why, `Where to get it:\n${from}`, same ? `It replaces the ${name} saved now.` : like ? `${like.name} stays saved as it is: this is a second key.` : '', `It goes only into ${keptWhere()}.`].filter(Boolean).join('\n\n')
@@ -222,11 +221,11 @@ const askedIn = (text: string, listed: KeyEntry[]) => {
 }
 // The secret runner's calls in a text, by any path to it (bin/secret, ./secret from its folder, a doubled slash), each with the names
 // it takes and what it does with them; the word secret alone, as in a commit message or kubectl's, is none
-const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|--forget|[^\s'"-][^\s'"]*)/g
+const SECRET_RUNS = /[\\/]secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|--forget|[^\s'"-][^\s'"]*)/g
 const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; name?: unknown; text?: unknown; copy?: unknown; details?: unknown; for?: unknown; agent?: unknown }
-  const root = $.plugin.root
+  const root = pluginRoot($)
   const listed = async () => (await keysFresh($)).entries.filter(usable)
   if (e.tool === 'mcp__sbos__ask_secret') {
     // One asked for an autonomous agent of SBOS's is its own: the list holds the person's
