@@ -185,7 +185,7 @@ config '{}'
 # What the panel types is sealed by the hook's own openssl line (read out of src/claudopus/boxes.tsx, or on Windows the mod's
 # hooks/windows.ts) to a key made as the runner makes it, and opened as the runner opens it: this machine's openssl takes every
 # option both use
-if [ -n "$windows" ]; then line=SEAL_FOR_WINDOWS from="$here/../hooks/windows.ts"; else line=SEAL_FOR from="$src/claudopus/boxes.tsx"; fi
+if [ -n "$windows" ]; then line=SEAL_FOR_WINDOWS from="$shipped/../hooks/windows.ts"; else line=SEAL_FOR from="$src/claudopus/boxes.tsx"; fi
 seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(new RegExp(`const ${process.argv[2]} =\\s+(\x27[^\\n]*\x27)\\n`).exec(t)[1]))' "$from" "$line")
 private=$(openssl genrsa 2048 2>/dev/null)
 public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)
