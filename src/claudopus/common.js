@@ -35,6 +35,8 @@ const ENTRIES_KEPT = 200;
 const OPEN_ASK = -1000001;
 const OPEN_DONE = -1000003;
 const OPEN_RESULT = -1000004;
+// (and what a task at work thought, under "Thought for")
+const OPEN_THOUGHT = -1000005;
 // Under a command's row in Details, its last lines sit on a darker ground, as a terminal's
 const OUTPUT_FILL = '#0000003D';
 // How much of what work reported at its end its Details shows before Show all
@@ -56,17 +58,14 @@ const FIT_PARTS = 1800;
 const FIT_DEEP = 30;
 const FIT_CHARS = 230000;
 const fitsSeen = new WeakMap();
-const drawingFits = (drawing) => {
-    if (!drawing || typeof drawing !== 'object')
-        return true;
-    const known = fitsSeen.get(drawing);
-    if (known !== undefined)
-        return known;
+// How big a drawing is as the app counts it: its parts, characters and depth, counted until one is past its limit, or to the end
+// (`isWhole`) for the log to say by how much
+const drawingSize = (drawing, isWhole = false) => {
     let parts = 0;
     let deepest = 0;
     let chars = 0;
     const walk = (node, depth) => {
-        if (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP)
+        if (!isWhole && (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP))
             return;
         if (typeof node === 'string' || typeof node === 'number')
             return void ((parts += 1), (chars += String(node).length + 2));
@@ -87,6 +86,20 @@ const drawingFits = (drawing) => {
         walk(el.children ?? el.props?.children, depth + 1);
     };
     walk(drawing, 0);
+    return { parts, chars, deepest };
+};
+// What the log says of a drawing too big: each count beside its limit
+const sizeSaid = (drawing) => {
+    const { parts, chars, deepest } = drawingSize(drawing, true);
+    return `${parts} of ${FIT_PARTS} parts, ${chars} of ${FIT_CHARS} characters, ${deepest} of ${FIT_DEEP} deep`;
+};
+const drawingFits = (drawing) => {
+    if (!drawing || typeof drawing !== 'object')
+        return true;
+    const known = fitsSeen.get(drawing);
+    if (known !== undefined)
+        return known;
+    const { parts, chars, deepest } = drawingSize(drawing);
     const fits = parts <= FIT_PARTS && chars <= FIT_CHARS && deepest <= FIT_DEEP;
     fitsSeen.set(drawing, fits);
     return fits;
@@ -135,11 +148,37 @@ const RELOAD_GRACE = 30000;
 const pauseFrom = (one) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0);
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
 const isLingering = (one, at) => one.status !== 'working' && one.endedAt > 0 && at >= pauseFrom(one) && at - pauseFrom(one) < LINGER;
-// Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, its question
-// with the reply under it and nothing to press or type, as the person has answered. So from the moment the reply is sent: ended
-// work being started again with it (isWaking), and another chat's work until its own chat has taken the reply (actingOn). Only
-// once it stops again with the ask open does it wait on the person, with every answer back
-const isActingOnReply = (one) => Boolean(one.ask) && ((Boolean(one.ask?.replied) && (one.status === 'working' || Boolean(one.ask?.replied?.isWaking))) || actingOn.has(`${one.id}:${one.ask?.at}`));
+const isActingOn = (one, ask) => (Boolean(ask.replied) && (one.status === 'working' || Boolean(ask.replied?.isWaking))) || actingOn.has(`${one.id}:${ask.at}`);
+const isActingOnReply = (one) => {
+    const all = [...(one.asksBefore ?? []), ...(one.ask ? [one.ask] : [])];
+    return all.length > 0 && all.every(ask => isActingOn(one, ask));
+};
+const asksOf = (one) => [...(one.asksBefore ?? []), ...(one.ask ? [one.ask] : [])];
+const isSameAsk = (a, b) => a.at === b.at && a.text === b.text;
+const withAsks = (one, list) => {
+    // (stable: asks made at the same moment keep the order they were given in, the last given the newest)
+    const sorted = list.map((ask, n) => ({ ask, n })).sort((a, b) => a.ask.at - b.ask.at || a.n - b.n).map(one => one.ask);
+    const before = sorted.slice(0, -1);
+    return { ...one, ask: sorted.at(-1), asksBefore: before.length ? before : undefined };
+};
+const hasAsk = (one, ask) => asksOf(one).some(other => isSameAsk(other, ask));
+const dropAsk = (one, ask) => withAsks(one, asksOf(one).filter(other => !isSameAsk(other, ask)));
+const mapAsk = (one, ask, fn) => withAsks(one, asksOf(one).map(other => (isSameAsk(other, ask) ? fn(other) : other)));
+const mapAsks = (one, fn) => (one.ask || one.asksBefore ? withAsks(one, asksOf(one).map(fn)) : one);
+// One question of a card, as its block, its answer and its line read it: the card with that question alone
+const askView = (one, ask = one.ask) => ({ ...one, ask, asksBefore: undefined });
+// The same for a task's questions for a key: `keyAsk` the newest, `keyAsksBefore` the rest
+const keyAsksOf = (one) => [...(one.keyAsksBefore ?? []), ...(one.keyAsk ? [one.keyAsk] : [])];
+const withKeyAsks = (one, list) => {
+    const sorted = list.map((ask, n) => ({ ask, n })).sort((a, b) => a.ask.at - b.ask.at || a.n - b.n).map(one => one.ask);
+    const before = sorted.slice(0, -1);
+    return { ...one, keyAsk: sorted.at(-1), keyAsksBefore: before.length ? before : undefined };
+};
+// A card whose newest question went brings up the newest of those before it
+const keepAsks = (list) => list.map(one => {
+    const asks = !one.ask && one.asksBefore?.length ? withAsks(one, one.asksBefore) : one;
+    return !asks.keyAsk && asks.keyAsksBefore?.length ? withKeyAsks(asks, asks.keyAsksBefore) : asks;
+});
 // The words of the buttons every block of the panel answers with (docs/words.md)
 const ALLOW = 'Allow';
 const DONT_ALLOW = "Don't allow";
@@ -155,7 +194,7 @@ const ANSWER_IN_WORDS = 'Answer in words';
 // call of its own, and the password or key box of a command of its own (needs.tsx). Another chat's card is read from its file
 // A permission the person answered in words, whose task is answering them: nothing to press until it has (gate.tsx, wordsOnGate)
 const isGateActing = (gate) => gate.talk?.at(-1)?.by === 'you';
-const needsPerson = (one) => Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)));
+const needsPerson = (one) => Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || Boolean(one.keyAsk) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)));
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set();
 // The engine's list of agents is read again this often, and the minutes move on
@@ -166,6 +205,8 @@ const WORKING = ['pending', 'running', 'waiting'];
 const NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/;
 const me = atom({ plugin: 'claudopus', key: 'me' }, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, isListOpened: false, window: 0 }, { shape: 'me-6' });
 const todos = atom({ plugin: 'claudopus', key: 'todos' }, [], { shape: 'todos-3' });
+// The topics and areas, by name and state, as the chat was last told them (topics.ts listKeys)
+const listSeen = atom({ plugin: 'claudopus', key: 'listSeen' }, [], { shape: 'list-seen-1' });
 const view = atom({ plugin: 'claudopus', key: 'view' }, { openId: '' }, { shape: 'view-5' });
 const servers = atom({ plugin: 'claudopus', key: 'servers' }, [], { shape: 'servers-2' });
 // Counts the passes that bring the screen up to date: each one redraws what reads it
@@ -191,11 +232,16 @@ const changeTodos = async ($, fn) => {
     const now = await read($, todos);
     const before = JSON.stringify(now);
     // (a task's card ends done only with its result: holdDone; and keeps what each of its results named: saidKept)
-    const hold = (list) => saidKept(list, holdDone(list, fn(list)));
+    // (and every question a card holds: the newest of those before comes up as one goes, keepAsks)
+    // (and each of the chat's own cards has its colour from the moment it is made: withColours, colours.tsx)
+    const hold = (list) => withColours(keepAsks(saidKept(list, holdDone(list, fn(list)))));
     const next = hold(now);
     if (JSON.stringify(next) === before)
         return now;
-    return update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)));
+    const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)));
+    // (and the ledger on disk with it, so a quit or a crash loses nothing: keep.tsx)
+    saveLedgerSoon($);
+    return written;
 };
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' }, false, { shape: 'shown-1' });
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
@@ -343,6 +389,8 @@ const talks = new Map();
 const folds = new Map();
 // The memory folder, ~/.claude/claudopus; set when the session starts
 let dir = '';
+// Claude Code's own folder, ~/.claude or CLAUDE_CONFIG_DIR's (configDir); set when the session starts
+let claudeDir = '';
 // The person's last message, for the pass that runs after the reply
 let said = '';
 // Each message of the person's in the chat's turn under way: only a message that carries one of them is their steer
@@ -362,6 +410,9 @@ const loadSettings = async ($) => {
         await personCheck($).catch(err => log($, `files not compared as the mod loads: ${String(err)}`));
     const config = await readConfig($, dir);
     isOff = config.agents === false;
+    // Task colours and links at the end of replies, each on as shipped (colours.tsx)
+    isColoured = config.taskColours !== false;
+    isLinked = config.replyLinks !== false;
     // Admin passwords an earlier version kept leave the keychain as the mod loads: none is kept any more
     void forgetKeptPasswords($).catch(() => undefined);
     person = typeof config.name === 'string' ? config.name.trim() : '';
@@ -512,7 +563,8 @@ let listDrawing = 0;
 // keep files) and anything large is never watched, so it cannot draw the panel again each second
 const isWatched = (path, text) => text.length < 64000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path);
 const drawnFiles = new Map();
-// Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
+// Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file, but for the one
+// key it adds to the person's own Claude Code settings when they hold none (setTaskCache)
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
 // Added to its end, never read and written back whole: every chat on this Mac writes here, and two rewriting it at once left runs of
 // empty bytes in it, which make grep take the log for binary and find nothing. Where the shell cannot add it, it is written whole

@@ -1,0 +1,224 @@
+"use strict";
+// Task colours and links at the end. Config's Task colours (`taskColours`, on as shipped) puts each chat reply about a task in a
+// box of that task's colour, headed by its name (a press opens its Details) and Reply (the box above the chat, to that task), and
+// gives its card the same colour dot. Links at the end (`replyLinks`, on as shipped) ends each chat reply with the links it gave,
+// each led by where it goes, and lists in a task's Details every link the chat gave about it. Which reply is about which task is
+// read from the chat's own transcript (../../mods/claudopus/hooks/colours.ts)
+// The two settings as this chat has them, read with the others (loadSettings)
+let isColoured = true;
+let isLinked = true;
+const EMPTY_COLOURS = { tasks: {}, replies: {}, texts: {}, quotes: {}, asked: {} };
+let colourIndex = EMPTY_COLOURS;
+let colourBuilder;
+let colourRunning;
+let colourWanted = 'none';
+let colourTimer;
+let colourWritten = '';
+const colourHex = (slot) => PALETTE[slot % PALETTE.length] ?? PALETTE[0];
+// Each card's colour, kept on the card (Todo.colour): the chat's own cards are given one as they are made, in the same change of
+// the list (changeTodos), the one least used by the tasks started just before, so tasks seen together never share one (27 Nov: two
+// working cards were both red). Cards made before this came in get theirs at the next change. The list as last given, by id
+const cardSlots = new Map();
+const withColours = (list) => {
+    const own = list.filter(one => !one.parentId && !one.chat);
+    const fresh = slotsFor(own.map(one => ({ id: one.id, startedAt: one.begunAt ?? one.startedAt, colour: one.colour })));
+    const next = Object.keys(fresh).length ? list.map(one => (fresh[one.id] === undefined ? one : { ...one, colour: fresh[one.id] })) : list;
+    for (const one of next)
+        if (one.colour !== undefined)
+            cardSlots.set(one.id, one.colour);
+    return next;
+};
+// The colour of a task of this chat's: its card's, else the one its replies were given; none while colours are off
+const taskColour = (id) => {
+    if (!isColoured)
+        return undefined;
+    const card = cardSlots.get(id);
+    if (card !== undefined)
+        return colourHex(card);
+    const slot = colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id];
+    return slot === undefined ? undefined : colourHex(slot);
+};
+// The links the chat's replies about a task gave, newest first; none while links are off
+const taskLinks = ($, id) => {
+    if (!isLinked)
+        return [];
+    // Its Details reads the rows since at most every 10 seconds, so a link given since shows there
+    colourSoon($, 10000);
+    return colourIndex.tasks[id]?.links ?? [];
+};
+const isColourRead = () => isColoured || isLinked;
+// The results this chat was given to pass on, the newest last: a reply that passes one on, as it came, is about its task
+const givenResults = [];
+const resultGiven = (id, text) => {
+    givenResults.push({ id, text: text.slice(0, 20000) });
+    givenResults.splice(0, Math.max(0, givenResults.length - 30));
+};
+// The tasks a drawn reply is about: the one whose result it passes on (given this load, or the end report a card keeps), else by
+// its row id, else by its words (the desktop app names a reply by its message's id)
+const replyTasks = async ($, requestId, text) => {
+    const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat);
+    const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults]);
+    if (passed && cards.some(one => one.id === passed)) {
+        colourBuilder ??= new ColourBuilder();
+        colourBuilder.pick(passed);
+        return { ids: [passed], cards };
+    }
+    return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards };
+};
+// One pass: reads the rows not yet read (every row the first time) and keeps what it found, redrawing when that changed
+const colourPass = async ($, isWhole) => {
+    const every = await $.session.messages().catch(() => []);
+    const rows = Array.isArray(every) ? every : [];
+    let builder = colourBuilder;
+    // Read afresh the first time, when asked, and when the transcript is shorter than what was read (a compaction)
+    if (!builder || isWhole || rows.length < builder.read)
+        builder = new ColourBuilder(builder?.colours ?? {});
+    const fresh = rows.slice(builder.read);
+    colourBuilder = builder;
+    builder.ingest(fresh);
+    const value = builder.index();
+    const json = JSON.stringify(value);
+    if (json === colourWritten)
+        return;
+    colourWritten = json;
+    colourIndex = value;
+    redraw($);
+};
+// Passes run one at a time; a call while one runs asks for one more after it
+const colourBuild = ($, isWhole) => {
+    if (!isColourRead())
+        return Promise.resolve();
+    if (colourRunning) {
+        colourWanted = isWhole || colourWanted === 'all' ? 'all' : 'more';
+        return colourRunning;
+    }
+    colourRunning = (async () => {
+        let next = isWhole ? 'all' : 'more';
+        while (next !== 'none') {
+            colourWanted = 'none';
+            await colourPass($, next === 'all');
+            next = colourWanted;
+        }
+    })()
+        .catch(err => log($, `replies not sorted by task: ${String(err)}`))
+        .finally(() => {
+        colourRunning = undefined;
+    });
+    return colourRunning;
+};
+// A pass soon, asked by a drawing that may show what the last pass did not read: a reply it knows nothing of, a task's Details. At
+// most one waits, and none starts within `gap` of the last, so a tab drawn every second reads the transcript only now and then.
+// (Not on each new row: Claude Code's hook for that runs on every row of every task, and held each of them up.)
+let colourPassAt = 0;
+const colourAsked = new Set();
+const colourSoon = ($, gap = 400) => {
+    if (colourTimer || !isColourRead())
+        return;
+    colourTimer = $.clock.after(400, () => {
+        colourTimer = undefined;
+        void $.clock.now().then(now => {
+            if (now - colourPassAt < gap)
+                return;
+            colourPassAt = now;
+            return colourBuild($, false);
+        });
+    });
+};
+// Reply on a reply's box opens the box above the chat, to that task: its answer box while it asks something, else the box Message
+// opens on its card, else the box that continues from its result. Only the terminal, whose bar has no box, opens its Details
+const replyToTask = async ($, id, surface) => {
+    if (surface === 'terminal')
+        return openWork($, id);
+    const one = (await read($, todos)).find(card => card.id === id);
+    if (one?.ask && needsPerson(one))
+        return openBar($, { kind: 'answer', id, one }, surface);
+    if (one && canChange(one))
+        return openBar($, { kind: 'change', id }, surface);
+    const kept = (await read($, reports)).find(r => r.agent === id);
+    if (kept)
+        return openBar($, { kind: 'continue', id: kept.id }, surface);
+    openWork($, id);
+};
+// What you wrote to a task, quoted small under its name in each reply about it, so you remember what you asked: about three lines
+// (its first three, at most QUOTE_CHARS, as small letters run about 80 to a line in a narrow chat), and View more for the rest. A box of
+// three rows would hold four lines of small letters: rows are the body text's. Its press is kept for the reply it was made on
+const quotesOpen = new Set();
+const QUOTE_LINES = 3;
+const QUOTE_CHARS = 240;
+const quoteShort = (words) => cut(words.split('\n').slice(0, QUOTE_LINES).join('\n'), QUOTE_CHARS);
+const quoteOf = ($, ui, key, words) => {
+    const short = quoteShort(words);
+    const isLong = short !== words;
+    const isOpen = quotesOpen.has(key);
+    return (<ui.Box key={`quote-${key}`} flexDirection="column">
+      <ui.Text key="quote-words" size="footnote" dimColor wrap="wrap">{`“${isLong && !isOpen ? `${short.replace(/\s*…$/, '')}…` : words}”`}</ui.Text>
+      {isLong ? (<ui.Button key={`quote-more-${key}-${presses}`} label={isOpen ? 'View less' : 'View more'} plain dimColor onPress={() => {
+                presses += 1;
+                if (isOpen)
+                    quotesOpen.delete(key);
+                else
+                    quotesOpen.add(key);
+                redraw($);
+            }}/>) : null}
+    </ui.Box>);
+};
+// A list of links, one a line, each led by where it goes
+const linkList = (links) => links.map(link => `- **${link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n');
+// A chat reply as drawn, with its task's box around it while colours are on and its links at its end while links are on
+const withTaskBox = async ($, e, reply, ui) => {
+    if (e.props.isSummary || e.props.text.trim() === NO_ANSWER)
+        return reply;
+    const given = isLinked ? replyLinksIn(e.props.text) : [];
+    const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [], cards: [] };
+    // A reply the last pass did not read: the rows since are read, and it is drawn again in its box
+    // (once for each text: a reply about no task stays out of its box, and asks no pass again)
+    const hash = colourTextHash(e.props.text);
+    if (isColoured && !ids.length && !colourIndex.texts[hash] && !colourAsked.has(hash))
+        (colourAsked.add(hash), colourSoon($));
+    const [first] = ids;
+    if (!first && !given.length)
+        return reply;
+    const { Box, Button, Markdown, Text } = ui;
+    const links = given.length ? (<Box key="reply-links" flexDirection="column">
+      <Text dimColor>Links</Text>
+      <Markdown text={linkList(given)}/>
+    </Box>) : null;
+    // A task's colour and name: from what the transcript told, else its card
+    const colourOfTask = (id) => taskColour(id) ?? colourHex(colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id] ?? 0);
+    const titleOfTask = (id) => colourIndex.tasks[id]?.title ?? (() => {
+        const card = cards.find(one => one.id === id);
+        return card ? titleOf(card) : 'Task';
+    })();
+    if (!first)
+        return (<Box key={`linked-${mark(e.requestId)}`} flexDirection="column" gap={1}>
+        {reply}
+        {links}
+      </Box>);
+    return (<Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={colourOfTask(first)} paddingX={1} gap={1}>
+      <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
+        {ids.map(id => {
+            return (<Box key={`task-${id}`} flexDirection="row" columnGap={2}>
+              {/* The dot outside the button, as the app draws a button's words in its own colour */}
+              <Box key={`task-name-${id}`} flexDirection="row">
+                <Text color={colourOfTask(id)}>● </Text>
+                <Button key={`task-open-${id}-${presses}`} plain hover={{ scope: `task-open-${id}`, underline: true }} onPress={() => openWork($, id)}>
+                  <Text bold>{cut(titleOfTask(id), 60)}</Text>
+                </Button>
+              </Box>
+              <Button key={`task-reply-${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))}/>
+            </Box>);
+        })}
+      </Box>
+      {(() => {
+            // The person's message this reply answers: as the transcript tells it, else the newest they sent its task, else the one
+            // that started it
+            // (a reply found by the result it passes on, which the transcript put with another task, answers the newest message to its own)
+            const hash = colourTextHash(e.props.text);
+            const isIndexed = (colourIndex.replies[e.requestId] ?? colourIndex.texts[hash])?.[0] === first;
+            const words = ((isIndexed ? (colourIndex.quotes[e.requestId] ?? colourIndex.quotes[hash]) : undefined) ?? colourIndex.asked[first] ?? cards.find(one => one.id === first)?.words ?? '').trim();
+            return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null;
+        })()}
+      {reply}
+      {links}
+    </Box>);
+};

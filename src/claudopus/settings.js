@@ -254,6 +254,7 @@ const configActs = ($) => ({
     // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
     gateMode: (mode) => configAct($, "Couldn't save the setting", () => regate($, { mode })),
     gateRemove: (host, command) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
+    memory: (surface) => void showMemory($, surface).catch(err => log($, `memory folder not opened: ${String(err)}`)),
     // How often the look runs, or only at Check now: one choice, written as the two keys
     lookEvery: (hours) => configAct($, "Couldn't save the setting", async () => {
         await setConfig($, dir, 'updates', hours ? undefined : false);

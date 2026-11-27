@@ -1,22 +1,39 @@
 "use strict";
-// Stats: reading Claude's records for the Stats tab (the sums and drawing are in ../../mods/claudopus/hooks/stats.tsx)
-// ---- Stats: reading Claude's records (the sums and drawing are in ./stats) ----
+// Stats: Claude's records read into what is kept, the Stats tab and the leaderboard (the sums and drawing are in
+// ../../mods/claudopus/hooks/stats.tsx, which says what is kept and why)
+// ---- Stats: reading Claude's records ----
 let jqPath = '';
+// No more than six jq at once, whichever chats they sum for: each is a process
+const jqLine = [];
+let jqBusy = 0;
 async function sumOf($, path) {
-    for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
-        const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined);
-        if (!r || r.exitCode !== 0)
-            continue;
-        jqPath = jq;
-        return parsed(r.stdout.trim(), { s: [], u: [], d: [] });
+    if (jqBusy >= 6)
+        await new Promise(go => jqLine.push(go));
+    else
+        jqBusy += 1;
+    try {
+        for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
+            const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined);
+            if (!r || r.exitCode !== 0)
+                continue;
+            jqPath = jq;
+            return parsed(r.stdout.trim(), { s: [], u: [], d: [] });
+        }
+        throw new Error('jq');
     }
-    throw new Error('jq');
+    finally {
+        // The next in line takes this one's place
+        const next = jqLine.shift();
+        if (next)
+            next();
+        else
+            jqBusy -= 1;
+    }
 }
-// Where a chat's records are: its own folder under ~/.claude/projects, found by its id
-async function chatFolderOf($, home, chatId, known) {
-    if (known && (await $.fs.stat(`${known}/${chatId}.jsonl`).catch(() => undefined)))
-        return known;
-    const root = `${home}/.claude/projects`;
+// Where a chat's records are: its own folder under the engine's projects folder (in ~/.claude, or in CLAUDE_CONFIG_DIR when the
+// person keeps Claude Code elsewhere: until 0.2.281 only ~/.claude was looked in, and such a Mac counted nothing), found by its id
+async function chatFolderOf($, chatId) {
+    const root = `${await configDir($)}/projects`;
     for (const entry of await $.fs.list(root).catch(() => [])) {
         if (entry.kind !== 'dir')
             continue;
@@ -25,71 +42,437 @@ async function chatFolderOf($, home, chatId, known) {
     }
     return '';
 }
-// Every transcript of one chat, summed, with what each was
-async function runsOf($, home, memory, chatId, hint = '') {
-    const cachePath = `${memory}/stats/${chatId}.json`;
-    const read = parsed(await readOr($, cachePath), { files: {} });
-    // Sums made by an earlier program are made again
-    const cache = read.v === CACHE_V ? read : { files: {} };
-    const folder = await chatFolderOf($, home, chatId, hint || cache.folder);
-    if (!folder)
-        return [];
+// The chats the mod has kept work for (finished/<chat id>.json), and this one
+async function chatsKept($, memory, chatId) {
+    const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean);
+    return [...new Set([chatId, ...kept])];
+}
+const statsText = ($, path) => $.fs.read(path).then(text => String(text), () => '');
+// ---- Stats: the kept files ----
+// A map kept across files that each stay well under the 4 MB the engine reads and writes whole: <base>.json, then <base>.1.json and
+// so on. The first says how many there are and holds what goes with the whole map (`head`). An entry stays in its file while that
+// has room, so a change writes one file. `e` is the keeping's own mark (all.json's): a file with another is from a keeping that
+// was started over, and reads as empty
+const PART_MOST = 1500000;
+const partPath = (base, i) => (i ? `${base}.${i}.json` : `${base}.json`);
+async function shardsRead($, base, epoch, head) {
+    const kept = { base, head, of: new Map(), home: new Map(), lens: new Map(), sizes: [0], dirty: new Set(), isBroken: false };
+    const text = await statsText($, partPath(base, 0));
+    if (!text)
+        return kept;
+    const first = parsed(text, undefined);
+    if (!first || typeof first !== 'object')
+        return ((kept.isBroken = true), kept);
+    if (first.v !== CACHE_V || first.e !== epoch)
+        return kept;
+    const rest = await Promise.all(Array.from({ length: Math.max(0, (first.n ?? 1) - 1) }, (_, i) => statsText($, partPath(base, i + 1))));
+    const parts = [first, ...rest.map(one => parsed(one, undefined))];
+    if (parts.some(one => !one || one.v !== CACHE_V || one.e !== epoch))
+        return ((kept.isBroken = true), kept);
+    kept.head = first.head ?? head;
+    kept.sizes = [text.length, ...rest.map(one => one.length)];
+    parts.forEach((part, i) => {
+        for (const [key, value] of Object.entries(part?.of ?? {}))
+            (kept.of.set(key, value), kept.home.set(key, i));
+    });
+    return kept;
+}
+const shardSet = (kept, key, value) => {
+    const home = kept.home.get(key);
+    const was = kept.of.get(key);
+    if (home !== undefined)
+        ((kept.sizes[home] = (kept.sizes[home] ?? 0) - (was === undefined ? 0 : (kept.lens.get(key) ?? JSON.stringify(was).length + key.length + 4))), kept.dirty.add(home));
+    if (value === undefined)
+        return void (kept.of.delete(key), kept.home.delete(key), kept.lens.delete(key));
+    const len = JSON.stringify(value).length + key.length + 4;
+    // Where it was while that file has room, else the first with room (an empty one takes anything), else a new one
+    const fits = (i) => (kept.sizes[i] ?? 0) + len <= PART_MOST || (kept.sizes[i] ?? 0) < 100;
+    const found = home !== undefined && fits(home) ? home : kept.sizes.findIndex((_, i) => fits(i));
+    const at = found < 0 ? (kept.dirty.add(0), kept.sizes.push(0) - 1) : found;
+    (kept.of.set(key, value), kept.home.set(key, at), kept.lens.set(key, len), (kept.sizes[at] = (kept.sizes[at] ?? 0) + len), kept.dirty.add(at));
+};
+async function shardsWrite($, kept, epoch) {
+    for (const i of [...kept.dirty].sort((a, b) => a - b)) {
+        const of = {};
+        for (const [key, at] of kept.home)
+            if (at === i)
+                of[key] = kept.of.get(key);
+        await $.fs.write(partPath(kept.base, i), JSON.stringify(i ? { v: CACHE_V, e: epoch, of } : { v: CACHE_V, e: epoch, n: kept.sizes.length, head: kept.head, of }));
+    }
+    kept.dirty.clear();
+}
+const headNew = () => ({ folder: '', cells: {}, months: [] });
+// stats/all.json: the keeping's mark; when the chats were last looked at, and all of them; where the look at a few quiet chats
+// each time has got to; how many chats are counted; the chats changed in the last two days; every whole day's tokens and every
+// whole month's sums, each with when its file was last written, so a copy held in a chat is known to be old; and how the months'
+// files were made (`mv`): a keeping made before they held each helper's time has them made again from the chats' files, once
+// (nothing is summed again)
+const MONTHS_V = 1;
+const allNew = (now) => ({ v: CACHE_V, mv: MONTHS_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} });
+async function allRead($, memory) {
+    const all = parsed(await statsText($, `${memory}/stats/all.json`), undefined);
+    return all && all.v === CACHE_V && typeof all.epoch === 'string' && all.days && all.months ? all : undefined;
+}
+const statsOpen = { epoch: '', days: new Map(), months: new Map() };
+const statsOpened = (open, at, one, most) => {
+    open.delete(at);
+    open.set(at, one);
+    for (const old of open.keys())
+        if (open.size > most)
+            open.delete(old);
+    return one;
+};
+// A file all.json counts on that is gone or cut short: the keeping is started over (refreshNow)
+const KEPT_BROKEN = 'kept files unreadable';
+async function dayRead($, memory, all, day) {
+    if (statsOpen.epoch !== all.epoch)
+        ((statsOpen.epoch = all.epoch), statsOpen.days.clear(), statsOpen.months.clear());
+    const rev = all.days[day]?.rev ?? 0;
+    const open = statsOpen.days.get(day);
+    if (open && open.rev === rev)
+        return open.rows;
+    const rows = await shardsRead($, `${memory}/stats/days/${day}`, all.epoch, null);
+    if (rows.isBroken || (rev && !rows.of.size))
+        throw new Error(KEPT_BROKEN);
+    return statsOpened(statsOpen.days, day, { rev, rows }, 8).rows;
+}
+async function monthRead($, memory, all, month) {
+    if (statsOpen.epoch !== all.epoch)
+        ((statsOpen.epoch = all.epoch), statsOpen.days.clear(), statsOpen.months.clear());
+    const rev = all.months[month]?.rev ?? 0;
+    const open = statsOpen.months.get(month);
+    if (open && open.rev === rev)
+        return open;
+    const kept = await shardsRead($, `${memory}/stats/months/${monthName(month)}`, all.epoch, null);
+    if (kept.isBroken || (rev && !kept.of.size))
+        throw new Error(KEPT_BROKEN);
+    return statsOpened(statsOpen.months, month, { rev, kept }, 30);
+}
+const monthPieces = (open) => (open.read ??= { pieces: [...open.kept.of].flatMap(([chat, one]) => one.p.map(row => rowPiece(chat, row))), turns: [...open.kept.of.values()].flatMap(one => one.t) });
+// ---- Stats: Claude's records, looked at again ----
+// One chat at a time looks: a folder made in one step, which only one can make, holding when its maker last wrote to it. One left
+// by a chat that closed mid-look is taken over after LOCK_STALE
+const LOCK_STALE = 90000;
+async function statsLock($, memory, now) {
+    const lock = `${memory}/stats/lock`;
+    const take = () => $.process.run(['/bin/sh', '-c', 'mkdir -p "$1/chats" "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false);
+    if (await take())
+        return true;
+    if (now - Number(await statsText($, `${lock}/at`)) < LOCK_STALE)
+        return false;
+    await $.process.run(['rm', '-rf', lock], { timeoutMs: 5000 }).catch(() => undefined);
+    return take();
+}
+async function whatOf($, f, flowTitle) {
+    if (f.key === 'chat')
+        return { kind: 'chat', parent: '', title: 'This chat', fin: false };
+    const meta = parsed(await statsText($, f.path.replace(/\.jsonl$/, '.meta.json')), {});
+    if (f.flow)
+        return { kind: 'flow', parent: f.flow, title: flowTitle, fin: Boolean(meta.finished), flow: f.flow };
+    return { kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background task', fin: Boolean(meta.finished) };
+}
+// A chat as looked at: its file with what changed put in, the days whose responses changed (each transcript's of that day, or
+// none), whether anything of it changed, when its newest transcript was written, and whether it had a thread of its own before
+const OLD_KEPT_FOR = 3 * 86400000;
+const HOUR = 3600000;
+// Looks at one chat's transcripts: one whose file is as it was is not read, and one that changed is summed again, once. A
+// transcript no longer there keeps what was kept of it. `isThorough` also reads again what an unfinished one that has been quiet
+// for an hour says it was, and looks again for a chat whose records were not found
+async function chatCheck($, memory, chatId, hint, epoch, now, isThorough, isRemade = false) {
+    const index = await shardsRead($, `${memory}/stats/chats/${chatId}`, epoch, headNew());
+    // Sums kept the old way (stats/<chat>.json) are carried over the first time: none of what they hold is summed again. The file
+    // is left as it is, as a chat still on an older Claudopus goes on reading and writing it, and removed once nothing has for days
+    const oldPath = `${memory}/stats/${chatId}.json`;
+    const carried = index.of.size ? undefined : parsed(await statsText($, oldPath), undefined);
+    const old = carried?.v === 5 ? carried : undefined;
+    const checked = { id: chatId, index, days: [], isChanged: false, last: 0, hadMain: index.of.has('chat') };
+    const head = index.head;
+    if (old && !head.old)
+        ((head.old = 1), index.dirty.add(0));
+    if (isThorough && head.old && index.of.size) {
+        const left = await $.fs.stat(oldPath).catch(() => undefined);
+        if (left && now - left.mtimeMs > OLD_KEPT_FOR)
+            await $.process.run(['rm', '-f', oldPath], { timeoutMs: 5000 }).catch(() => undefined);
+        if (!left || now - left.mtimeMs > OLD_KEPT_FOR)
+            ((head.old = undefined), index.dirty.add(0));
+    }
+    const mainAt = (folder) => (folder ? $.fs.stat(`${folder}/${chatId}.jsonl`).catch(() => undefined) : Promise.resolve(undefined));
+    let folder = hint;
+    let main = await mainAt(folder);
+    for (const known of [head.folder, old?.folder ?? ''])
+        if (!main && known && known !== folder)
+            main = await mainAt((folder = known));
+    // A chat whose records were not found is looked for again a day later, so records that were elsewhere still come to count
+    const isSought = !main && !head.folder && (isThorough || !head.sought || now - head.sought >= DAY);
+    if (isSought)
+        main = await mainAt((folder = await chatFolderOf($, chatId)));
+    if (!main)
+        folder = head.folder;
+    if (!folder) {
+        if (!head.sought || isSought)
+            ((head.sought = now), index.dirty.add(0));
+        return checked;
+    }
+    if (head.folder !== folder || head.sought)
+        ((index.head = { ...head, folder, sought: undefined }), index.dirty.add(0));
     const subs = `${folder}/${chatId}/subagents`;
     const flowDirs = (await $.fs.list(`${subs}/workflows`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name);
     const listed = [
         ...(await $.fs.list(subs).catch(() => [])).map(e => ({ ...e, dir: subs, flow: '' })),
         ...(await Promise.all(flowDirs.map(async (name) => (await $.fs.list(`${subs}/workflows/${name}`).catch(() => [])).map(e => ({ ...e, dir: `${subs}/workflows/${name}`, flow: name }))))).flat(),
     ].filter(e => /^agent-\w+\.jsonl$/.test(e.name));
-    const chatFile = (await $.fs.list(folder).catch(() => [])).find(e => e.name === `${chatId}.jsonl`);
-    const files = [...listed.map(e => ({ path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow, id: e.name.slice(6, -6) })), ...(chatFile ? [{ path: `${folder}/${chatFile.name}`, size: chatFile.size, mtime: chatFile.mtimeMs, flow: '', id: '' }] : [])];
-    const next = { v: CACHE_V, folder, files: {} };
-    let isChanged = folder !== cache.folder;
-    // A few at a time: each is a process
-    for (let at = 0; at < files.length; at += 6)
-        await Promise.all(files.slice(at, at + 6).map(async (f) => {
-            const was = cache.files[f.path];
-            if (was && was.size === f.size && was.mtime === f.mtime)
-                next.files[f.path] = was;
-            else {
-                next.files[f.path] = { size: f.size, mtime: f.mtime, sum: await sumOf($, f.path) };
-                isChanged = true;
-            }
-        }));
-    if (isChanged || Object.keys(cache.files).length !== files.length)
-        await $.fs.write(`${memory}/stats/${chatId}.json`, JSON.stringify(next)).catch(() => undefined);
+    const files = [
+        ...listed.map(e => ({ key: `${e.flow ? `${e.flow}/` : ''}${e.name.slice(0, -6)}`, path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow })),
+        ...(main ? [{ key: 'chat', path: `${folder}/${chatId}.jsonl`, size: main.size, mtime: main.mtimeMs, flow: '' }] : []),
+    ];
     const flowTitle = new Map();
     for (const name of flowDirs)
-        flowTitle.set(name, parsed(await readOr($, `${memory}/flows/${name}.json`), {}).title || 'Workflow');
-    return Promise.all(files.map(async (f) => {
-        const sum = next.files[f.path]?.sum ?? { s: [], u: [], d: [] };
-        if (!f.id)
-            return { id: chatId, kind: 'chat', parent: '', title: 'This chat', isFinished: false, sum };
-        const meta = parsed(await readOr($, f.path.replace(/\.jsonl$/, '.meta.json')), {});
-        if (f.flow)
-            return { id: f.id, kind: 'flow', parent: f.flow, title: flowTitle.get(f.flow) ?? 'Workflow', isFinished: Boolean(meta.finished) || (sum.s.at(-1)?.[1] ?? 0) < Date.now() - GAP, sum };
-        return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background task', isFinished: Boolean(meta.finished), sum };
-    }));
+        flowTitle.set(name, parsed(await statsText($, `${memory}/flows/${name}.json`), {}).title || 'Workflow');
+    const look = async (f) => {
+        const was = index.of.get(f.key);
+        const isSame = was !== undefined && was.size === f.size && was.mtime === f.mtime;
+        // What a finished transcript was never changes; nor does that of one quiet for an hour, until it is written to again
+        const what = was && isSame && f.key !== 'chat' && (was.fin || (!isThorough && now - f.mtime > HOUR))
+            ? { kind: was.kind, parent: was.parent, title: f.flow ? (flowTitle.get(f.flow) ?? 'Workflow') : was.title, fin: was.fin, ...(was.flow ? { flow: was.flow } : {}) }
+            : await whatOf($, f, flowTitle.get(f.flow) ?? 'Workflow');
+        if (was && isSame && was.kind === what.kind) {
+            if (was.parent !== what.parent || was.title !== what.title || was.fin !== what.fin)
+                (shardSet(index, f.key, { ...was, ...what }), (checked.isChanged = true));
+            return;
+        }
+        const kept5 = old?.files?.[f.path];
+        const sum = kept5 && kept5.size === f.size && kept5.mtime === f.mtime ? kept5.sum : await sumOf($, f.path);
+        const { kept, rows } = sumKept(sum, what, f.size, f.mtime);
+        for (const day of new Set([...Object.keys(was?.days ?? {}), ...Object.keys(kept.days)])) {
+            const [a, b] = [was?.days[day], kept.days[day]];
+            if (!a || !b || a[0] !== b[0] || a[1] !== b[1])
+                checked.days.push({ day: Number(day), key: `${chatId} ${f.key}`, entry: rows.get(Number(day)) });
+        }
+        shardSet(index, f.key, kept);
+        checked.isChanged = true;
+    };
+    for (let at = 0; at < files.length; at += 12)
+        await Promise.all(files.slice(at, at + 12).map(look));
+    checked.last = files.reduce((last, f) => Math.max(last, f.mtime), 0);
+    // (its months made again from what is kept of it)
+    if (isRemade && index.of.size)
+        checked.isChanged = true;
+    return checked;
 }
-// The chats the mod has kept work for (finished/<chat id>.json), and this one
-async function chatsKept($, memory, chatId) {
-    const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean);
-    return [...new Set([chatId, ...kept])];
+// Puts what a few chats' looks found into the kept files: each changed day's responses and its tokens, each changed month's pieces
+// and its sums, then all.json, then the chats' own files, in that order, so a look cut short is only made again
+async function statsApply($, memory, all, checked, now, isRemade = false) {
+    const byDay = new Map();
+    for (const one of checked)
+        for (const change of one.days)
+            byDay.set(change.day, [...(byDay.get(change.day) ?? []), change]);
+    for (const [day, changes] of byDay) {
+        const rows = await dayRead($, memory, all, day);
+        for (const { key, entry } of changes)
+            shardSet(rows, key, entry);
+        const whole = Object.fromEntries(rows.of);
+        if (rows.of.size)
+            all.days[day] = { rev: now, c: dayCells(whole, day) };
+        else
+            delete all.days[day];
+        for (const one of checked) {
+            if (!changes.some(change => change.key.startsWith(`${one.id} `)))
+                continue;
+            const own = dayCells(whole, day, -Infinity, one.id);
+            if (Object.keys(own).length)
+                one.index.head.cells[day] = own;
+            else
+                delete one.index.head.cells[day];
+            one.index.dirty.add(0);
+        }
+        await shardsWrite($, rows, all.epoch);
+        statsOpened(statsOpen.days, day, { rev: all.days[day]?.rev ?? 0, rows }, 8);
+    }
+    const months = new Set();
+    for (const one of checked) {
+        // A chat none of whose transcripts are there any more keeps the pieces kept of it
+        if (!one.isChanged || !one.index.of.size)
+            continue;
+        const { pieces, turns } = piecesKept(one.id, Object.fromEntries(one.index.of));
+        const next = monthsKept(pieces, turns);
+        for (const month of new Set([...one.index.head.months, ...next.keys()])) {
+            const open = await monthRead($, memory, all, month);
+            if (JSON.stringify(open.kept.of.get(one.id)) === JSON.stringify(next.get(month)))
+                continue;
+            shardSet(open.kept, one.id, next.get(month));
+            open.read = undefined;
+            months.add(month);
+        }
+        one.index.head.months = [...next.keys()];
+        one.index.dirty.add(0);
+    }
+    // Every month's sums made again, those of chats whose files are gone too
+    if (isRemade)
+        for (const month of Object.keys(all.months))
+            months.add(Number(month));
+    for (const month of months) {
+        const open = await monthRead($, memory, all, month);
+        const { pieces, turns } = monthPieces(open);
+        if (open.kept.of.size)
+            all.months[month] = { rev: now, part: partOf(piecesIn(pieces), turns, monthFrom(month), monthFrom(month + 1)) };
+        else
+            delete all.months[month];
+        open.rev = all.months[month]?.rev ?? 0;
+        await shardsWrite($, open.kept, all.epoch);
+    }
+    for (const one of checked) {
+        if (one.index.of.has('chat') !== one.hadMain)
+            all.counted += one.hadMain ? -1 : 1;
+        if (one.last > now - 2 * DAY)
+            all.recent[one.id] = one.last;
+    }
+    for (const [id, last] of Object.entries(all.recent))
+        if (last <= now - 2 * DAY)
+            delete all.recent[id];
+    if (byDay.size || months.size || checked.some(one => one.isChanged))
+        await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all));
+    for (const one of checked)
+        if (one.index.dirty.size)
+            await shardsWrite($, one.index, all.epoch);
 }
-async function loadStats($, scope, home, memory, chatId, hint, now) {
+// The chats a look at all of them goes through. Every one the first time, and when `isThorough`. Else this chat, the chats open
+// now or since the last look (each writes its beat every few seconds), those changed in the last day, those never looked at, and
+// a few of the quiet ones in turn, so that each is looked at again within the hour
+const STATS_BATCH = 4;
+const SWEEP_EACH = 12;
+const SWEEP_EVERY = 10 * 60000;
+async function chatsDue($, memory, chatId, all, now, isThorough) {
+    const ids = await chatsKept($, memory, chatId);
+    if (isThorough)
+        return ids;
+    const have = new Set((await $.fs.list(`${memory}/stats/chats`).catch(() => [])).map(e => /^(.+?)(?:\.\d+)?\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean));
+    const open = new Set((await $.fs.list(`${memory}/keep`).catch(() => [])).filter(e => e.name.endsWith('.beat') && e.mtimeMs > all.at - 5 * 60000).map(e => e.name.slice(0, -5)));
+    const sorted = [...ids].sort();
+    const after = Math.max(0, sorted.findIndex(id => id > all.cursor));
+    const turn = new Set(Array.from({ length: Math.min(SWEEP_EACH, sorted.length) }, (_, i) => sorted[(after + i) % sorted.length] ?? ''));
+    all.cursor = [...turn].at(-1) ?? '';
+    return ids.filter(id => id === chatId || open.has(id) || !have.has(id) || (all.recent[id] ?? 0) > now - DAY || turn.has(id));
+}
+// Looks at Claude's records again and keeps what changed: this chat's alone, or the chats that may have changed. 'busy' when
+// another chat is looking: what is kept is as new as that chat makes it
+let statsLooking = Promise.resolve();
+const statsRefresh = ($, memory, chatId, hint, scope, now, isLooking = false) => {
+    const next = statsLooking.then(() => refreshNow($, memory, chatId, hint, scope, now, isLooking));
+    statsLooking = next.catch(() => undefined);
+    return next;
+};
+async function refreshNow($, memory, chatId, hint, scope, now, isLooking) {
+    if (!(await statsLock($, memory, now)))
+        return 'busy';
+    const pass = async (all, isNew) => {
+        // Every chat the first time; and again when Stats is open on all of them and that was not done in the last ten minutes
+        const isThorough = scope === 'all' && (!all.swept || (isLooking && now - all.swept >= SWEEP_EVERY));
+        // Months made before they held each helper's time are made again from every chat's file, once
+        const isRemade = all.mv !== MONTHS_V;
+        const ids = isRemade ? await chatsKept($, memory, chatId) : scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId];
+        let saidAt = now;
+        for (let at = 0; at < ids.length; at += STATS_BATCH) {
+            const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || (scope === 'chat' && id === chatId), isRemade)));
+            await statsApply($, memory, all, checked, now, isRemade && at + STATS_BATCH >= ids.length);
+            // A long look says it is still at it, so no other chat takes it over
+            const clock = await $.clock.now();
+            if (clock - saidAt >= LOCK_STALE / 4)
+                ((saidAt = clock), await $.fs.write(`${memory}/stats/lock/at`, String(clock)).catch(() => undefined));
+        }
+        if (isRemade)
+            ((all.mv = MONTHS_V), await log($, `stats: the months were made again from ${ids.length} chats, with each helper's time`));
+        // A chat with nothing to keep yet still has its figures: none
+        if (scope !== 'all')
+            return void ((isNew || isRemade) && (await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))));
+        ((all.at = now), isThorough && (all.swept = now));
+        await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all));
+    };
+    try {
+        const had = await allRead($, memory);
+        await pass(had ?? allNew(now), !had).catch(async (err) => {
+            if (!String(err).includes(KEPT_BROKEN))
+                throw err;
+            // Started over under a new mark: every kept file with the old one reads as empty, and every chat is summed again
+            await log($, 'stats: a kept file was gone or cut short, so the sums are made again');
+            (statsOpen.days.clear(), statsOpen.months.clear());
+            await pass(allNew(now), true);
+        });
+        return 'done';
+    }
+    finally {
+        await $.process.run(['rm', '-rf', `${memory}/stats/lock`], { timeoutMs: 5000 }).catch(() => undefined);
+    }
+}
+async function statsFor($, memory, chatId, scope, froms, now, isWhole) {
+    const all = await allRead($, memory);
+    if (!all || (scope === 'all' && !all.swept))
+        return undefined;
+    const edges = new Map();
+    const edgesOf = async (cells) => {
+        for (const from of froms) {
+            const day = dayNo(from);
+            if (cells[day] && from > day * DAY && !edges.has(day))
+                edges.set(day, Object.fromEntries((await dayRead($, memory, all, day)).of));
+        }
+    };
+    if (scope === 'chat') {
+        const index = await shardsRead($, `${memory}/stats/chats/${chatId}`, all.epoch, headNew());
+        const { pieces, turns } = piecesKept(chatId, Object.fromEntries(index.of));
+        const months = new Map([...monthsKept(pieces, turns)].map(([month, one]) => [month, { pieces: one.p.map(row => rowPiece(chatId, row)), turns: one.t }]));
+        await edgesOf(index.head.cells);
+        return { kept: { cells: index.head.cells, edge: (day, from) => dayCells(edges.get(day) ?? {}, day, from, chatId), parts: {}, months, first: chatId }, chats: 1, all };
+    }
+    await edgesOf(all.days);
+    const begins = froms.map(from => monthNo(Math.max(0, from)));
+    const months = new Map();
+    for (const month of Object.keys(all.months).map(Number))
+        if (isWhole ? month >= Math.min(...begins) : begins.includes(month) || month >= monthNo(now - GAP))
+            months.set(month, monthPieces(await monthRead($, memory, all, month)));
+    const cells = Object.fromEntries(Object.entries(all.days).map(([day, one]) => [day, one.c]));
+    const parts = Object.fromEntries(Object.entries(all.months).map(([month, one]) => [month, one.part]));
+    return { kept: { cells, edge: (day, from) => dayCells(edges.get(day) ?? {}, day, from), parts, months, first: chatId }, chats: all.counted, all };
+}
+// The figures the tab shows, added up from what is kept: today, 7 and 30 days each time, all time once it has been asked for
+async function statsShow($, scope, memory, chatId, now) {
+    const was = held.get(scope);
+    const ranges = RANGES.filter(range => range !== 'all' || statsShown.range === 'all' || was?.shown.all);
+    const got = await statsFor($, memory, chatId, scope, ranges.map(range => rangeFrom(range, now)), now, true);
+    if (!got)
+        return false;
+    const shown = {};
+    for (const range of ranges)
+        shown[range] = statsFrom(got.kept, rangeFrom(range, now), now);
+    held.set(scope, { shown, svgs: new Map(), chats: got.chats, at: held.get(scope)?.at ?? 0 });
+    return true;
+}
+// The tab's figures: drawn at once from what is kept, then Claude's records are looked at again, at most once a minute, and the
+// figures drawn again from what that changed
+const MEMORY_EVERY = 5 * 60000;
+let memoryReadAt = 0;
+async function loadStats($, scope, memory, chatId, hint, now) {
     if (reading.has(scope) || !chatId)
         return;
     const was = held.get(scope);
-    if (was && now - was.at < READ_EVERY)
+    const isDue = !was || now - was.at >= READ_EVERY;
+    if (!isDue && was.shown[statsShown.range])
         return;
     reading.add(scope);
     try {
-        await loadMemorySizes($, memory).catch(() => undefined);
-        const ids = scope === 'chat' ? [chatId] : await chatsKept($, memory, chatId);
-        const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat();
-        held.set(scope, { runs, at: now });
+        if (now - memoryReadAt >= MEMORY_EVERY)
+            ((memoryReadAt = now), void loadMemorySizes($, memory).then(() => drawAgain($), () => undefined));
+        if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now)))
+            drawAgain($);
+        if (!isDue)
+            return;
+        const looked = await statsRefresh($, memory, chatId, hint, scope, now, true);
+        await statsShow($, scope, memory, chatId, now);
+        // While another chat is looking, this one asks again in a few seconds
+        held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: looked === 'busy' ? now - READ_EVERY + 5000 : now, error: undefined });
+        if (looked === 'busy')
+            $.clock.after(5000, () => drawAgain($));
     }
     catch (err) {
-        held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` });
+        held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` });
     }
     finally {
         reading.delete(scope);
@@ -120,10 +503,10 @@ async function loadMemorySizes($, memory) {
 // Stats: what the work added up to, in a tab of its own, opened in front like Results
 const STATS_PANE = 'stats';
 const STATS_TITLE = 'Stats';
+const statsHint = async ($) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`;
 const statsRead = async ($, scope) => {
-    const home = (await $.env.get('HOME')) ?? '';
     const { id } = await read($, me);
-    await loadStats($, scope, home, dir, id, `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`, await $.clock.now());
+    await loadStats($, scope, dir, id, await statsHint($), await $.clock.now());
 };
 const openStats = async ($) => {
     presses += 1;
@@ -132,4 +515,234 @@ const openStats = async ($) => {
 };
 const statsButton = ($, ui, isKeyed = false) => (<ui.Box key="stats-button" flexShrink={0}>
     <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey={isKeyed ? 's' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))}/>
+  </ui.Box>);
+// ---- The leaderboard on claudopus.ai ----
+// Opt in: nothing about the person leaves this Mac until they join from Stats with a username nobody has. Joining returns a secret
+// kept in leaderboard.json in the memory folder; with it Claudopus sends the person's sums (never a title, a path or a word anyone
+// wrote: boardRange) every few minutes and only what changed, from one chat at a time, and Leave takes the row off the board at once. The board is a Supabase
+// project's lb_* functions (supabase/leaderboard.sql), reached with its publishable key, which is public by design
+const BOARD_SITE = 'https://claudopus.ai/leaderboard';
+const BOARD_API = 'https://wezffxcyofkyhoowwjwi.supabase.co/rest/v1/rpc';
+const BOARD_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U';
+const BOARD_EVERY = 3 * 60000;
+const boardNow = { file: {}, said: '', isBusy: false, waiting: 0, turn: Promise.resolve() };
+const boardPath = () => `${dir}/leaderboard.json`;
+const boardLoad = async ($) => (boardNow.file = parsed(await readOr($, boardPath()), {}));
+const boardSave = async ($, file) => {
+    boardNow.file = file;
+    await $.fs.write(boardPath(), JSON.stringify(file));
+};
+// One call of the board's functions: curl with the body on its standard input, the status on the last line
+const boardCall = async ($, fn, args) => {
+    const r = await $.process
+        .run(['curl', '-q', '-sS', '-m', '20', '-X', 'POST', '-H', `apikey: ${BOARD_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@-', '-w', '\n%{http_code}', `${BOARD_API}/${fn}`], { stdin: JSON.stringify(args), timeoutMs: 25000 })
+        .catch(() => ({ exitCode: 1, stdout: '' }));
+    const text = r.stdout ?? '';
+    const cut = text.lastIndexOf('\n');
+    const status = Number(text.slice(cut + 1)) || 0;
+    return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed(cut > 0 ? text.slice(0, cut) : '', undefined) };
+};
+// The person's sums over every range, from what is kept of every chat's records, looked at again first unless `isHeld`; the
+// timeline only while they make it public. Undefined while the records have never all been read (another chat is at it)
+const boardFigures = async ($, isTimelinePublic, isHeld = false) => {
+    const { id } = await read($, me);
+    const now = await $.clock.now();
+    if (!isHeld)
+        await statsRefresh($, dir, id, await statsHint($), 'all', now).catch(err => log($, `stats not read for the leaderboard: ${String(err)}`));
+    const since = await installedAt($);
+    const got = await statsFor($, dir, id, 'all', RANGES.map(range => boardFrom(range, now, since)), now, false);
+    if (!got)
+        return undefined;
+    const figures = {};
+    for (const range of RANGES)
+        figures[range] = boardRange(statsFrom(got.kept, boardFrom(range, now, since), now));
+    if (!isTimelinePublic)
+        return figures;
+    // The newest tasks, as many as the timeline holds: older months are read only until it is full
+    for (;;) {
+        const s = statsFrom(got.kept, boardFrom('all', now, since), now);
+        figures.timeline = timelineOf(s.pieces, s.time.first, s.starts);
+        const older = Object.keys(got.all.months).map(Number).filter(month => month >= monthNo(boardFrom('all', now, since)) && !got.kept.months.has(month)).sort((a, b) => b - a)[0];
+        const starts = s.pieces.map(p => p.spans[0]?.[0] ?? 0).sort((a, b) => b - a);
+        if (older === undefined || (figures.timeline.pieces.length < s.pieces.length && (starts[figures.timeline.pieces.length - 1] ?? 0) >= monthFrom(older + 1)))
+            return figures;
+        got.kept.months.set(older, monthPieces(await monthRead($, dir, got.all, older)));
+    }
+};
+// When Claudopus was first installed on this Mac, kept in installed.json: the first time asked, the memory folder's own birth (it is
+// made by the first load), else now. The board counts nothing from before it
+const installedAt = async ($) => {
+    const kept = parsed(await readOr($, `${dir}/installed.json`), {}).at;
+    if (typeof kept === 'number' && kept > 0)
+        return kept;
+    const born = await $.process.run(isLinux ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined);
+    const seconds = Number(born?.stdout.trim());
+    const at = seconds > 0 ? seconds * 1000 : await $.clock.now();
+    await $.fs.write(`${dir}/installed.json`, JSON.stringify({ at })).catch(() => undefined);
+    return at;
+};
+const UNREACHED = 'Couldn’t reach the leaderboard. Try again in a minute.';
+// The board's calls, one at a time in the order made: a press never waits on a call it can't see, nor is dropped for one (on 0.2.261
+// a Join pressed while one was on its way did nothing at all)
+const boardInTurn = ($, call) => {
+    ;
+    ((boardNow.waiting += 1), (boardNow.isBusy = true));
+    const done = () => void ((boardNow.waiting -= 1), (boardNow.isBusy = boardNow.waiting > 0), drawAgain($));
+    const r = boardNow.turn.then(call);
+    boardNow.turn = r.then(done, done);
+    return r;
+};
+// A press: what it is doing shows at once, then what it came to
+const boardAct = ($, doing, act) => {
+    ;
+    ((boardNow.said = doing), drawAgain($));
+    return boardInTurn($, async () => {
+        ;
+        ((boardNow.said = doing), drawAgain($));
+        try {
+            boardNow.said = await act();
+        }
+        catch (err) {
+            ;
+            ((boardNow.said = UNREACHED), log($, `leaderboard: ${String(err)}`));
+        }
+        finally {
+            void readBoard($, true).catch(() => undefined);
+        }
+    });
+};
+// Joining sends the figures read last, so it answers in a moment; the full figures follow straight after, and the board is read again
+const joinBoard = ($, name) => {
+    if (!NAME_RULE.test(name))
+        return void ((boardNow.said = 'A username is 3 to 20 letters, digits, - or _, with no spaces.'), drawAgain($));
+    return boardAct($, `Joining as ${name}…`, async () => {
+        if (boardNow.file.token)
+            return boardNow.said;
+        const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: (await boardFigures($, false, true)) ?? {} });
+        if (r.status === 409)
+            return `Someone already has the username ${name}. Choose another.`;
+        if (!r.ok || typeof r.body !== 'string')
+            return UNREACHED;
+        await boardSave($, { name, token: r.body, isPublic: false, sentAt: await $.clock.now() });
+        await $.fs.write(boardSentPath(), '{}').catch(() => undefined);
+        const joined = `✓ You joined as ${name}. Your stats are private until you make them public.`;
+        ((boardNow.said = joined), drawAgain($));
+        void readBoard($, true).catch(() => undefined);
+        await pushBoard($, false, false);
+        return joined;
+    });
+};
+const leaveBoard = ($) => boardAct($, 'Taking you off the leaderboard…', async () => {
+    const r = await boardCall($, 'lb_leave', { p_token: boardNow.file.token ?? '' });
+    if (!r.ok)
+        return 'Couldn’t reach the leaderboard, so you’re still on it. Press Leave again in a minute.';
+    await boardSave($, {});
+    await $.fs.write(boardSentPath(), '{}').catch(() => undefined);
+    return '✓ You left the leaderboard. Your figures are gone from it.';
+});
+// Whether the timeline is public: as the stats are, for a file from before it had a switch of its own
+const timelineShown = (file) => Boolean(file.isTimelinePublic ?? file.isPublic);
+// Sends the board what changed since it was last sent (boardDelta), and whether the stats and the timeline are public; nothing at
+// all when nothing did. What the board then holds is kept in leaderboard-sent.json with the mark it was sent under: the board
+// takes a change only on top of that mark, and asks for everything ('full') when it holds something else, as after a send from
+// an older Claudopus or one whose answer was lost. A secret the board no longer knows (left from another Mac) clears this one too
+const boardSentPath = () => `${dir}/leaderboard-sent.json`;
+const pushBoard = async ($, isPublic, isTimelinePublic) => {
+    const file = boardNow.file;
+    const figures = await boardFigures($, isTimelinePublic);
+    if (!figures)
+        return 'failed';
+    const sent = parsed(await statsText($, boardSentPath()), {});
+    const send = async (was) => {
+        const changed = boardDelta(was, figures);
+        if (was && !Object.keys(changed).length && Boolean(file.isPublic) === isPublic && timelineShown(file) === isTimelinePublic)
+            return 'ok';
+        const rev = `${(await $.clock.now()).toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
+        const r = await boardCall($, 'lb_send', { p_token: file.token ?? '', p_public: isPublic, p_timeline: isTimelinePublic, p_was: was ? (sent.rev ?? '') : null, p_now: rev, p_stats: changed });
+        if (r.ok && r.body === 'ok')
+            await $.fs.write(boardSentPath(), JSON.stringify({ rev, stats: figures })).catch(() => undefined);
+        return r.ok ? r.body : undefined;
+    };
+    const first = await send(sent.rev && sent.stats ? sent.stats : undefined);
+    const said = first === 'full' ? await send(undefined) : first;
+    if (said === 'gone')
+        return (await boardSave($, {}), await $.fs.write(boardSentPath(), '{}').catch(() => undefined), 'gone');
+    if (said !== 'ok')
+        return 'failed';
+    await boardSave($, { ...file, isPublic, isTimelinePublic, sentAt: await $.clock.now() });
+    return 'sent';
+};
+const publicBoard = ($, what, isPublic) => boardAct($, `Making your ${what} ${isPublic ? 'public' : 'private'}…`, async () => {
+    const file = boardNow.file;
+    const r = await pushBoard($, what === 'stats' ? isPublic : Boolean(file.isPublic), what === 'timeline' ? isPublic : timelineShown(file));
+    return r === 'gone' ? 'You’re no longer on the leaderboard. Choose a username to join again.' : r === 'failed' ? UNREACHED : `✓ Your ${what} ${what === 'stats' ? 'are' : 'is'} ${isPublic ? 'public' : 'private'}.`;
+});
+// Every few minutes, from whichever chat comes first: the time sent is written before sending, so the other chats leave it
+const sendBoard = async ($) => {
+    const file = await boardLoad($);
+    const now = await $.clock.now();
+    if (!file.token || boardNow.isBusy || now - (file.sentAt ?? 0) < BOARD_EVERY)
+        return;
+    await boardSave($, { ...file, sentAt: now });
+    await boardInTurn($, () => (boardNow.file.token ? pushBoard($, Boolean(boardNow.file.isPublic), timelineShown(boardNow.file)) : Promise.resolve('gone')));
+};
+const openSite = async ($, name = '') => {
+    const r = await openOn($, name ? `${BOARD_SITE}/${encodeURIComponent(name)}` : BOARD_SITE);
+    if (r.exitCode !== 0)
+        log($, `leaderboard not opened: ${'stderr' in r ? String(r.stderr) : ''}`);
+};
+// The board as the Leaderboard tab shows it: the top 10 of the range chosen, read again at most every 30 seconds while the tab is drawn
+const BOARD_PANE = 'leaderboard';
+const BOARD_TITLE = 'Leaderboard';
+const BOARD_READ_EVERY = 30000;
+const boardTop = { range: 'd7', total: 0, at: 0, error: '', isReading: false };
+const readBoard = async ($, isNow = false) => {
+    const now = await $.clock.now();
+    if (boardTop.isReading || (!isNow && now - boardTop.at < BOARD_READ_EVERY))
+        return;
+    boardTop.isReading = true;
+    const range = boardTop.range;
+    try {
+        const r = await boardCall($, 'lb_board', { p_range: range, p_sort: 'work' });
+        if (range !== boardTop.range)
+            return;
+        if (!r.ok || !Array.isArray(r.body))
+            return void (boardTop.error = 'Couldn’t reach the leaderboard. Claudopus tries again in 30 seconds.');
+        const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+        const rows = r.body.map((one) => {
+            const f = (one.f ?? {});
+            return { rank: n(one.rank), name: String(one.name ?? '').slice(0, 20), isPublic: one.is_public === true, work: n(f.work), clock: n(f.clock), model: typeof one.model === 'string' ? one.model : '' };
+        });
+        ((boardTop.rows = rows), (boardTop.total = n(r.body[0]?.total)), (boardTop.error = ''));
+    }
+    finally {
+        ;
+        ((boardTop.isReading = false), (boardTop.at = now), drawAgain($));
+    }
+};
+const openBoard = async ($) => {
+    presses += 1;
+    void readBoard($).catch(err => log($, `leaderboard not read: ${String(err)}`));
+    await front($, BOARD_PANE, BOARD_TITLE);
+};
+const boardShown = ($) => ({
+    rows: boardTop.rows,
+    total: boardTop.total,
+    error: boardTop.error,
+    range: boardTop.range,
+    setRange: range => void ((boardTop.range = range), (boardTop.rows = undefined), drawAgain($), readBoard($, true).catch(err => log($, `leaderboard not read: ${String(err)}`))),
+    openPerson: name => void openSite($, name).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
+    name: boardNow.file.name ?? '',
+    isPublic: Boolean(boardNow.file.isPublic),
+    isTimelinePublic: timelineShown(boardNow.file),
+    said: boardNow.said,
+    isBusy: boardNow.isBusy,
+    join: name => void joinBoard($, name),
+    leave: () => void leaveBoard($),
+    setPublic: isPublic => void publicBoard($, 'stats', isPublic),
+    setTimelinePublic: isPublic => void publicBoard($, 'timeline', isPublic),
+    open: () => void openSite($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
+});
+const boardButton = ($, ui, isKeyed = false) => (<ui.Box key="board-button" flexShrink={0}>
+    <ui.Button key={`board-open-${presses}`} label="Leaderboard" hotkey={isKeyed ? 'l' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openBoard($).catch(err => log($, `leaderboard not opened: ${String(err)}`))}/>
   </ui.Box>);

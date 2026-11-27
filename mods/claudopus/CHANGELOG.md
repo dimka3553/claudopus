@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.296 · 27 November 2026
+- A task's card shows the pages, pictures and documents its result names, even in a folder with spaces in its name or made earlier in the task, ahead of web links; a page the result only cites is no longer shown as one it made.
+
 ## 0.2.295 · 27 November 2026
 - The chat no longer ends its replies with a line about which cards wait for you. You see the waiting cards in the panel, so it names a card's question only when you ask how things stand.
 
