@@ -194,6 +194,8 @@ const chatHooks = (on: On) => {
     await loadSettings($)
     // Which reply is about which task, read from the chat's transcript, for task colours and links at the end (colours.tsx)
     void colourBuild($, true)
+    // (and the cards made before task colours came in get theirs)
+    await changeTodos($, list => list).catch(err => log($, `cards not given colours: ${String(err)}`))
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)

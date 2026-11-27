@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { SessionMessage } from 'claude-code'
 
-import { Builder, NO_ANSWER, linksIn, passedOn } from './colours'
+import { Builder, NO_ANSWER, PALETTE, linksIn, passedOn, slotsFor } from './colours'
 
 const PUPIL = 'a3333333333333333'
 const GAPS = 'a4444444444444444'
@@ -158,5 +158,20 @@ describe('which task a reply is about', () => {
     expect(passedOn('The gaps page has its new When column, and it lists each gap', [...results, { id: HAIR, text: results[1]?.text ?? '' }])).toBe(HAIR)
     expect(passedOn('Done.', results)).toBeUndefined()
     expect(passedOn('Something else entirely, said in words of the chat\'s own.', results)).toBeUndefined()
+  })
+
+  test('each card gets the colour least used by the eleven started before it, so twelve in a row all differ; a card keeps the one it has', async () => {
+    const cards = Array.from({ length: PALETTE.length + 1 }, (_, n) => ({ id: `t${n}`, startedAt: 1000 + n }))
+    const fresh = slotsFor(cards)
+    expect(new Set(cards.slice(0, PALETTE.length).map(one => fresh[one.id])).size).toBe(PALETTE.length)
+    // The thirteenth takes the colour used longest ago: the first's
+    expect(fresh[`t${PALETTE.length}`]).toBe(fresh.t0)
+    // and the second is far from the first: blue after red, not orange
+    expect([fresh.t0, fresh.t1]).toEqual([0, 5])
+    // Cards that have a colour keep it, and a new one beside them takes another
+    const kept = slotsFor([{ id: 'a', startedAt: 1, colour: 0 }, { id: 'b', startedAt: 2, colour: 0 }, { id: 'c', startedAt: 3 }])
+    expect(kept.a).toBeUndefined()
+    expect(kept.b).toBeUndefined()
+    expect(kept.c).not.toBe(0)
   })
 })

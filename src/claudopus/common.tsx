@@ -244,7 +244,8 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   const before = JSON.stringify(now)
   // (a task's card ends done only with its result: holdDone; and keeps what each of its results named: saidKept)
   // (and every question a card holds: the newest of those before comes up as one goes, keepAsks)
-  const hold = (list: Todo[]) => keepAsks(saidKept(list, holdDone(list, fn(list))))
+  // (and each of the chat's own cards has its colour from the moment it is made: withColours, colours.tsx)
+  const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, fn(list)))))
   const next = hold(now)
   if (JSON.stringify(next) === before) return now
   const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))

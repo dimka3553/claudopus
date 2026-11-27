@@ -1,0 +1,2 @@
+- The box above the chat for a task takes that task's colour: its heading and a dot before it, as its card and its replies in the chat have.
+- Tasks started one after another each get a colour of their own, kept on their card, so two cards side by side are never the same colour.

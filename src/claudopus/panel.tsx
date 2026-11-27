@@ -546,7 +546,8 @@ const panelHooks = (on: On) => {
                 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
                   {/* With task colours on, the colour of the task's box in the chat leads its name (colours.tsx), outside the button,
                       as the app draws a button's words in its own colour */}
-                  {taskColour(one.id) ? <Text color={taskColour(one.id)}>● </Text> : null}
+                  {/* (moved in by the step a desktop pads a plain Button with, so the dot starts at the card's one left edge) */}
+                  {taskColour(one.id) ? <Box key={`dot-${one.id}`} paddingLeft={lead} flexShrink={0}><Text color={taskColour(one.id)}>● </Text></Box> : null}
                   <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
                     <Text bold wrap="truncate-end">{titleOf(one)}</Text>
                   </Button>

@@ -398,6 +398,7 @@ declare global {
   export import replyLinksIn = M18.linksIn
   export import PALETTE = M18.PALETTE
   export import passedOn = M18.passedOn
+  export import slotsFor = M18.slotsFor
   export import colourTextHash = M18.textHash
   export import ColourIndex = M18.ColourIndex
   export import TaskLink = M18.TaskLink
