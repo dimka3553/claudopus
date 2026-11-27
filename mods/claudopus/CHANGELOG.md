@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.315 · 28 November 2026
+- A pressed button in the panel or the bar keeps spinning until the panel shows what the press did, where it used to go back to its plain look for up to a second first.
+- Closing the update note, and the update's other buttons, show at once again while the panel is scrolled down: since 0.2.313 they could take seconds.
+
 ## 0.2.314 · 28 November 2026
 - Every question on a task's card now has Skip this one, which skips only that question while the task goes on with the rest, and Set aside is now Set aside task, a quiet button that says it stops the whole task, so a press meant for one question no longer ends the task.
 

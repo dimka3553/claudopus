@@ -7916,8 +7916,6 @@ const ENGAGED = 15_000
 let engagedAt = 0
 const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
-let stepsRead = ['', 0] as [string, number]
-const stepsNow = async ($: EngineInterface) => (isTimed && Date.now() - stepsRead[1] < 2000 ? stepsRead[0] : (stepsRead = [dir ? await readOr($, stepsPath()) : '', Date.now()])[0])
 const personSign = async ($: EngineInterface) => {
 const ranFrom = runFrom()
 try {
@@ -7927,10 +7925,10 @@ const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => on
 const momentAt = await $.clock.now()
 const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
 return JSON.stringify([
-presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
+presses, pressedAt, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
 [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
 [...pictureIn.keys()], isUpdating, loadMark,
-[...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, await stepsNow($),
+[...cards, ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
 ])
 } finally {
 runTo('personSign', ranFrom)
@@ -7971,7 +7969,16 @@ return true
 const isPanelSlow = (at: number) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10_000)
 const freshBegins = (key: string, at: number) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false, since: at }), freshness)
 const madeAgain = new Map<string, { fresh: number; at: number }>()
+const PRESS_SHOWN = 1500
+let pressWaits: { since: number; done: () => void }[] = []
+const pressShown = ($: EngineInterface, since: number) =>
+new Promise<void>(done => {
+pressWaits.push({ since, done })
+$.clock.after(PRESS_SHOWN, done)
+void drawFresh($, true)
+})
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
+if (made) pressWaits = pressWaits.filter(wait => made.at < wait.since || (wait.done(), false))
 const going = freshUnderWay.get(key)
 freshUnderWay.delete(key)
 const fresh = going?.fresh ?? made?.fresh ?? freshness
@@ -17715,6 +17722,7 @@ if (isTerminal) await tabMoves.finish(move => runTabMove($, move), ms => $.clock
 }
 if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
 if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
+if (isTimed && e.plugin === 'claudopus' && e.surface === 'desktop' && (e.requestId === LIST || e.component === 'AbovePrompt')) await pressShown($, pressedAt)
 return r
 })
 on('ui.input', async ($, e, next) => {
