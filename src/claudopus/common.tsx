@@ -253,7 +253,10 @@ const keepCards = (list: Todo[]) => {
   cardsAt = Date.now()
   return (cardsKept = list)
 }
-const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? cardsKept : keepCards(await read($, todos)))
+// (each read still goes to the engine and back once, with a call that carries nothing: code that follows a read kept its place
+// after what the engine was doing only by that, as a write that follows a message sent from a drawing's hook, refused while the
+// hook still draws)
+const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? (await $.clock.now(), cardsKept ?? keepCards(await read($, todos))) : keepCards(await read($, todos)))
 // What a task's card says it is running, and when something new last came back to it, change as every call ends: they are
 // written with the next change to the list (the next call's start, most often), or by themselves RUN_SOON after, so a call's end
 // writes nothing of its own and several tasks' calls are one write (each write of the list draws the panel again). By agent: when something new came

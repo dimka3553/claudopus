@@ -86,7 +86,7 @@ let changedSeen = ''
 // one kept says the list kept is not this code's (a session begun again), and it is compared whole. Whatever needs the list takes
 // it from here (ownReports), as each read of the whole list from the chat's state copies all of it; a drawing reads the mark alone
 let reportsKept: Report[] | undefined
-const ownReports = async ($: EngineInterface) => reportsKept ?? (reportsKept = await read($, reports))
+const ownReports = async ($: EngineInterface) => (reportsKept ? (await $.clock.now(), reportsKept) : (reportsKept = await read($, reports)))
 let reportsMarked = 0
 const reportsMark = atom({ plugin: 'claudopus', key: 'reportsMark' } as const, 0, { shape: 'reports-mark-1' })
 const changedPath = () => `${reportsDir()}/_changed.json`

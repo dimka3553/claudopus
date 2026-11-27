@@ -254,7 +254,7 @@ let othersHeld: Shared[] | undefined
 // The list as this copy last wrote it, which only it writes: read from the engine it is copied whole between Claude's two threads
 // (ownCards), and the look each second read it several times
 let othersKept: Shared[] | undefined
-const ownOthers = async ($: EngineInterface) => othersKept ?? (await read($, others))
+const ownOthers = async ($: EngineInterface) => (othersKept ? (await $.clock.now(), othersKept) : read($, others))
 const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
 const writeHeldOthers = async ($: EngineInterface) => {
   const held = othersHeld

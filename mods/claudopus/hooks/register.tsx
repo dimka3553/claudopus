@@ -198,7 +198,7 @@ if (!isTimed) JSON.stringify(list, (_, v: unknown) => (v && typeof v === 'object
 cardsAt = Date.now()
 return (cardsKept = list)
 }
-const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? cardsKept : keepCards(await read($, todos)))
+const ownCards = async ($: EngineInterface) => (cardsKept && (!isTimed || Date.now() - cardsAt < CARDS_HELD) ? (await $.clock.now(), cardsKept ?? keepCards(await read($, todos))) : keepCards(await read($, todos)))
 const runDue = new Map<string, number | undefined>()
 const RUN_SOON = 400
 let isRunSet = false
@@ -3004,7 +3004,7 @@ let reportsPassAt = -Infinity
 let reportsSeen = ''
 let changedSeen = ''
 let reportsKept: Report[] | undefined
-const ownReports = async ($: EngineInterface) => reportsKept ?? (reportsKept = await read($, reports))
+const ownReports = async ($: EngineInterface) => (reportsKept ? (await $.clock.now(), reportsKept) : (reportsKept = await read($, reports)))
 let reportsMarked = 0
 const reportsMark = atom({ plugin: 'claudopus', key: 'reportsMark' } as const, 0, { shape: 'reports-mark-1' })
 const changedPath = () => `${reportsDir()}/_changed.json`
@@ -8378,7 +8378,7 @@ if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(ta
 await log($, `work ${target} not started again with an answer: ${reason}`)
 const ids = new Set(answers.map(({ one }) => one.id))
 await changeTodos($, list => list.map(card => (ids.has(card.id) ? mapAsks(card, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)) : card)))
-const list = await read($, todos)
+const list = await ownCards($)
 const top = list.find(card => card.id === topOf(list, target))
 const isGone = UNRESUMABLE.test(reason) && top && !top.chat && Boolean(top.chatWas) && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
 if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
@@ -8723,7 +8723,7 @@ othersKept = await update($, others, () => next)
 }
 let othersHeld: Shared[] | undefined
 let othersKept: Shared[] | undefined
-const ownOthers = async ($: EngineInterface) => othersKept ?? (await read($, others))
+const ownOthers = async ($: EngineInterface) => (othersKept ? (await $.clock.now(), othersKept) : read($, others))
 const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
 const writeHeldOthers = async ($: EngineInterface) => {
 const held = othersHeld
