@@ -7932,6 +7932,8 @@ $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
 const to = ask.refused
 ? isRun && run
 ? await startRun($, one, run)
+: !isReply && said === ALLOW
+? `${RUN_GONE(ask.copy ?? ask.text)}${note}`
 : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
 : ask.rule
 ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
@@ -10240,6 +10242,9 @@ isReply
 const REFUSAL_ANSWERED = (command: string, said: string, isReply: boolean) =>
 `${isReply ? `${who(true)} replied, in their own words, when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}): ${said}` : `${who(true)} pressed "${DONT_ALLOW}" when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}).`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
 
+const RUN_GONE = (command: string) =>
+`${who(true)} pressed "${ALLOW}" on your card for the command Claude Code refused you (${cut(oneLine(command), 200)}), but Claudopus no longer keeps that command, so it did not run. If you still need it, run exactly the same command once more: Claude Code refuses it again, and your card asks ${who()} afresh, where their press runs it. Do not reach its result another way.`
+
 const REFUSAL_WORDS = (command: string, said: string) =>
 `${who(true)} wrote to you, in their own words, about the command Claude Code refused you (${cut(oneLine(command), 200)}), which waits on your card for their Allow: “${said}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside that permission, which keeps Allow and Don't allow: only their press runs the command, once, as theirs. Do not run it, or another way to the same end, yourself. With nothing else to do, end your step.`
 
@@ -10312,6 +10317,12 @@ redraw($)
 return runList
 }
 const isSameRun = (one: PressRun, other: Pick<PressRun, 'card' | 'askAt'>) => one.card === other.card && one.askAt === other.askAt
+const readRuns = async ($: EngineInterface) => {
+const kept = await read($, runs)
+const missing = kept.filter(one => !runList.some(other => isSameRun(other, one)))
+if (missing.length) runList = [...runList, ...missing]
+return runList
+}
 const offeredRun = (one: Todo) => {
 const ask = one.ask
 if (!ask?.refused || one.chat || !ask.copy) return undefined
@@ -10364,8 +10375,10 @@ const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs
 
 const runIt = async ($: EngineInterface, one: Todo) => {
 presses += 1
+await readRuns($).catch(err => log($, `runs not read for a press: ${String(err)}`))
 const run = offeredRun(one)
-if (!run || runPressed.has(runKey(run))) return
+if (!run) return void (await answerAsk($, one, ALLOW))
+if (runPressed.has(runKey(run))) return
 runPressed.add(runKey(run))
 runAsked.set(one.id, run)
 try {
@@ -10853,7 +10866,6 @@ const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.
 const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
 const inBar = repliesInBar(surface)
 if (ask.refused) {
-const run = offeredRun(one)
 const talk = talkText(ask.talk)
 const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(card, ask), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
 if (isActingOnReply(one)) return { ...base, ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}), kind: 'permission', isActing: true, buttons: [] }
@@ -10865,7 +10877,7 @@ kind: 'permission',
 buttons: elsewhere
 ? []
 : [
-...(run ? [{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) }] : []),
+{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) },
 { key: `${id}-deny-${ask.at}-${loadMark}`, label: DONT_ALLOW, onPress: () => void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(err => log($, `answer not sent: ${String(err)}`))) },
 ...words.buttons,
 ],

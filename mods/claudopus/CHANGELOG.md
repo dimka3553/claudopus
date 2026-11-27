@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.301 · 27 November 2026
+- A command Claude Code blocked now always shows Allow beside Don't allow on its card, also when the card comes up just as Claudopus updates. Before, such a card could show Don't allow alone.
+
 ## 0.2.300 · 27 November 2026
 - Rewinding a chat in the Claude app no longer empties its panel: the rewound chat shows every card it had before, just as after a restart. Finished and delivered tasks stay as they ended, a task that was still working shows as Interrupted with Carry on, and the tasks it starts keep your earlier messages in the chat.
 
