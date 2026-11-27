@@ -49,10 +49,6 @@ const offeredRun = (one) => {
 };
 // The runs on a card under way, and those ended whose output is kept for their task's next step
 const runningOn = (card) => runList.filter(run => run.card === card && run.startedAt && (!run.endedAt || Boolean(run.waiting)));
-// Whether a task or helper waits on a command the person allowed: it runs, or it ended and what it printed is on its way to it. Its
-// card stays at work meanwhile, however long its own step has been over: it is not over, and it has not failed (25 Nov: the release
-// a task asked for, refused by Claude Code, allowed by Dima and running, while its card said "Failed · Ended without its result")
-const holdsCard = (id) => runList.some(run => (run.card === id || run.from === id) && run.startedAt && (!run.endedAt || Boolean(run.waiting && !run.waiting.isLost)));
 // How long a run's end stays one grey line where it ran, unless its task writes a line of its own first: after that its end is
 // the ended row under the card and in Details
 const RUN_END_SHOWN = 60000;
@@ -85,7 +81,7 @@ const runAsked = new Map();
 // What an ended run printed, kept for a task that was not at a step when it ended: it is told as its next step begins (replyRead,
 // from that step's own hook), and its card says so meanwhile in one grey line. Nothing starts the task for it
 const runsAtStep = async ($, agent) => {
-    const due = runList.filter(run => run.waiting?.target === agent && !runSending.has(runKey(run)));
+    const due = runList.filter(run => run.waiting?.target === agent);
     for (const run of due) {
         const told = await tell($, agent, run.waiting?.text ?? '').catch(() => undefined);
         if (!told || told.deny)
@@ -151,7 +147,7 @@ const startRun = async ($, one, run) => {
     await log($, `refused command for ${one.id} run on ${who()}'s press, in ${run.cwd}`);
     const stops = run.limitMs >= RUN_LIMIT_BACKGROUND ? `It is stopped after ${limitText(run.limitMs)} if it is still running then.` : `It is stopped after ${limitText(run.limitMs)} at most.`;
     followRun($, { ...run, startedAt: at, log: logFile, pid });
-    return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it is running for them now, exactly as shown, as their own, in ${run.cwd}. What it prints goes to ${logFile}, which you can read as it runs; when it ends, its last lines come to you as a message: at your next step, or, once you have ended your step, as a message that starts you again. ${stops} Do not run it yourself; carry on with what does not need it, or end your step.`);
+    return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it is running for them now, exactly as shown, as their own, in ${run.cwd}. What it prints goes to ${logFile}, which you can read as it runs; when it ends, its last lines come to you as a message at your next step. ${stops} Do not run it yourself; carry on with what does not need it.`);
 };
 // Each run under way is looked at every RUN_LOOK by this load, a reload's own load taking over the ones it finds (followRuns)
 const followed = new Set();
@@ -160,10 +156,6 @@ const followRuns = async ($) => {
     for (const run of runList)
         if (run.startedAt && !run.endedAt && run.log && run.pid)
             followRun($, run);
-    // (and one whose end a reload kept from its task, which ended its step: it goes to it now)
-    for (const run of runList)
-        if (run.endedAt && run.waiting && !run.waiting.isLost && !runWaking.has(runKey(run)))
-            void wakeForRun($, run, run.waiting.target);
 };
 const followRun = ($, run) => {
     const key = runKey(run);
@@ -222,10 +214,9 @@ const stopRun = async ($, run) => {
     redraw($);
     await stopProcess($, run);
 };
-// What the task is sent of a run's end: written in while the task is at a step; else kept with the run, and sent to a task still
-// at work that ended its step as a message that starts it again, from the next hook of the mod's (sendOwn), never from the timer
-// that saw the end. Whatever step of its own comes first reads it instead (runsAtStep). Says whether it was sent, is kept, or is not
-// sent (a task the person stopped)
+// What the task is sent of a run's end, which no press of the person's starts: written in while the task is at a step; else kept
+// with the run for the task's next step (runsAtStep), never sent from a timer. Says whether it was sent, is kept, or is not sent
+// (a task the person stopped)
 const deliverRun = async ($, cardId, target, run, text) => {
     const card = (await read($, todos)).find(one => one.id === cardId);
     if (!card)
@@ -238,50 +229,7 @@ const deliverRun = async ($, cardId, target, run, text) => {
     if (isHeld(card))
         return 'held';
     await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: { target, text } } : one)));
-    // (one that ended otherwise, as with its result handed in, is started by nothing: it reads it if it works again)
-    if (isWorking)
-        void wakeForRun($, run, target);
     return 'waits';
-};
-// What a task that ended its step is told with the end of the command it waited on, so it carries on and hands in its result
-const RUN_RESUMED = 'You had ended your step while it ran: this message starts you again. Carry on from where you were with what it printed, then end with your report as before.';
-// The runs whose end is on its way to their task, so one end is sent once, and those whose message is going out now, which the
-// step it starts does not read a second time (marked in memory: the drawing it goes from may write nothing)
-const runWaking = new Set();
-const runSending = new Set();
-const wakeForRun = async ($, run, target) => {
-    const key = runKey(run);
-    if (runWaking.has(key))
-        return;
-    runWaking.add(key);
-    try {
-        const kept = () => runList.find(one => isSameRun(one, run));
-        const text = kept()?.waiting?.text;
-        if (!text)
-            return;
-        // Still wanted as it goes: not yet read at a step of the task's own, and the task still at work
-        const isStill = async () => {
-            const one = kept();
-            if (!one?.waiting || one.waiting.target !== target || (await read($, todos)).find(card => card.id === target)?.status !== 'working')
-                return false;
-            runSending.add(key);
-            return true;
-        };
-        const r = await sendOwn($, { to: { agentId: target }, text: `${text}\n${RUN_RESUMED}` }, isStill).catch(err => ({ isDelivered: false, reason: String(err) }));
-        if (r.isDelivered) {
-            await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: undefined } : one)));
-            runSending.delete(key);
-            await wakeCard($, target);
-            return void (await log($, `${target} started again with the end of the command run on ${who()}'s press`));
-        }
-        // Not sent: kept for a step of its own, and its card no longer held up by it, so it ends as it would
-        runSending.delete(key);
-        await saveRuns($, list => list.map(one => (isSameRun(one, run) && one.waiting ? { ...one, waiting: { ...one.waiting, isLost: true } } : one)));
-        await log($, `${target} not started again with the end of the command run on ${who()}'s press: ${r.reason ?? 'not sent'}`);
-    }
-    finally {
-        runWaking.delete(key);
-    }
 };
 // Its end: kept, sent to the task, and said on the card
 const endRun = async ($, run, end, exit, lines) => {
@@ -308,20 +256,13 @@ const endRun = async ($, run, end, exit, lines) => {
     // the card's grey line for it
     await keepRunEnded($, run);
 };
-// A task tried again after a passing network error, until the try goes (retryLater): its card says so in one grey line
-const isRetrying = (one) => !one.chat && one.status === 'working' && one.retry?.at !== undefined;
 // While it runs: one quiet line, how long it has run, and Stop; the command itself is not shown again, the person saw it before
 // pressing (17 Nov). Once it has ended with its task not at a step: one grey line that its output is kept for the task's next step
 const runBlock = ($, ui, one, key, at) => {
     const list = one.chat ? [] : runsShownOn(one, at);
-    // (and, while a passing network error is tried again, one grey line that says so: retryLater)
-    const retry = isRetrying(one) ? one.retry : undefined;
-    if (!list.length && !retry)
+    if (!list.length)
         return null;
     return (<ui.Box key={key} flexDirection="column">
-      {retry ? (<ui.Box key={`${key}-retry`} height={1} overflow="hidden">
-          <ui.Text dimColor wrap="truncate-end">{`Network error · trying again · ${retry.tries.length} of ${RETRY_MOST} tries`}</ui.Text>
-        </ui.Box>) : null}
       {list.map(run => {
             const isStopping = runStopped.has(runKey(run));
             const isEnded = Boolean(run.endedAt);

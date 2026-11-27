@@ -122,18 +122,17 @@ const memoryHooks = (on) => {
             const { Box } = uiOf($, e);
             return <Box key={`quiet-${mark(e.requestId)}`}/>;
         }
-        // Every reply then goes in its task's box, with its links at its end, as the person's settings have it (colours.tsx)
         if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text))
-            return withTaskBox($, e, await next(e), uiOf($, e));
+            return next(e);
         const { text, hrefs } = memoryLinked(e.props.text);
         if (!hrefs.length)
-            return withTaskBox($, e, await next(e), uiOf($, e));
+            return next(e);
         const { Markdown } = uiOf($, e);
-        return withTaskBox($, e, (<Markdown key={`memory-reply-${mark(e.requestId)}`} text={text} pressableLinks={hrefs.slice(0, 256)} onLinkPress={link => {
+        return (<Markdown key={`memory-reply-${mark(e.requestId)}`} text={text} pressableLinks={hrefs.slice(0, 256)} onLinkPress={link => {
                 const path = memoryPressed(link.href);
                 if (path)
                     openMemory($, path);
-            }}/>), uiOf($, e));
+            }}/>);
     });
     // A memory file opened as a tab of its own; the links in it to other memory files open there too
     on('ui.render', { component: 'Pane' }, async ($, e, next) => {

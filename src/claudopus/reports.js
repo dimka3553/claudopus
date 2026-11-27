@@ -109,9 +109,7 @@ const copyNamed = async ($, text, into) => {
             return;
         const to = `${into}/${name}`;
         await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))]);
-        // A copy that shares the file's space until either changes, where the disk allows it (the Mac's), so the same picture in a task's
-        // several results takes its room once; elsewhere a plain copy
-        if ((await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to])).exitCode === 0)
+        if ((await $.process.run(['cp', '-p', from, to])).exitCode === 0)
             copies.push(name);
     };
     for (const path of namedPaths(text)) {
@@ -171,8 +169,6 @@ const saveReport = async ($, card, text, isPart = false) => {
     };
     await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`);
     await loadReports($);
-    // and goes into the queue of progress/, which makes it its area's entry (progress.tsx)
-    queueSoon($, { kind: 'result', task: one.id, report: id, title, topic: one.subject ?? '', files: files.filter(file => PICTURE.test(file)), text });
 };
 // The small copy of a picture the panel draws, kept beside the report
 const thumbPath = (r, file) => `${reportPath(r)}/thumbs/${file.replaceAll('/', '--')}.jpg`;
@@ -234,12 +230,7 @@ const markReport = ($, r, patch) => {
 };
 // What the chat is told of with each message: the newest results, so a question one answers is answered from it. One put away is
 // left out
-// One task's results handed in again (a part, then the whole; a second round) are told once, the newest (the list is newest first)
-const newestPerTask = (all) => {
-    const told = new Set();
-    return all.filter(r => !r.archived && !(r.agent && told.has(r.agent)) && (r.agent ? told.add(r.agent) : true));
-};
-const reportsTold = (all, now, list = newestPerTask(all)) => list.length
+const reportsTold = (all, now, list = all.filter(r => !r.archived)) => list.length
     ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file):\n${list
         .slice(0, REPORTS_TOLD)
         .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`].join(' · ')}`)

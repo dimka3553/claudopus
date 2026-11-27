@@ -29,7 +29,7 @@ const tabHooks = (on) => {
         // An answer the press gave to a task that is not at a step is sent to it from here, inside the press's own hook (sendWakes)
         if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length))
             await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`));
-        if (heldSends.length)
+        if (heldSends.length || heldPrompts.length)
             await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`));
         return r;
     });
@@ -42,7 +42,7 @@ const tabHooks = (on) => {
         void log($, `reply submitted: ${answersOnWay.size} answer(s) and ${wakes.length} wake(s) on the way`);
         if (answersOnWay.size || wakes.length)
             await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`));
-        if (heldSends.length)
+        if (heldSends.length || heldPrompts.length)
             await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`));
         return r;
     });
@@ -62,25 +62,13 @@ const tabHooks = (on) => {
             drawing = drawn();
         return drawing;
     }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)));
-    // Progress, in a pane of its own: the goals' rings, the areas, and an area opened; drawn again when the progress folder changes
-    on('ui.render', { component: 'Pane', requestId: PROGRESS_PANE }, async ($, e) => progressTab($, uiOf($, e), Math.max(300, Math.floor(e.props.bodyColumns * 7.4 - 32)), e.props.scroll.bodyRows)).catch(($, e, next) => next.called ? next(e) : tabFailed($, e, next.error));
-    // Stats, in a pane of its own: drawn at once from the figures last added up, while Claude's records are looked at again at most once a minute
+    // Stats, in a pane of its own: drawn at once from what was read last, while the records are read again at most once a minute
     on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
         const { Box } = uiOf($, e);
         void statsRead($, statsShown.scope).catch(() => undefined);
         return (<Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => drawAgain($), uiOf($, e), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>);
-    }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)));
-    // The leaderboard, in a pane of its own: the board's top 10, and joining it, or your place on it
-    on('ui.render', { component: 'Pane', requestId: BOARD_PANE }, async ($, e) => {
-        const ui = uiOf($, e);
-        if (!boardNow.isBusy)
-            await boardLoad($).catch(() => undefined);
-        void readBoard($).catch(() => undefined);
-        return (<ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {boardView(ui, boardShown($), e.surface)}
-      </ui.Box>);
     }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)));
     // About, in a pane of its own
     on('ui.render', { component: 'Pane', requestId: CONFIG_PANE }, async ($, e) => {

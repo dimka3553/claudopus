@@ -1,8 +1,6 @@
 "use strict";
 // ---- One stage for a task's card ----
 const stageOf = (_list, card) => {
-    if (isInterrupted(card))
-        return needsPerson(card) ? 'waiting' : 'interrupted';
     if (card.status === 'failed' || card.status === 'stopped')
         return card.status;
     if (needsPerson(card))
@@ -29,11 +27,8 @@ const isDoneMoment = (one, at) => {
 // Whether it handed in its result: delivered, or marked done by the person
 const hasResult = (stage) => stage === 'delivered' || stage === 'done';
 // Each stage in the words a card says it with, and its colour
-const STAGE_WORD = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' };
-const stageColor = (stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error', interrupted: CUT })[stage];
-// How a card's line begins once it has ended, in its stage's colour
-// (a cut-off card with a note of its own after it says only Interrupted, so its note has the room: on a narrow panel the two cut each other short)
-const stageLine = (stage, why = '', hasNote = false) => (stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? (hasNote ? '⏸ Interrupted' : `⏸ Interrupted · ${WHY_APP_CLOSED}`) : 'Stopped');
+const STAGE_WORD = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' };
+const stageColor = (stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage];
 // Why a card failed, where it says so
 const WHY_NO_RESULT = 'Ended without its result';
 const WHY_APP_CLOSED = 'The app closed while it worked';

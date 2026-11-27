@@ -1,5 +1,5 @@
 "use strict";
-// Clear names for the commands a task runs, from Sonnet: as a command starts, as its log moves and as it ends, the
+// Clear names for the commands a task runs, from a small fast model: as a command starts, as its log moves and as it ends, the
 // model is asked what it does in plain words, what kind it is, what it does now and, when it failed, why. Asked in the background,
 // never holding the panel, and remembered: a title once for each command, the same command run again named with no call. Where
 // the model gives no answer, a row keeps the name it had before (hooks/naming.ts holds the question, what is hidden first and how

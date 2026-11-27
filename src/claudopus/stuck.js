@@ -178,7 +178,7 @@ const lookStuck = async ($) => {
             // A task that moved again since the chat was told is no longer what the chat was told: flagged and told afresh if it is stuck again
             if (one.stuckTold !== undefined && movedAt(list, one) > one.stuckTold)
                 ((isChanged = true), (one = { ...one, stuckTold: undefined, stuckAt: undefined }));
-            const isStuck = stageOf(list, one) === 'working' && !one.ask && !one.bg?.length && !runningKids(list, one.id).length && !isPrompted(one) && !holdsCard(one.id) && !one.retry?.at && now - movedAt(list, one) >= STUCK_AFTER;
+            const isStuck = stageOf(list, one) === 'working' && !one.ask && !one.bg?.length && !runningKids(list, one.id).length && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER;
             if (isStuck && !one.stuckAt)
                 return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) });
             if (!isStuck && one.stuckAt)
@@ -245,11 +245,6 @@ const endedSummary = (helpers, runs, lost = 0) => {
         return count ? [`${count} ${endedWord({ how })}`] : [];
     });
     return [head, ...(lost ? [`${n(lost, 'helper')} failed`] : []), ...(bad.length ? [bad.join(', ')] : [])].join(' · ');
-};
-// What still works under a card, counted as endedSummary counts what ended: `2 helpers and 3 commands working`
-const workingSummary = (helpers, commands) => {
-    const n = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
-    return helpers && commands ? `${n(helpers, 'helper')} and ${n(commands, 'command')} working` : helpers ? `${n(helpers, 'helper')} working` : commands ? `${n(commands, 'command')} working` : '';
 };
 // The runs a card has had end, kept so its summary row and Details can say how each ended, the newest last
 const keepEnded = (one, runs) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {});

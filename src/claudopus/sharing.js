@@ -13,13 +13,13 @@ let sharedAt = 0;
 const ownLive = (id) => `${liveDir()}/${id}.json`;
 // Set as the session ends, so a beat due after it does not write the file again
 let isEnded = false;
-// What opens this chat in the Claude app, read off the engine's own file of this session in its sessions folder (~/.claude/sessions, or CLAUDE_CONFIG_DIR's) (its Remote Control id
+// What opens this chat in the Claude app, read off the engine's own file of this session in ~/.claude/sessions (its Remote Control id
 // appears there once Remote Control is on) at most once a beat; the file found is read again alone until it no longer names this chat
 let myLink;
 let linkReadAt = 0;
 let linkFile = '';
 const readLink = async ($, id) => {
-    const folder = `${await configDir($)}/sessions`;
+    const folder = `${(await $.env.get('HOME')) ?? ''}/.claude/sessions`;
     const entryOf = async (name) => JSON.parse((await readOr($, `${folder}/${name}`)) || '{}');
     let found = linkFile ? await entryOf(linkFile).catch(() => ({})) : {};
     if (found.sessionId !== id) {
@@ -213,10 +213,6 @@ const readOthers = async ($) => {
     const isOffChanged = await lookAfar($, now).catch(() => false);
     // A chat both fetched and handed over, as when two Macs each name the other, is listed once, as fetched
     for (const one of pushed)
-        if (!here.has(one.chat))
-            (here.add(one.chat), found.push(one));
-    // Chats of this Mac whose process ended with tasks at work, as when the app quit: those tasks, cut off, as their ledgers kept them
-    for (const one of await ledgerOthers($, id, open, now).catch(err => (void log($, `other chats' ledgers not read: ${String(err)}`), [])))
         if (!here.has(one.chat))
             (here.add(one.chat), found.push(one));
     // Work gone from a chat still open, with no word of its end: finished, for its pause. A chat with nothing left going on is not

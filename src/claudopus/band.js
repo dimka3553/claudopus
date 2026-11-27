@@ -39,10 +39,7 @@ const barBoxOf = ($, ui, cards, kept) => {
     };
     if (open.kind === 'answer') {
         const one = barTarget(cards);
-        // (with several questions open on the card, the one it answers is named too)
-        const ask = one ? barAskOf(one) : undefined;
-        const which = one && ask && asksOf(one).length > 1 ? `: “${cut(ask.text, 60)}”` : '';
-        return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”${which}`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (((barBoxAt = 0), dropDrafts($, one.id, ask), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($)), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) };
+        return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) };
     }
     if (open.kind === 'change') {
         const one = changeTarget(cards);
@@ -169,13 +166,6 @@ const settleBar = ($) => {
     // (the panes' own drawings are still good: they are given again as they were)
     void drawFresh($, true);
 };
-// The bar's figures as last made, by bar, and how to make them again with the other run of spacers: a drawing given again as it
-// was would show again a card the pointer had left. Its buttons keep their keys and look, so the engine keeps their numbers
-const barRemakes = new Map();
-const barAgain = (bar, recent) => {
-    const one = barRemakes.get(bar);
-    return one && one.drawing === recent ? one.remake() : recent;
-};
 // When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
 // windows of one chat that differ never ask in turn without end
 let barFlipAt = 0;
@@ -188,7 +178,7 @@ const bandHooks = (on) => {
     // into or holds the cursor: a bar with a box open keeps a drawing of its own (barHeld)
     on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
         // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
-        if (heldSends.length)
+        if (heldSends.length || heldPrompts.length)
             await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`));
         const drawBar = () => drawBarNow();
         if (e.surface !== 'desktop' || e.props.hasSurvey)
@@ -200,9 +190,8 @@ const bandHooks = (on) => {
         const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD);
         if (recent && !isBarHeld && isPressHeld(at))
             return ((isPressMissed = true), recent);
-        // Given again, the figures still move past the places they had, so the app shows again no card the pointer left (barAgain)
         if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at)))
-            return barAgain(line, recent);
+            return recent;
         freshBegins(key, at);
         const madeFrom = Date.now();
         let made;
@@ -278,7 +267,7 @@ const bandHooks = (on) => {
                 const ask = first?.ask;
                 if (first && ask) {
                     // The same block as on its card (needBlock), compact: its own buttons numbered, and nothing typed here
-                    const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 8));
+                    const answers = (ask.choices ?? []).slice(0, 9);
                     const id = `${first.id}:${ask.at}`;
                     const picked = bandPick?.id === id ? bandPick.n : -1;
                     const press = (n, choice) => {
@@ -371,14 +360,7 @@ const bandHooks = (on) => {
         </Box>) : (row);
             };
             // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
-            const bar = `bar|${e.requestId ?? ''}|${e.surface}`;
-            const remake = () => drawing(drawn ? usageSpacersDrawn(ui, bar) : null);
-            const made = remake();
-            if (drawn)
-                barRemakes.set(bar, { drawing: made, remake });
-            else
-                barRemakes.delete(bar);
-            return made;
+            return drawing(drawn ? usageSpacersDrawn(ui) : null);
         }
     });
 };

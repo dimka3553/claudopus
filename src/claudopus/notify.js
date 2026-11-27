@@ -209,14 +209,10 @@ const askAloud = ($, one, text) => aloud($, 'ask', `${titleOf(one)} has a questi
 const REMIND_AT = [15 * 60000, 60 * 60000, 4 * 3600000, 12 * 3600000];
 // What waits on the person on a card: its question, or the Allow its commands wait for, its words, and since when: since the question
 // came, or since the person's last reply to it that did not settle it. Not on a stopped card
-// The questions on a card that wait on the person: each one not acted on, but a blocked command's, which says itself on the card
-const openAsksOf = (one) => asksOf(one).filter(ask => !ask.refused && !isActingOnReply(askView(one, ask)));
-// Several are named each, numbered, so the chat and a reminder name every one
-const asksSaid = (asks) => (asks.length === 1 ? (asks[0]?.text ?? '') : asks.map((ask, n) => `${n + 1}. ${ask.text}`).join(' '));
 const waitingOnPerson = (one) => one.status === 'stopped'
     ? undefined
-    : openAsksOf(one).length
-        ? { text: asksSaid(openAsksOf(one)), at: Math.min(...openAsksOf(one).map(ask => Math.max(ask.at, ask.replied?.at ?? 0))) }
+    : one.ask && !isActingOnReply(one) && !one.ask.refused
+        ? { text: one.ask.text, at: Math.max(one.ask.at, one.ask.replied?.at ?? 0) }
         : one.admins?.some(gate => !isGateActing(gate))
             ? {
                 text: one.admins.some(a => a.kind === 'release')
@@ -273,7 +269,7 @@ const cardsNow = async ($) => {
         const doing = items.find(item => item.state === 'doing')?.text;
         const note = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text;
         const what = waits
-            ? `waiting for {name}: ${cut(oneLine(waits.text), 160 * Math.max(1, openAsksOf(one).length))}`
+            ? `waiting for {name}: ${cut(oneLine(waits.text), 160)}`
             : stageOf(list, one) === 'working'
                 ? `working, ${items.filter(item => item.state === 'done').length} of ${items.length} to-dos done${doing ? `, doing "${cut(doing, 80)}"` : ''}${note ? `, last note "${cut(oneLine(note), 120)}"` : ''}`
                 : `${one.status}${one.status === 'failed' && one.why ? ` (${one.why.charAt(0).toLowerCase()}${one.why.slice(1)})` : ''}`;

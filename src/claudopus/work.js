@@ -58,7 +58,7 @@ const isPersonWait = (call, name) => {
 };
 const asksNow = (list, agent) => {
     const top = topOf(list, agent);
-    return list.some(one => (one.id === agent || one.id === top) && asksOf(one).some(ask => !ask.replied));
+    return list.some(one => (one.id === agent || one.id === top) && Boolean(one.ask) && !one.ask?.replied);
 };
 const NO_PERSON_WAIT = (name) => `Not run: this command waits for ${name}, and a wait with a time limit gives them one. Don't wait for ${name} with a command at all. End your step now: your question stays on the card for as long as it takes, and ${name}'s answer comes to you as a message the moment they give it. Anything you need to see of what they did (a recording, a file, a page), look at once their answer has come.`;
 // The note Claude Code adds when a task ends its step without its report. Where the press can bring nothing (its report was taken
@@ -130,10 +130,8 @@ const writesOwnFiles = async ($, e) => {
         return '';
     const input = e;
     if (e.tool === 'Bash') {
-        // The command as written and unquoted, and each script it runs; one that only reads passes (reads.ts)
+        // The command as written and unquoted, and each script it runs
         const command = String(input.command ?? '');
-        if (readsOnly(command, { home: dir.replace(/\/\.claude\/claudopus$/, ''), folder: '', memory: dir }, shellWords, commandAt))
-            return '';
         const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)]);
         if (texts.some(one => writesMemory(one, MEMORY_OWN)))
             return NO_MEMORY;
@@ -183,7 +181,7 @@ const touchesKeyring = (e) => {
 // work's own rules, and its panel's. They are its rules for as long as it runs: a change made since reaches the next task
 const workRules = async ($) => {
     const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim();
-    const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`;
+    const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`;
     return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`;
 };
 // Claudopus's own checkout, when a command would change what is checked out there (changesOf), or nothing. Its own checkout is the
@@ -217,8 +215,6 @@ const workHooks = (on) => {
                 await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e).catch(err => log($, `call not followed: ${String(err)}`));
             if (isWatched)
                 callStarted(e.tool_use_id, await $.clock.now());
-            if (isWatched)
-                callBegins(e.agentId ?? '', e.tool_use_id, e.tool, e, await $.clock.now());
             let r;
             // The person's own files are compared with what they are known to hold as every call begins, and as a command ends: a change
             // is put back, and the work is told of what its command changed
@@ -232,9 +228,6 @@ const workHooks = (on) => {
             let isPersonEnded = false;
             try {
                 r = await raw(call);
-                // A worktree a task's command made is noted on its card, for a fresh task that carries it on (keep.tsx)
-                if (e.tool === 'Bash' && e.agentId && dir && !r.deny)
-                    await noteWorktree($, e.agentId, String(call.command ?? '')).catch(err => log($, `worktree not noted: ${String(err)}`));
                 if (isPersonWatched) {
                     isPersonEnded = true;
                     const undone = await personCheck($, e).catch(() => []);
@@ -250,8 +243,6 @@ const workHooks = (on) => {
                     personWriting.delete(writes);
                 if (isPersonWatched && !isPersonEnded)
                     await personCheck($, e).catch(() => undefined);
-                if (isWatched)
-                    callEnds(e.agentId ?? '', e.tool_use_id);
                 if (isWatched)
                     await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r).catch(err => log($, `call end not followed: ${String(err)}`));
                 asked = asked.filter(one => one.id !== e.tool_use_id);
@@ -479,18 +470,12 @@ const workHooks = (on) => {
             }
             // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
             // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
-            const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => asksOf(one).some(ask => ask.from === target.id))) : undefined;
-            // Of the card's open questions, the one the words answer: one whose button they begin with, else one the message names, else
-            // the newest that waits on the person
-            const open = asking ? asksOf(asking).filter(ask => asking.id === target?.id || ask.from === target?.id) : [];
-            const waits = open.filter(ask => !isActingOnReply(askView(asking ?? {}, ask)));
-            const isOfButton = (ask) => (ask.choices ?? []).some(choice => plainWords(choice) && `${plainWords(words)} `.startsWith(`${plainWords(choice)} `));
-            const which = waits.find(isOfButton) ?? waits.find(ask => plainWords(ask.text) && plainWords(message).includes(plainWords(ask.text))) ?? waits.at(-1) ?? open.at(-1);
-            const asked = asking && which ? `${asking.id}:${which.at}:${which.text}` : '';
-            if (asking && which && !answeredAsks.has(asked)) {
+            const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined;
+            const asked = asking?.ask ? `${asking.id}:${asking.ask.at}:${asking.ask.text}` : '';
+            if (asking?.ask && !answeredAsks.has(asked)) {
                 answeredAsks.add(asked);
-                answered = which.text;
-                answer = { card: asking, ask: which, key: asked, words, at: now };
+                answered = asking.ask.text;
+                answer = { card: asking, ask: asking.ask, key: asked, words, at: now };
             }
             if (target) {
                 woken = target.id;
@@ -594,19 +579,7 @@ const workHooks = (on) => {
                 const now = await $.clock.now();
                 // (one a safety check ended hands in only word of that: it failed, and says so)
                 await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...(one.flagged ? { ...ended(one, 'failed', now), why: WHY_FLAGGED } : { ...ended(one, 'done', now), reportAt: now }), answer: report.slice(0, ANSWER_CHARS) || one.answer, reportForChat: report, reportGiven: undefined, tookReport: String(e.tool_use_id) })));
-                let card = (await read($, todos)).find(one => one.id === agent);
-                // What its result still asks with buttons is drawn as one picture too, opened on the screen and shown with the question
-                const asked = card?.ask?.isResult && card.ask.choices?.length && !card.ask.pictures?.length ? card.ask : undefined;
-                if (card && asked && (await wantsQuestionPictures($).catch(() => false))) {
-                    const drawn = await questionPicture($, card.id, titleOf(card), asked.text, asked.details ?? '', asked.choices ?? [], asked.at);
-                    if (drawn) {
-                        await changeTodos($, list => list.map(one => (one.id === agent && one.ask?.at === asked.at && one.ask.text === asked.text ? { ...one, ask: { ...one.ask, pictures: [drawn] } } : one)));
-                        card = (await read($, todos)).find(one => one.id === agent);
-                        await openQuestionPicture($, drawn);
-                        if (card)
-                            await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`));
-                    }
-                }
+                const card = (await read($, todos)).find(one => one.id === agent);
                 if (card?.status === 'done' && report)
                     $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${agent} not kept: ${String(err)}`)));
                 await lookEnds($);
@@ -703,7 +676,7 @@ const workHooks = (on) => {
         const tokens = e.context.tokens;
         if (tokens !== undefined)
             await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }));
-        if (heldSends.length)
+        if (heldSends.length || heldPrompts.length)
             await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`));
         return next(e);
     });
@@ -743,9 +716,9 @@ const workHooks = (on) => {
         // where the app sent it, and its card says so
         // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
         const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined;
-        // A task that ended its step with a question or a permission open for the person waits for them (or for a command they allowed), and Claude Code presses it for
+        // A task that ended its step with a question or a permission open for the person waits for them, and Claude Code presses it for
         // a report it cannot give: each press is answered here with no model, so it costs nothing and no unfinished report is handed in
-        if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id) || holdsCard(id)) && (await isPressedForReport($, id, true))) {
+        if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id)) && (await isPressedForReport($, id, true))) {
             await log($, `work ${id} pressed for its report while it waits for the person: let it end its step, saying nothing`);
             yield { kind: 'text', index: 0, text: PRESS_ANSWER };
             yield { kind: 'stop', stopReason: 'end_turn', usage: null };
@@ -792,9 +765,7 @@ const workHooks = (on) => {
         // A pick the engine has since passed is its family's newest
         const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined;
         const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead;
-        // A task's or helper's response is followed as it streams, for its Details (liveChunk): each piece passes on as it came
-        const stream = next(to ? { ...e, model: to } : e);
-        const r = yield* (id === undefined || !dir ? stream : followStream($, id, stream));
+        const r = yield* next(to ? { ...e, model: to } : e);
         const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0;
         const model = r.usage?.model;
         if (model)
@@ -874,9 +845,7 @@ const workHooks = (on) => {
         // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
         const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : '';
         const isBackground = isHelperSpawn(e);
-        // and what was set aside before in the area its words are about, with why (progress.tsx)
-        const aside = isTold ? await asideTold($, e.description ?? '', e.prompt ?? '').catch(err => (void log($, `set-aside work not told: ${String(err)}`), '')) : '';
-        const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}${aside ? `\n\n${aside}` : ''}` } : isBackground ? { ...e, background: true } : e);
+        const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}` } : isBackground ? { ...e, background: true } : e);
         if (isBackground && r.agentId)
             await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`);
         if (r.model)
@@ -896,30 +865,12 @@ const workHooks = (on) => {
         const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : [];
         const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : '';
         const from = fromReport || goesOn;
-        // The instructions it was started with are kept in the ledger, for a fresh task that may carry it on; one that carries on a task
-        // the app's close cut off names that task's carry file, and takes its place
-        const carried = isOwn && !e.resume ? carriedFrom(e.prompt ?? '') : '';
-        if (isOwn && !e.resume)
-            await saveBrief($, id, e.prompt ?? '').catch(err => log($, `instructions of ${id} not kept: ${String(err)}`));
-        // A task the chat starts goes into the queue of progress/, which sorts it into its area while it works (progress.tsx)
-        if (isOwn && !e.resume)
-            queueSoon($, { kind: 'start', task: id, title: e.description ?? '', text: `${e.description ?? ''}\n\n${e.prompt ?? ''}` });
-        await changeTodos($, all => {
-            const old = all.find(one => one.id === id);
-            const was = carried ? all.find(one => one.id === carried && isInterrupted(one) && !one.closedAt) : undefined;
-            // (the cut-off card goes under Finished, saying which task took it on)
-            const list = was ? all.map(one => (one.id === was.id ? { ...one, closedAt: now, carriedTo: id, ask: undefined } : one)) : all;
+        await changeTodos($, list => {
+            const old = list.find(one => one.id === id);
             // Its title is the few words the task was given; under it, the person's message as they wrote it
-            const made = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') };
-            // (carrying one on, it goes on with that task's words, to-dos, notes, worktree and folder, in its place among the cards)
-            const fresh = was
-                ? { ...made, words: was.words || made.words, items: was.items, entries: [...was.entries, { at: now, kind: 'event', text: 'Carried on after the app closed' }].slice(-ENTRIES_KEPT), begunAt: was.begunAt ?? was.startedAt, ...(was.worktree ? { worktree: was.worktree, ...(was.branch ? { branch: was.branch } : {}) } : {}), ...(was.scratch ? { scratch: was.scratch } : {}) }
-                : made;
-            const folder = old?.scratch || fresh.scratch || scratch;
-            return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(folder ? { scratch: folder } : {}) }]);
+            const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') };
+            return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }]);
         });
-        if (carried)
-            await log($, `task ${id} carries on ${carried}, which the app's close cut off`);
         if (isOwn)
             await openList($);
         await sync($).catch(() => undefined);

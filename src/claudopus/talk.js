@@ -36,7 +36,7 @@ const stepOf = (use) => {
     if (isTool(use.tool, 'note'))
         return { kind: 'said', text: given('text'), isUse: true };
     if (use.tool === 'SubagentHandback' || isTool(use.tool, 'report'))
-        return { kind: 'said', text: whole(given('message')), full: given('message'), isUse: true };
+        return { kind: 'said', text: whole(given('message')), isUse: true };
     if (use.tool === 'Agent')
         return { kind: 'step', text: `Started a helper: ${given('description') || 'unnamed'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') };
     const file = given('file_path') || given('notebook_path');
@@ -50,7 +50,6 @@ const stepOf = (use) => {
     const { pictures, seen } = picturesOf(use);
     return {
         kind: 'step',
-        ...(use.tool_use_id ? { id: use.tool_use_id } : {}),
         text: text.length > STEP_CHARS ? `${text.slice(0, STEP_CHARS)} …` : text,
         isError: use.isError,
         isUse: true,
@@ -76,10 +75,9 @@ const listed = (steps) => steps.reduce((all, line) => {
 // A message as the chat draws it: whole, unless it is too long for one drawing
 const whole = (text) => (text.length > SAID_CHARS ? `${text.slice(0, SAID_CHARS)}\n\n…` : text);
 // What the app adds around a message for the model alone is no part of the chat
-const unwrapped = (text) => (text.replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>/g, '').split(workHead())[0] ?? '')
+const bare = (text) => whole((text.replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>/g, '').split(workHead())[0] ?? '')
     .replace(PANEL_RULE, '')
-    .trim();
-const bare = (text) => whole(unwrapped(text));
+    .trim());
 // The chat of a piece of work as lines. The rows the engine gives hold each message's text and its tool calls, and no thinking
 const talkOf = (rows) => rows.flatMap((row) => {
     const text = bare(row.text);
@@ -88,7 +86,7 @@ const talkOf = (rows) => rows.flatMap((row) => {
         return [{ kind: 'model', text: `${MODEL_HEAD}${moved[1]} · ${moved[2]}` }];
     if (row.role === 'user')
         return text ? [{ kind: 'told', text }] : [];
-    return [...(text ? [{ kind: 'said', text, ...(text.length < unwrapped(row.text).length ? { full: unwrapped(row.text) } : {}) }] : []), ...row.toolUses.map(stepOf)];
+    return [...(text ? [{ kind: 'said', text }] : []), ...row.toolUses.map(stepOf)];
 });
 // A run of tool steps in a few words, as the app's own chat folds one: "Ran 3 commands, read 2 files"
 const folded = (steps) => {
@@ -157,158 +155,6 @@ const newest = (lines, squeeze = 0) => {
     const from = lines.findLastIndex((line, i) => i < lines.length - kept || (room -= line.text.length) < 0);
     return lines.slice(from + 1);
 };
-const liveSteps = new Map();
-// The calls each agent runs now, by tool_use_id, with what they were given and since when
-const liveCalls = new Map();
-// How many times each agent's conversation moved in a way its rows show (a call began or ended, a step or turn ended): the reading
-// of its Details is keyed by it, so it is read again then
-const talkMarks = new Map();
-// The most responses under way kept at once (an agent no tab looked at keeps its last until this many came after it)
-const LIVE_KEPT = 60;
-// The most thinking and words one response keeps while it streams: the newest of it
-const LIVE_THINKING = 1200;
-const talkMoved = (id) => void talkMarks.set(id, (talkMarks.get(id) ?? 0) + 1);
-// A response begins: it is shown as thinking until its first part comes
-const liveBegun = (id, from) => {
-    liveSteps.delete(id);
-    liveSteps.set(id, { from, blocks: [] });
-    while (liveSteps.size > LIVE_KEPT)
-        liveSteps.delete(liveSteps.keys().next().value ?? '');
-    talkMoved(id);
-};
-// One piece of the response arrives. Only what the person would see: thinking, words, the call's name and its arguments
-const liveChunk = (id, chunk, at) => {
-    const step = liveSteps.get(id);
-    if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number')
-        return;
-    const kind = chunk.kind === 'input' ? 'tool' : chunk.kind;
-    if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool')
-        return;
-    let block = step.blocks.find(one => one.index === chunk.index && one.kind === kind);
-    if (!block)
-        step.blocks.push((block = { kind, index: chunk.index, text: '', at }));
-    if (chunk.kind === 'tool')
-        Object.assign(block, { id: chunk.id, name: chunk.name });
-    const more = chunk.kind === 'input' ? (chunk.json ?? '') : (chunk.text ?? '');
-    block.text = kind === 'thinking' ? (block.text + more).slice(-LIVE_THINKING) : (block.text + more).slice(0, SAID_CHARS * 2);
-};
-const liveEnded = (id, at) => {
-    const step = liveSteps.get(id);
-    if (step && step.endedAt === undefined)
-        Object.assign(step, { endedAt: at, endedMark: talkMarks.get(id) ?? 0 });
-};
-// The conversation was read at `mark`, from `from`: a response that ended before that is in what was read, and leaves the live part
-const liveCaughtUp = (id, mark, from) => {
-    const step = liveSteps.get(id);
-    if (step?.endedMark !== undefined && (mark > step.endedMark || from >= (step.endedAt ?? Infinity)))
-        liveSteps.delete(id);
-};
-const callBegins = (agent, id, tool, input, at) => {
-    const calls = liveCalls.get(agent) ?? new Map();
-    calls.set(id, { tool, input, at });
-    liveCalls.set(agent, calls);
-    talkMoved(agent);
-};
-const callEnds = (agent, id) => {
-    const calls = liveCalls.get(agent);
-    calls?.delete(id);
-    if (calls && !calls.size)
-        liveCalls.delete(agent);
-    talkMoved(agent);
-};
-// A response passed on piece by piece as it came, each piece also kept for the live part
-async function* followStream($, id, stream) {
-    liveBegun(id, await $.clock.now());
-    let isDone = false;
-    try {
-        for (;;) {
-            const got = await stream.next();
-            if (got.done)
-                return ((isDone = true), got.value);
-            liveChunk(id, got.value, await $.clock.now());
-            yield got.value;
-        }
-    }
-    finally {
-        liveEnded(id, await $.clock.now());
-        // (a response the engine stopped taking, as on Stop, is let go beneath too)
-        if (!isDone)
-            await stream.return?.(undefined);
-    }
-}
-// A call's arguments while they are still being written: whole where they already parse, else each text value written so far
-// (a note's words, a command's description), so what it says shows as it is written
-const partialInput = (json) => {
-    try {
-        const whole = JSON.parse(json);
-        if (whole && typeof whole === 'object')
-            return whole;
-    }
-    catch {
-        // still being written
-    }
-    const found = {};
-    for (const [, key, value = ''] of json.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)/g)) {
-        try {
-            found[key ?? ''] = JSON.parse(`"${value.replace(/\\(u[0-9a-fA-F]{0,3})?$/, '')}"`);
-        }
-        catch {
-            found[key ?? ''] = value;
-        }
-    }
-    return found;
-};
-// What a call is doing, in the app's own chat's words for it while it runs
-const runningWords = (tool) => tool === 'Bash' ? 'Running a command' : tool === 'Read' ? 'Reading a file' : ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'Editing a file' : tool === 'Grep' ? 'Searching files' : tool === 'Glob' ? 'Finding files' : tool === 'WebFetch' ? 'Reading a page' : tool === 'WebSearch' ? 'Searching the web' : tool === 'Agent' || tool === 'Task' ? 'Starting a helper' : tool === 'Skill' ? 'Running skill' : 'Using a tool';
-const liveLinesOf = (id, shown, at) => {
-    const step = liveSteps.get(id);
-    const calls = liveCalls.get(id) ?? new Map();
-    const lines = [];
-    if (step) {
-        const blocks = [...step.blocks].sort((a, b) => a.index - b.index);
-        blocks.forEach((block, n) => {
-            const after = blocks[n + 1];
-            if (block.kind === 'thinking') {
-                const isOn = !after && step.endedAt === undefined;
-                lines.push(isOn ? { kind: 'thinking', text: 'Thinking…' } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}`, detail: block.text.trim() });
-                return;
-            }
-            if (block.kind === 'text') {
-                if (block.text.trim())
-                    lines.push({ kind: 'said', text: whole(block.text.trimEnd()) });
-                return;
-            }
-            if (block.id && (calls.has(block.id) || shown.has(block.id)))
-                return;
-            const line = stepOf({ tool_use_id: block.id ?? '', tool: block.name ?? '', input: partialInput(block.text) });
-            if (line.kind === 'said')
-                return void (line.text.trim() && lines.push({ kind: 'said', text: line.text }));
-            if (isTool(block.name, 'todo'))
-                return;
-            lines.push({ kind: 'call', head: runningWords(block.name ?? ''), text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) });
-        });
-        // Asked for, and nothing back yet: it thinks
-        if (!blocks.length && step.endedAt === undefined)
-            lines.push({ kind: 'thinking', text: 'Thinking…' });
-    }
-    for (const [callId, call] of calls) {
-        const line = stepOf({ tool_use_id: callId, tool: call.tool, input: call.input });
-        // (the mod's own tools say what they say in the conversation, and end at once)
-        if (line.kind !== 'step' || call.tool.startsWith(TOOLS) || call.tool.startsWith(OLD_TOOLS))
-            continue;
-        lines.push({ kind: 'call', head: runningWords(call.tool), text: line.text, since: call.at, id: callId });
-    }
-    return lines;
-};
-// What a Details tab's live part shows, in a few values: it is drawn again when this moves (calmLook), the times every LIVE_STEP_TICK
-const LIVE_STEP_TICK = 5000;
-const liveSign = (ids, at) => JSON.stringify(ids.map(id => {
-    const step = liveSteps.get(id);
-    const isOn = (step && step.endedAt === undefined) || liveCalls.has(id);
-    return [talkMarks.get(id) ?? 0, step ? [step.endedAt ?? 0, step.blocks.map(one => [one.kind, one.text.length])] : 0, [...(liveCalls.get(id)?.keys() ?? [])], isOn ? Math.floor(at / LIVE_STEP_TICK) : 0];
-}));
-// The Details tabs drawn lately, by pane, with the task each shows: what calmLook watches for its live part
-const paneWork = new Map();
 // A piece of work's Details is a tab of its own, named after the work, beside the list, as a result is: closing it leaves the
 // list as it was. A press on Details for work whose tab is open brings that tab to the front
 const WORK_PANE = 'work-';

@@ -1,78 +1,26 @@
 "use strict";
-// The chat's process and its ledger: every task of the chat is written to disk as it changes, so a task found at work after the
-// process was replaced (the app quit, restarted or dropped the chat) is known to have been cut off, and carried on from what was
-// written; and the watcher that brings Claudopus back should Claude switch it off
-// ---- The ledger: every task of this chat, on disk, as it changes ----
-// ledger/<chat>.json: the chat (its folder, its process, its link) and each of its tasks a person may still look at, whole: at work,
-// waiting, delivered, stopped, failed or cut off, until dismissed or marked done, with its helpers at work. ledger/<chat>/<task>.brief.md
-// holds the instructions a task was started with, and <task>.carry.md what a fresh task is told to carry it on. Written on every change
-// of the cards (changeTodos), one write at a time, the file whole under another name and then moved, so a quit or a crash mid-write
-// leaves the last whole one. keep/<chat>.json, which kept only the ids, titles and process, is read once for a chat that has no ledger
-const LEDGER_DIR = 'ledger';
-const ledgerFile = (chat) => `${dir}/${LEDGER_DIR}/${chat}.json`;
-const ledgerPart = (chat, task, kind) => `${dir}/${LEDGER_DIR}/${chat}/${task}.${kind}.md`;
+// The chat's process: what is at work is kept beside it, so a card found at work after the process was replaced says that the app
+// closed while it worked; and the watcher that brings Claudopus back should Claude switch it off
+// keep/<chat>.json: the chat's process and what is at work in it, kept true as the cards change
 const keepFile = (id, kind = 'json') => `${dir}/keep/${id}.${kind}`;
-// What a card is kept with: all but what moves at every step and what a load reads afresh (its commands and their output)
-const LEDGER_ENTRIES = 30;
-const ledgerCard = (one) => {
-    const { running: _running, bg: _bg, seenJobs: _seen, endedRuns: _runs, newAt: _new, stuckAt: _stuck, stuckTold: _told, quiet: _quiet, owes: _owes, steps: _steps, tokens: _tokens, made: _made, ...kept } = one;
-    return { ...kept, tokens: 0, entries: one.entries.slice(-LEDGER_ENTRIES), answer: one.answer.slice(0, 4000) };
-};
-// The tasks the ledger holds: each one the panel still shows, and the helpers at work under them
-const ledgerTasks = (list) => {
-    const tops = list.filter(one => !one.chat && !one.parentId && (one.status === 'working' || !one.closedAt) && (one.status === 'working' || one.up));
-    const ids = new Set(tops.map(one => one.id));
-    return [...tops, ...list.filter(one => !one.chat && one.parentId && one.status === 'working' && ids.has(topOf(list, one.id)))];
-};
+let keepSign = '';
 // The chat's own process, which runs the mod's commands: a load in the same process is a reload of the mod, which ends nothing
 let enginePid = '';
 const pidOfEngine = async ($) => ((await $.process.run(['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim();
-// Written only once this load has read what the last process left (noteClosed), so a load never writes over it before it is read
-let isLedgerRead = false;
-let ledgerSign = '';
-// The chat whose ledger folder this load has made
-let ledgerMade = '';
-const saveLedger = async ($) => {
-    const { id, title } = await read($, me);
-    if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id))
+const saveKeep = async ($) => {
+    const { id } = await read($, me);
+    if (!id || !dir)
         return;
     const list = await read($, todos);
-    const agents = await agentsFolder($, id);
-    const tasks = ledgerTasks(list).map(one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) }));
-    const body = { chat: id, title, folder: cwd, pid: enginePid, ...(myLink ? { link: myLink } : {}), tasks };
-    const sign = JSON.stringify(body);
-    if (sign === ledgerSign)
+    const atWork = list.filter(one => !one.chat && one.status === 'working');
+    // (each task with its title, so a card the new process does not have comes back under its own name)
+    const titles = Object.fromEntries(atWork.filter(one => !one.parentId).map(one => [one.id, oneLine(one.title).slice(0, 200)]));
+    const sign = `${atWork.map(one => one.id).join(',')}|${Object.values(titles).join('|')}`;
+    if (sign === keepSign)
         return;
-    const path = ledgerFile(id);
-    const ledger = { ...body, savedAt: await $.clock.now() };
-    if (ledgerMade !== id)
-        (await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`]), (ledgerMade = id));
-    await $.fs.write(`${path}.part`, JSON.stringify(ledger, null, 1));
-    const r = await $.process.run(['mv', '-f', `${path}.part`, path]);
-    if (r.exitCode !== 0)
-        throw new Error(`ledger not moved into place: ${r.stderr.slice(0, 200)}`);
-    ledgerSign = sign;
+    keepSign = sign;
+    await $.fs.write(keepFile(id), JSON.stringify({ ids: atWork.map(one => one.id), titles, pid: enginePid, at: await $.clock.now() }));
 };
-// One write at a time; a change made while one is written is written after it
-let isLedgerBusy = false;
-let isLedgerDue = false;
-const saveLedgerSoon = ($) => {
-    if (isLedgerBusy)
-        return void (isLedgerDue = true);
-    isLedgerBusy = true;
-    void (async () => {
-        try {
-            do {
-                isLedgerDue = false;
-                await saveLedger($).catch(err => log($, `ledger not written: ${String(err)}`));
-            } while (isLedgerDue);
-        }
-        finally {
-            isLedgerBusy = false;
-        }
-    })();
-};
-const saveKeep = async ($) => saveLedger($);
 const parsedOr = (text, or) => {
     try {
         return text ? JSON.parse(text) : or;
@@ -81,218 +29,32 @@ const parsedOr = (text, or) => {
         return or;
     }
 };
-const isTaskId = (one) => typeof one === 'string' && /^[\w-]{1,80}$/.test(one);
-const isKeptCard = (one) => {
-    const card = one;
-    return Boolean(card) && isTaskId(card?.id) && typeof card?.title === 'string' && Array.isArray(card?.items) && Array.isArray(card?.entries) && typeof card?.status === 'string';
-};
-// The cards a ledger holds, read as cards; an older chat's keep file gives each task at work its title alone
-const keptCards = (text, now) => {
-    const was = parsedOr(text, {});
-    const pid = typeof was.pid === 'string' ? was.pid : '';
-    const savedAt = Number(was.savedAt ?? was.at) || 0;
-    if (Array.isArray(was.tasks))
-        return { pid, savedAt, cards: was.tasks.map(one => one?.card).filter(isKeptCard) };
-    const titles = Object.entries(was.titles && typeof was.titles === 'object' ? was.titles : {}).filter((pair) => isTaskId(pair[0]) && typeof pair[1] === 'string');
-    return { pid, savedAt, cards: titles.map(([id, title]) => started(id, '', title, '', now)) };
-};
-// A task the app's close cut off: its run is gone, and its card says so until the person carries it on or dismisses it. What it
-// asked the person stays on it, and an answer carries it on (toEnded)
-const QUIT_WINDOW = 60000;
-const cutOff = (one, now) => ({ ...ended(one, 'failed', now), why: WHY_APP_CLOSED, running: undefined });
-const isInterrupted = (one) => one.status === 'failed' && one.why === WHY_APP_CLOSED;
-// As the chat starts: a command lasts only while the app is open, so what was at work when the chat's process was replaced ended
-// with it. Its card comes back from the ledger, whole, as cut off: nothing starts it again by itself, the person's Carry on does.
-// What Claude Code itself runs again in the new process is at work, and what had ended stays as it ended: a task the person or the
-// chat stopped stays stopped
+// As the chat starts: a command lasts only while the app is open, so what was at work when the chat's process was replaced (the app
+// quit, restarted or dropped the chat) ended with it. Its card says so, Failed with why, and nothing starts it again by itself:
+// the person's Start again does. What Claude Code itself runs again in the new process is at work
 const noteClosed = async ($, id) => {
-    ledgerSign = '';
+    keepSign = '';
     if (!dir)
-        return void (isLedgerRead = true);
-    try {
-        enginePid = await pidOfEngine($);
-        const now = await $.clock.now();
-        const ledger = SAFE_CHAT.test(id) ? await readOr($, ledgerFile(id)) : '';
-        const { pid: wasPid, cards: kept, savedAt } = keptCards(ledger || (await readOr($, keepFile(id))), now);
-        if (!/^\d+$/.test(wasPid) || !/^\d+$/.test(enginePid) || wasPid === enginePid)
-            return;
-        // A task stopped by no one here as that process ended (its ledger's last write, or its end as the chat said it) was stopped by
-        // the app's quit: cut off too
-        const endedThen = Number((await readOr($, keepFile(id, 'ended'))).split('\t')[1] ?? 0) * 1000;
-        const lastAt = Math.max(savedAt, endedThen);
-        const isQuitStop = (one) => one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && !hasReport(one) && lastAt > 0 && one.endedAt >= lastAt - QUIT_WINDOW;
-        const live = await $.agent.list().catch(() => []);
-        const isLive = (one) => live.some(agent => agent.id === one && WORKING.includes(agent.status));
-        const closed = [];
-        await changeTodos($, list => {
-            closed.length = 0;
-            const known = new Set(list.map(one => one.id));
-            // (a card the new process does not have comes back as the ledger kept it, with what a load reads afresh left out)
-            const added = kept.filter(one => !known.has(one.id)).map(one => ({ ...one, bg: undefined, running: undefined, stuckAt: undefined }));
-            return capped([...list, ...added]).map(one => (one.chat || !(one.status === 'working' || isQuitStop(one)) || isLive(one.id) ? one : (closed.push(one.id), cutOff(one, now))));
-        });
-        if (closed.length)
-            await log($, `the chat's process was replaced (${wasPid} to ${enginePid}) while work was at work: ${closed.join(', ')} ended with it`);
-    }
-    finally {
-        isLedgerRead = true;
-    }
-};
-// ---- What a task needs to be carried on ----
-// The instructions a task of the chat's own was started with, as the chat wrote them
-const saveBrief = async ($, task, prompt) => {
-    const { id } = await read($, me);
-    if (!dir || !SAFE_CHAT.test(id) || !isTaskId(task) || !prompt.trim())
         return;
-    await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`]);
-    await $.fs.write(ledgerPart(id, task, 'brief'), prompt);
-};
-// The worktree a task made, as its command made it: `git worktree add [-b <branch>] <path>`, the path as the command gives it or
-// under the folder it ran in (`cd <folder> &&`, `git -C <folder>`)
-const worktreeOf = (command, folder) => {
-    const m = /(?:^|[;&|(\s])git((?:\s+-C\s+\S+)?)\s+worktree\s+add\s+([^;&|\n]+)/.exec(command);
-    if (!m)
-        return undefined;
-    const words = (m[2] ?? '').trim().split(/\s+/).map(word => word.replace(/^["']|["']$/g, ''));
-    let branch = '';
-    const plain = [];
-    for (let at = 0; at < words.length; at += 1) {
-        const word = words[at] ?? '';
-        if (word === '-b' || word === '-B')
-            branch = words[(at += 1)] ?? '';
-        else if (word === '--reason' || word === '--orphan')
-            at += 1;
-        else if (!word.startsWith('-'))
-            plain.push(word);
-    }
-    const [path = ''] = plain;
-    if (!path)
-        return undefined;
-    const base = /-C\s+(\S+)/.exec(m[1] ?? '')?.[1] ?? /(?:^|[;&|]\s*)cd\s+("[^"]+"|'[^']+'|\S+)\s*&&[^;]*$/.exec(command.slice(0, m.index + 1))?.[1]?.replace(/^["']|["']$/g, '') ?? folder;
-    const whole = path.startsWith('/') ? path : path.startsWith('~/') ? path : `${base.replace(/\/$/, '')}/${path}`;
-    // (what a later step names it by: the folder with no ./ or ../ left in it)
-    const parts = [];
-    for (const part of whole.split('/'))
-        part === '..' ? parts.pop() : part === '.' || (part === '' && parts.length) ? undefined : parts.push(part);
-    return { worktree: parts.join('/') || whole, branch };
-};
-const noteWorktree = async ($, agent, command) => {
-    const found = worktreeOf(command, cwd);
-    if (!found)
+    enginePid = await pidOfEngine($);
+    const was = parsedOr(await readOr($, keepFile(id)), {});
+    const wasPid = typeof was.pid === 'string' ? was.pid : '';
+    if (!/^\d+$/.test(wasPid) || !/^\d+$/.test(enginePid) || wasPid === enginePid)
         return;
+    const isId = (one) => typeof one === 'string' && /^[\w-]{1,80}$/.test(one);
+    const titles = Object.fromEntries(Object.entries(was.titles && typeof was.titles === 'object' ? was.titles : {}).filter((pair) => isId(pair[0]) && typeof pair[1] === 'string'));
+    const live = await $.agent.list().catch(() => []);
+    const isLive = (one) => live.some(agent => agent.id === one && WORKING.includes(agent.status));
+    const now = await $.clock.now();
+    const closed = [];
     await changeTodos($, list => {
-        const top = topOf(list, agent);
-        return list.map(one => (one.id === top && !one.chat ? { ...one, worktree: found.worktree, ...(found.branch ? { branch: found.branch } : {}) } : one));
+        closed.length = 0;
+        const known = new Set(list.map(one => one.id));
+        const added = Object.keys(titles).filter(one => !known.has(one) && !isLive(one)).map(one => started(one, '', titles[one] ?? '', '', now));
+        return [...list, ...added].map(one => (one.chat || one.status !== 'working' || isLive(one.id) ? one : (closed.push(one.id), { ...ended(one, 'failed', now), why: WHY_APP_CLOSED, bg: undefined })));
     });
-};
-// What a fresh task is told to carry on a task the app's close cut off: everything the ledger and the task's own record hold
-const carryText = async ($, one, answer) => {
-    const { id: chat } = await read($, me);
-    const brief = (await readOr($, ledgerPart(chat, one.id, 'brief'))).trim();
-    const transcript = `${await agentsFolder($, chat)}/agent-${one.id}.jsonl`;
-    const worktree = one.worktree || asksOf(one).findLast(ask => ask.release)?.release || one.admins?.find(gate => gate.folder)?.folder || '';
-    const when = (at) => new Date(at).toISOString().slice(0, 16).replace('T', ' ');
-    const items = one.items.map(item => `- [${item.state}] ${item.text}`);
-    const notes = one.entries.slice(-12).map(entry => `- ${when(entry.at)} ${entry.kind === 'steer' ? `${who(true)} said: ` : ''}${entry.text}`);
-    return [
-        `# Carry on: ${titleOf(one)}`,
-        '',
-        named(`The Claude app closed while this task worked, at ${when(one.endedAt)} UTC, and its run ended with it. You are a fresh task carrying it on: read this, then go on from where it stopped. Do not do again what it finished; check what it left half done before you build on it.`),
-        '',
-        `- Task: ${titleOf(one)}, started ${when(one.begunAt ?? one.startedAt)} UTC${one.model ? ` on ${modelName(one.model) || one.model}` : ''} (its id was ${one.id})`,
-        `- The chat's folder: ${cwd}`,
-        worktree ? `- Its worktree, yours now: ${worktree}${one.branch ? ` on branch ${one.branch}` : ''}. Look at \`git -C ${worktree} status\` and its last commits first.` : '- No worktree was noted for it: its saved transcript names any it made.',
-        one.scratch ? `- Its scratch folder: ${one.scratch}` : '',
-        `- The saved transcript of the run that was cut off: ${transcript} (one JSON line per message, the newest last: read its end with tail, never the whole file)`,
-        one.words ? named(`- {Name}'s message it was started for: ${one.words}`) : '',
-        '',
-        '## Its instructions',
-        brief || 'Not kept: the first line of its saved transcript holds them.',
-        '',
-        '## Its to-dos when it stopped',
-        ...(items.length ? items : ['None were listed.']),
-        '',
-        '## Its last notes',
-        ...(notes.length ? notes : ['None.']),
-        ...(one.ask ? ['', named('## What it was asking {name}'), ...asksOf(one).flatMap((ask, n) => [...(n ? [''] : []), ask.text, ...(ask.details ? [ask.details] : [])])] : []),
-        ...(answer ? ['', named("## {Name}'s answer"), answer] : []),
-        '',
-    ]
-        .filter(line => line !== undefined)
-        .join('\n');
-};
-const CARRY_PROMPT = (path) => `Carry on a task the Claude app's close cut off. Read ${path} first: it holds the task's instructions, its to-dos, its last notes, its worktree and its saved transcript. Then go on from where it stopped.`;
-// The person's press on Carry on, or their answer to what a cut-off task asked: the chat starts a fresh task told everything the
-// ledger holds of it. Its card goes under Finished once the fresh task starts, which takes its place, its to-dos and its notes
-const carryOn = async ($, id, answer = '') => {
-    const list = await read($, todos);
-    const one = list.find(card => card.id === topOf(list, id));
-    const { id: chat } = await read($, me);
-    if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat))
-        return;
-    const path = ledgerPart(chat, one.id, 'carry');
-    await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${chat}`]);
-    await $.fs.write(path, await carryText($, one, answer));
-    const model = modelName(one.model ?? '');
-    await log($, `carry on ${one.id}: the chat is asked to start a fresh task from ${path}`);
-    await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Carry on" on "${titleOf(one)}" (${one.id}), which stopped when the Claude app closed${answer ? `, and answered what it asked` : ''}. Its run is gone, so start a fresh task for it now: the Agent tool with subagent_type "${one.kind === 'claudopus:quick' ? 'claudopus:quick' : 'claudopus:task'}"${model ? `, the model it ran on (${model})` : ''}, description "${titleOf(one)}", and as its prompt exactly: ${CARRY_PROMPT(path)}`);
-};
-// The task a fresh task's instructions carry on, by its id, from the carry file they name
-const carriedFrom = (prompt) => /\/ledger\/[A-Za-z0-9-]+\/([\w-]+)\.carry\.md/.exec(prompt)?.[1] ?? '';
-// ---- Other chats whose process ended with tasks at work ----
-// A chat of this Mac that is not open (no fresh file in live/) and whose process is gone, with tasks its ledger kept at work or cut
-// off: those tasks are listed under its name, cut off, so the panel shows what every chat had at work after the app comes back. A
-// press on the chat's name opens it, where each has Carry on. Ledgers not written for LEDGER_SHOWN are left out
-const LEDGER_SHOWN = 3 * 24 * 3600000;
-const ledgersRead = new Map();
-const pidsSeen = { at: 0, alive: new Set(), asked: '' };
-const ledgerOthers = async ($, me, open, now) => {
-    if (!dir)
-        return [];
-    const files = (await $.fs.list(`${dir}/${LEDGER_DIR}`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${me}.json`);
-    for (const name of [...ledgersRead.keys()])
-        if (!files.some(entry => entry.name === name))
-            ledgersRead.delete(name);
-    const found = [];
-    for (const entry of files) {
-        if (entry.mtimeMs && now - entry.mtimeMs > LEDGER_SHOWN)
-            continue;
-        const key = `${entry.mtimeMs}:${entry.size}`;
-        const was = ledgersRead.get(entry.name);
-        const ledger = was?.key === key ? was.ledger : parsedOr(await readOr($, `${dir}/${LEDGER_DIR}/${entry.name}`), {});
-        ledgersRead.set(entry.name, { key, ledger });
-        if (typeof ledger.chat !== 'string' || !SAFE_CHAT.test(ledger.chat) || open.has(`/${ledger.chat}`) || !Array.isArray(ledger.tasks))
-            continue;
-        const savedAt = Number(ledger.savedAt) || 0;
-        const cards = ledger.tasks
-            .map(one => one?.card)
-            .filter(isKeptCard)
-            .filter(one => !one.parentId && !one.closedAt && (one.status === 'working' || isInterrupted(one) || (one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && one.endedAt >= savedAt - QUIT_WINDOW)));
-        if (cards.length)
-            found.push({ ledger, cards });
-    }
-    if (!found.length)
-        return [];
-    // Whether each process still runs, asked of the Mac at most every FOLLOW_EVERY: one that runs may be a chat whose Claudopus Claude
-    // switched off, whose tasks still work
-    const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort();
-    if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
-        const r = pids.length ? await $.process.run(['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined;
-        pidsSeen.alive = new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)));
-        pidsSeen.at = now;
-        pidsSeen.asked = pids.join(',');
-    }
-    return found
-        .filter(({ ledger }) => !pidsSeen.alive.has(String(ledger.pid ?? '')))
-        .map(({ ledger, cards }) => ({
-        chat: String(ledger.chat),
-        title: typeof ledger.title === 'string' ? ledger.title : '',
-        folder: typeof ledger.folder === 'string' ? ledger.folder : '',
-        host: '',
-        at: now,
-        cards: cards.map(one => (isInterrupted(one) ? one : cutOff(one, Math.min(now, Number(ledger.savedAt) || now)))).map(one => ({ ...one, bg: undefined, running: undefined })),
-        ...(linkOf(ledger.link) ? { link: linkOf(ledger.link) } : {}),
-    }));
+    if (closed.length)
+        await log($, `the chat's process was replaced (${wasPid} to ${enginePid}) while work was at work: ${closed.join(', ')} ended with it`);
 };
 // ---- Back by itself after Claude switches it off ----
 // Claude's engine switches off an add-on that held its shared helper for five seconds, and that chat has no Claudopus until the
@@ -380,23 +142,4 @@ const endBeat = async ($, id) => {
         await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined);
 };
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/;
-// ---- Tasks keep their prompt cache an hour, as the chat does ----
-// With Claude Code's 5 minutes, a task or helper that waits longer on a command or a helper pays to read its whole context again (a
-// person's tasks woken after a wait rewrote theirs 82 times, a fifth of what Claudopus cost them). So each chat's start sets
-// subagentPromptCacheTtl to "1h" in the person's own settings.json, every other key as it was, as site/install.sh does for an install
-// from claudopus.ai, here for one made from the marketplace. A value already there, whatever it is, is the person's and stays; so
-// does a file that cannot be read, is not a JSON object, or holds a number of more than 15 digits, which would come back changed
-const TASK_CACHE = 'subagentPromptCacheTtl';
-const setTaskCache = async ($) => {
-    const settings = `${await configDir($)}/settings.json`;
-    const isThere = await $.fs.exists(settings).catch(() => true);
-    const text = isThere ? await $.fs.read(settings).catch(() => undefined) : '';
-    if (text === undefined || /[-:[,\s]\d{16,}|\d\.\d{16,}/.test(text))
-        return;
-    const d = parsedOr(text.trim() ? text : '{}', undefined);
-    if (!d || typeof d !== 'object' || Array.isArray(d) || TASK_CACHE in d)
-        return;
-    await $.fs.write(settings, `${JSON.stringify({ ...d, [TASK_CACHE]: '1h' }, null, 2)}\n`);
-    await log($, `tasks keep their prompt cache an hour: ${TASK_CACHE} set to "1h" in ${settings}`);
-};
 const REVIVED_KEY = 'claudopus.revived';

@@ -128,7 +128,7 @@ const lookBoxes = async ($) => {
     const now = await $.clock.now();
     const found = [];
     const entries = await $.fs.list(boxesDir()).catch(() => []);
-    const cards = await read($, todos);
+    const cards = entries.length ? await read($, todos) : [];
     for (const entry of entries) {
         // A mark left after its request went (a chat that marked it as the runner ended) goes too
         const marked = entry.name.replace(/\.told$/, '');
@@ -165,13 +165,6 @@ const lookBoxes = async ($) => {
             // A request being written is read at the next look
         }
     }
-    // Each task's own question for a key, on its card, while it is not answered
-    for (const card of cards)
-        for (const ask of keyAsksOf(card)) {
-            const id = ownBoxId(card.id, ask.at);
-            if (!card.chat && !boxSent.has(id))
-                found.push({ id, kind: 'key', name: ask.name, text: ask.text, details: ask.details, at: ask.at, chat: boxChat, agent: ask.from, card: card.id, isOwn: true });
-        }
     found.sort((a, b) => a.at - b.at);
     for (const one of found) {
         if (boxTold.has(one.id))
@@ -182,14 +175,12 @@ const lookBoxes = async ($) => {
         boxTold.add(one.id);
         // The first chat to make the mark brings its panel up with the field ready to type in (focus is given only over an empty
         // prompt), and tells it. A panel that cannot be drawn here gives the mark back, so another chat or the runner's own box asks
-        // (a task's own question for a key has no runner to tell, and its card is this chat's alone)
-        const mark = one.isOwn ? { exitCode: 0 } : await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }));
+        const mark = await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }));
         if (mark.exitCode !== 0)
             continue;
         const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(err => (log($, `panel not opened for a box: ${String(err)}`), undefined));
         if (!opened?.isPlaced) {
-            if (!one.isOwn)
-                await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined);
+            await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined);
             await log($, `box ${one.id} given back: the panel is not drawn here${opened && !opened.isPlaced ? ` (${opened.reason})` : ''}`);
             continue;
         }
@@ -231,9 +222,6 @@ const sendBox = async ($, id, value) => {
         boxTries.set(id, (boxTries.get(id) ?? 0) + 1);
         return void drawAgain($);
     }
-    const own = boxes.find(other => other.id === id && other.isOwn);
-    if (own)
-        return void (await keepOwnKey($, own, value));
     const request = `${boxesDir()}/${id}.json`;
     // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
     if (!(await $.fs.exists(request).catch(() => false)))
@@ -279,57 +267,11 @@ const sendBox = async ($, id, value) => {
     }
     drawAgain($);
 };
-// The box of a task's own question for a key
-const ownBoxId = (card, at) => `key-${card}-${at}`;
-// A key pasted in a task's own box: saved under its name as the secret runner keeps one (bin/keyring, replacing a saved one), and
-// the task told it can run its command now
-const SHORTEST_KEY = 4;
-const keepOwnKey = async ($, one, value) => {
-    const id = one.id;
-    const name = one.name ?? '';
-    boxPresses += 1;
-    boxTries.set(id, (boxTries.get(id) ?? 0) + 1);
-    if (value.length < SHORTEST_KEY)
-        return void (boxSaid.set(id, `That was shorter than ${SHORTEST_KEY} characters. Paste the whole key.`), drawAgain($));
-    const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', 'claudopus-secret', name, `Claudopus: ${name}`], { stdin: `${value}\n`, timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }));
-    if (r.exitCode !== 0) {
-        boxSaid.set(id, `It couldn't be saved in ${keptWhere()}. Try again.`);
-        await log($, `key ${name} not kept from its box: the keychain ended ${r.exitCode}`);
-        return void drawAgain($);
-    }
-    boxSent.add(id);
-    boxSaid.delete(id);
-    boxHeldReply.delete(id);
-    closeBarOf(id);
-    boxes = boxes.filter(other => other.id !== id);
-    pressedLine($, one.card ?? '', '', '', `You gave ${name}`);
-    drawAgain($);
-    await log($, `key ${name} saved from the box on ${one.card}`);
-    await refreshKeys($).catch(err => log($, `keys not made again: ${String(err)}`));
-    await ownKeyDone($, one, named(KEY_GIVEN($.plugin.root, name)), `You gave ${name}`);
-};
-// A task's own key question answered: gone from its card, and its task told what was done
-const ownKeyDone = async ($, one, text, label) => {
-    const card = one.card ?? '';
-    await changeTodos($, list => list.map(other => (other.id === card && keyAsksOf(other).some(ask => ownBoxId(card, ask.at) === one.id) ? withKeyAsks(other, keyAsksOf(other).filter(ask => ownBoxId(card, ask.at) !== one.id)) : other)));
-    await toTask($, card, one.agent ?? card, text, label, one.text).catch(err => log($, `task not told of its key: ${String(err)}`));
-};
-const KEY_GIVEN = (root, name) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${root}/bin/secret ${name} here '<command using $${name}>'\`.`;
-const KEY_NOT_GIVEN = (name) => `{Name} pressed Don't give it on your question for ${name}, so it was not given.`;
-const KEY_ANSWERED = (name, said) => `{Name} answered your question for ${name} in their own words instead of giving it: ${said}`;
 // Don't allow, or Don't give it: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($, id, said = '') => {
     boxSent.add(id);
     barKeyTyped.delete(id);
     const one = boxes.find(other => other.id === id);
-    if (one?.isOwn) {
-        boxes = boxes.filter(other => other.id !== id);
-        closeBarOf(id);
-        boxHeldReply.delete(id);
-        pressedLine($, one.card ?? '', DONT_GIVE, said);
-        drawAgain($);
-        return void (await ownKeyDone($, one, named(KEY_NOT_GIVEN(one.name ?? '')), DONT_GIVE));
-    }
     boxes = boxes.filter(other => other.id !== id);
     closeBarOf(id);
     boxHeldReply.delete(id);
@@ -387,15 +329,6 @@ const sendBoxReply = async ($, id, text, isSure = false) => {
         return void drawAgain($);
     }
     boxHeldReply.delete(id);
-    if (one.isOwn) {
-        boxSent.add(id);
-        boxSaid.delete(id);
-        boxes = boxes.filter(other => other.id !== id);
-        closeBarOf(id);
-        pressedLine($, one.card ?? '', '', '', `You answered “${cut(oneLine(said), 60)}”`);
-        drawAgain($);
-        return void (await ownKeyDone($, one, named(KEY_ANSWERED(one.name ?? '', said)), `You answered “${cut(oneLine(said), 60)}”`));
-    }
     const request = `${boxesDir()}/${id}.json`;
     if (!(await $.fs.exists(request).catch(() => false)))
         return void (await cancelBox($, id, "the command had stopped waiting, so your answer wasn't sent"));

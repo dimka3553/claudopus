@@ -316,8 +316,6 @@ export const openUrl = (c, held = '') => {
 };
 // (what was delivered and is not yet marked done comes last, and alone when nothing waits or works)
 export const deliveredSaid = ({ here, there, asks, delivered = 0 }) => (delivered ? `${asks || here || there ? ' · ' : ''}${delivered} delivered` : '');
-// (and after it what the app's close cut off, until carried on or dismissed)
-export const interruptedSaid = ({ here, there, asks, delivered = 0, interrupted = 0 }) => (interrupted ? `${asks || here || there || delivered ? ' · ' : ''}${interrupted} interrupted` : '');
 export const headLine = (head) => {
     const { here, there, chats, asks, isDone } = head;
     const running = here + there;
@@ -331,7 +329,7 @@ export const headLine = (head) => {
                 : here
                     ? `${here} working`
                     : '';
-    return first || head.delivered || head.interrupted ? `${first}${deliveredSaid(head)}${interruptedSaid(head)}` : isDone ? 'Just finished' : 'Nothing waits for you';
+    return first || head.delivered ? `${first}${deliveredSaid(head)}` : isDone ? 'Just finished' : 'Nothing waits for you';
 };
 // The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while
 // anything needs the person, at work while anything runs, resting only when nothing goes on anywhere
