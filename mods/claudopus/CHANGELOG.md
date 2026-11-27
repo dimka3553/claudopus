@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.304 · 27 November 2026
+- A task's part of its result, passed on by the chat, shows in that task's coloured box, not the box of the task that spoke before it, also after a reload.
+- A message the chat passes on to three or more tasks at once is quoted only over the chat's reply to it, not over each of those tasks' later results.
+- A note from the chat that repeats one of your older messages no longer makes later replies quote that older message.
+- A picture you sent and the summary left when a chat runs out of room are no longer quoted as your words.
+
 ## 0.2.303 · 27 November 2026
 - When your Mac is busy, Claudopus no longer reloads itself again and again in a chat whose Claudopus is still running, which cut off the chat's turn and hid its task kinds for a while.
 - A task can no longer change the files of the Claudopus copy your chats run from; it works in a copy of its own.

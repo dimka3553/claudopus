@@ -54,7 +54,7 @@ const resultGiven = (id: string, text: string) => {
 // its row id, else by its words (the desktop app names a reply by its message's id)
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
   const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
-  const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults])
+  const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
   if (passed && cards.some(one => one.id === passed)) {
     colourBuilder ??= new ColourBuilder()
     colourBuilder.pick(passed)
