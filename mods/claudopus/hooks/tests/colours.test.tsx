@@ -901,7 +901,7 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
     { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
     { role: 'assistant', text: 'The tip of the nose is rounder now, and the bridge is as it was.', uuid: 'r4', toolUses: [] },
   ]
-  const { files, tabs } = world(on, { talk })
+  const { files, tabs, clock } = world(on, { talk })
   await $.session.start(start)
     await $.prompt.submit({ text: ASKED, wait: false, origin: composer })
   const r = (await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A' } as never)) as { agentId: string }
@@ -935,6 +935,19 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   const later = await $.ui.mount({ ...MSG, requestId: 'r4', props: { text: 'The tip of the nose is rounder now, and the bridge is as it was.', isFirstOfReply: true }, surface: 'desktop' } as never)
   expect(await until(async () => later.find({ type: 'Text', text: '“Also make the tip rounder”' }))).toBeDefined()
   await later.unmount()
+  // A result handed in after the last read of the chat, found by its words, quotes the newest message passed on to its task since
+  const RESULT = 'The bridge is narrower now, and the tip is as you asked it to be.'
+  talk.push(
+    { role: 'user', text: 'Make the bridge narrower too', toolUses: [] },
+    { role: 'assistant', text: 'Passing that on.', uuid: 'r5', toolUses: [{ tool_use_id: 'pass2', tool: 'SendMessage', input: { to: 'a1', message: 'Make the bridge narrower too' } }] },
+    { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
+    { role: 'assistant', text: RESULT, uuid: 'r6', toolUses: [] },
+  )
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: RESULT } as never)
+  const result = await $.ui.mount({ ...MSG, requestId: 'msg_r6', props: { text: RESULT, isFirstOfReply: true }, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => result.find({ type: 'Text', text: '“Make the bridge narrower too”' }))).toBeDefined()
+  await result.unmount()
   // View more shows the whole of it
   await reply.press({ key: String((await reply.findAll({ type: 'Button' })).find(one => /^quote-more-/.test(one.key ?? ''))?.key) })
   expect(await until(async () => (await reply.findAll({ type: 'Button' })).find(one => one.props.label === 'View less'))).toBeDefined()
