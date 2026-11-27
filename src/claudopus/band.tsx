@@ -374,7 +374,7 @@ const bandHooks = (on: On) => {
 
     const marker = await waitMarker($, ui, e.surface)
     const isListHere = e.surface !== 'terminal' && (await isListPlaced($))
-    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures, usageHistory(), machineWord(), FILL) : null
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures, usageHistory(), machineWord(), FILL, diskKept) : null
     const drawing = (spacers: JSX.Element | null) => {
       const row = (
         <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">

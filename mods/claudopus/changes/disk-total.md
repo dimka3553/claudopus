@@ -1,0 +1,1 @@
+- A pointer resting on the disk's speed in the line above the prompt shows how much disk space is used, how much is left and the disk's size
