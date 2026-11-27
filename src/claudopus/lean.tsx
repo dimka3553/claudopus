@@ -286,8 +286,10 @@ const reportsFor = async ($: EngineInterface, ids?: string[]) => {
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
   await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
   // (each kept, so the chat's reply that passes it on is drawn in its task's box: colours.tsx)
-  for (const one of given) resultGiven(one.id, one.reportForChat ?? '')
-  return given.map(one => named(REPORT_FOR_CHAT(titleOf(one), one.id, one.reportForChat ?? '')))
+  // (each file it names given as a copy in the chat's folder, which the person's click opens: opening.tsx)
+  const reports = await Promise.all(given.map(one => withOpenables($, one.reportForChat ?? '').catch(() => one.reportForChat ?? '')))
+  given.forEach((one, n) => resultGiven(one.id, reports[n] ?? ''))
+  return given.map((one, n) => named(REPORT_FOR_CHAT(titleOf(one), one.id, reports[n] ?? '')))
 }
 // The parts of their results tasks handed in while at work that the chat has not been given, each once, the oldest first
 const partsFor = async ($: EngineInterface) => {
@@ -295,8 +297,9 @@ const partsFor = async ($: EngineInterface) => {
   if (!given.length) return []
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)))
   await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
-  for (const one of given) for (const part of one.partsForChat ?? []) resultGiven(one.id, part)
-  return given.flatMap(one => (one.partsForChat ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))))
+  const parts = await Promise.all(given.map(one => Promise.all((one.partsForChat ?? []).map(part => withOpenables($, part).catch(() => part)))))
+  given.forEach((one, n) => (parts[n] ?? []).forEach(part => resultGiven(one.id, part)))
+  return given.flatMap((one, n) => (parts[n] ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))))
 }
 // `atWork`: the chat's tasks whose cards are at work, which paused by ending a step and are not finished; `given`: the tasks whose
 // report the chat was given with an earlier notice of their end (REPORT_FOR_CHAT), whose later notices repeat it

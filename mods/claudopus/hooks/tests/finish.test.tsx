@@ -1705,11 +1705,11 @@ test('a task hands in a finished part of its result while it works on: its card 
   expect(await until(async () => (reportsOf().length === (kept ?? 0) + 1 ? reportsOf() : undefined))).toHaveLength(4)
 })
 
-test("a task's report whose notice of its end never comes goes to the chat with the person's next message, once; a message to the task after its hand-back is a step of its own", async ($, on) => {
+test("a task's report whose notice of its end never comes goes to the chat with the person's next message, once; a message to the task after its hand-back is a step of its own; a file it names or the chat sends from outside the chat's folder reaches the person as a copy inside it, which their click opens", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const talk: unknown[] = []
-  const { stepped } = world(on, { agents, kinds, talk })
+  const { stepped, files } = world(on, { agents, kinds, talk })
   await $.session.start(start)
   await $.prompt.submit({ text: 'name the squid', wait: false, origin: composer })
   // A report whose notice never comes goes with the person's next message, once; a message to the task after its hand-back is a step
@@ -1726,4 +1726,34 @@ test("a task's report whose notice of its end never comes goes to the chat with 
   const withMessage = async () => ((await $.prompt.submit({ text: 'what did it name it?', wait: false, origin: { kind: 'composer' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(await withMessage()).toContain('  Named it Inky.')
   expect(await withMessage()).not.toContain('Named it Inky.')
+
+  // The app's file pane opens only files inside the chat's folder: a file the report names elsewhere, on a line of its own with its
+  // spaces, reaches the chat as its copy there, which git leaves out; a folder, a file inside the chat's folder and one gone stay
+  const BOARD = `${HOME}/Documents/Squid names/board.html`
+  const COPY = `/repo/.claudopus-files/Documents/Squid names/board.html`
+  files.set(BOARD, '<h1>Inky</h1>')
+  files.set('/repo/notes.md', 'names')
+  await $.agent.spawn({ ...spawn, description: 'Draw the board', prompt: 'draw it' } as never)
+  agents.a2 = 'waiting'
+  kinds.a2 = 'general-purpose'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb6', agentId: 'a2', message: `The board is drawn.\n${BOARD}\nNotes: /repo/notes.md, folder ${HOME}/Documents, old ${HOME}/gone.html.` } as never)
+  const given = await withMessage()
+  expect(given).toContain(`  ${COPY}\n`)
+  expect(given).not.toContain(BOARD)
+  expect(given).toContain(`Notes: /repo/notes.md, folder ${HOME}/Documents, old ${HOME}/gone.html.`)
+  expect(files.get(COPY)).toBe('<h1>Inky</h1>')
+  expect(files.get('/repo/.claudopus-files/.gitignore')).toBe('*\n')
+  // A file sent from outside the chat's folder is copied in, and the call refused with the copy to send instead, never changed on its
+  // way; the copy sent goes, made again from its file as that is now; a file inside the chat's folder goes as it is
+  files.set(BOARD, '<h1>Inky, Ink</h1>')
+  files.delete(COPY)
+  const sent = (await $.tool.call({ tool: 'SendUserFile', tool_use_id: 's1', files: [BOARD], status: 'normal' } as never)) as { deny?: string }
+  expect(sent.deny).toContain(`${COPY} (a copy of ${BOARD})`)
+  expect(sent.deny).toContain('Send the same call again with the copy in place of the original')
+  expect(files.get(COPY)).toBe('<h1>Inky, Ink</h1>')
+  files.set(BOARD, '<h1>Inky, Ink, Squirt</h1>')
+  expect(((await $.tool.call({ tool: 'SendUserFile', tool_use_id: 's2', files: [COPY], status: 'normal' } as never)) as { deny?: string }).deny).toBeUndefined()
+  expect(files.get(COPY)).toBe('<h1>Inky, Ink, Squirt</h1>')
+  expect(((await $.tool.call({ tool: 'SendUserFile', tool_use_id: 's3', files: ['/repo/notes.md'], status: 'normal' } as never)) as { deny?: string }).deny).toBeUndefined()
+  expect(files.has('/repo/.claudopus-files/repo/notes.md')).toBe(false)
 })

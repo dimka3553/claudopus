@@ -1,0 +1,1 @@
+- A file Claude sends you or a report names now opens when you click it, even when a task saved it outside the chat's folder. Claudopus puts a copy in the chat's folder, where the app can open it, instead of showing "This file is outside this session's folders".
