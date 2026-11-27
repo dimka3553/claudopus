@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.292 · 27 November 2026
+- The box above the chat for a task takes that task's colour: its heading and a dot before it, as its card and its replies in the chat have.
+- Tasks started one after another each get a colour of their own, kept on their card, so two cards side by side are never the same colour.
+
 ## 0.2.291 · 27 November 2026
 - Reply on a coloured reply opens the box above the chat for that task: the answer box while it asks you something, the message box otherwise.
 - A chat reply that passes on a task's result now sits in that task's box, not the box of a task the chat heard from just before.

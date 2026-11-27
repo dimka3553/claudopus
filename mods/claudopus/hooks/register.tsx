@@ -31,7 +31,7 @@ import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, Prog
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
-import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, textHash as colourTextHash } from './colours'
+import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, slotsFor, textHash as colourTextHash } from './colours'
 import type { ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
@@ -193,7 +193,7 @@ let finishedAtTop: string[] = []
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
 const now = await read($, todos)
 const before = JSON.stringify(now)
-const hold = (list: Todo[]) => keepAsks(saidKept(list, holdDone(list, fn(list))))
+const hold = (list: Todo[]) => withColours(keepAsks(saidKept(list, holdDone(list, fn(list)))))
 const next = hold(now)
 if (JSON.stringify(next) === before) return now
 const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
@@ -3493,8 +3493,18 @@ let colourTimer: Timer | undefined
 let colourWritten = ''
 
 const colourHex = (slot: number) => PALETTE[slot % PALETTE.length] ?? PALETTE[0]
+const cardSlots = new Map<string, number>()
+const withColours = (list: Todo[]) => {
+const own = list.filter(one => !one.parentId && !one.chat)
+const fresh = slotsFor(own.map(one => ({ id: one.id, startedAt: one.begunAt ?? one.startedAt, colour: one.colour })))
+const next = Object.keys(fresh).length ? list.map(one => (fresh[one.id] === undefined ? one : { ...one, colour: fresh[one.id] })) : list
+for (const one of next) if (one.colour !== undefined) cardSlots.set(one.id, one.colour)
+return next
+}
 const taskColour = (id: string) => {
 if (!isColoured) return undefined
+const card = cardSlots.get(id)
+if (card !== undefined) return colourHex(card)
 const slot = colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id]
 return slot === undefined ? undefined : colourHex(slot)
 }
@@ -3597,7 +3607,7 @@ const links = given.length ? (
 <Markdown text={linkList(given)} />
 </Box>
 ) : null
-const colourOfTask = (id: string) => colourHex(colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id] ?? 0)
+const colourOfTask = (id: string) => taskColour(id) ?? colourHex(colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id] ?? 0)
 const titleOfTask = (id: string) => colourIndex.tasks[id]?.title ?? (() => {
 const card = cards.find(one => one.id === id)
 return card ? titleOf(card) : 'Task'
@@ -11249,6 +11259,7 @@ if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((awa
 ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
 await loadSettings($)
 void colourBuild($, true)
+await changeTodos($, list => list).catch(err => log($, `cards not given colours: ${String(err)}`))
 await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
 await closeUndrawn($)
 $.clock.after(3000, () => closeUndrawn($))
@@ -14666,7 +14677,7 @@ onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start
 ) : null}
 </ui.Box>
 ) : null
-type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; message?: Todo; attachTo?: string; send: (value: string) => void }
+type BarBox = { head: string; task?: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; message?: Todo; attachTo?: string; send: (value: string) => void }
 const changeTarget = (cards: Todo[]) => (barOpen?.kind === 'change' ? cards.find(one => one.id === barOpen?.id && canChange(asPressed(one))) : undefined)
 const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): BarBox | undefined => {
 const open = barOpen
@@ -14680,11 +14691,11 @@ if (open.kind === 'answer') {
 const one = barTarget(cards)
 const ask = one ? barAskOf(one) : undefined
 const which = one && ask && asksOf(one).length > 1 ? `: “${cut(ask.text, 60)}”` : ''
-return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”${which}`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (((barBoxAt = 0), dropDrafts($, one.id, ask), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($)), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
+return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”${which}`, task: one.id, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (((barBoxAt = 0), dropDrafts($, one.id, ask), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($)), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
 }
 if (open.kind === 'change') {
 const one = changeTarget(cards)
-return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
+return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, task: one.id, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
 }
 if (open.kind === 'permission') {
 const one = gatePressed.has(open.id) || !(gateHeld.has(open.id) || gateParked.has(open.id)) ? undefined : cards.find(card => !card.chat && card.admins?.some(gate => gate.id === open.id))
@@ -14696,11 +14707,11 @@ if (!shown) return
 ;((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($))
 void wordsOnGate($, one.id, open.id, shown, filesNote(files))
 }
-return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: open.id, send: sendWords }
+return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, task: one.id, placeholder: 'Type your answer', draft: barDraft(), attachTo: open.id, send: sendWords }
 }
 if (open.kind === 'continue') {
 const r = kept.find(one => one.id === open.id)
-return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), attachTo: r.id, send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value, takeAttached(r.id)).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
+return r && { head: `↳ Message to “${cut(r.title, 50)}”`, task: r.agent, placeholder: 'Type your message', draft: barDraft(), attachTo: r.id, send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value, takeAttached(r.id)).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
 }
 const box = boxes.find(one => one.id === open.id)
 if (!box) return undefined
@@ -14715,6 +14726,7 @@ open.kind === 'words'
 : `↳ The key's name`
 return {
 head,
+task: box.card,
 placeholder: open.kind === 'words' ? 'Type your answer' : open.kind === 'password' || !box.name ? 'Type it here' : 'Paste it here',
 secret: box.id,
 ...(boxSaid.get(box.id) ? { said: boxSaid.get(box.id) } : {}),
@@ -14727,8 +14739,10 @@ const typed = () => (box.draft ? (drafts.get(box.draft) ?? '') : box.secret ? (b
 const send = (value: string) => void ((value.trim() || (box.attachTo && attached.get(box.attachTo)?.length)) && box.send(value))
 return (
 <ui.Box key="band-box" flexDirection="column" flexShrink={0} width="100%">
+{/* With task colours on, the box takes its task's colour, the colour of its card and of its replies in the chat (colours.tsx) */}
 <ui.Box flexDirection="row" height={1} overflow="hidden">
-<ui.Text color={NEEDS} bold wrap="truncate-end">{box.head}</ui.Text>
+{box.task && taskColour(box.task) ? <ui.Text key="band-box-dot" color={taskColour(box.task)}>● </ui.Text> : null}
+<ui.Text color={(box.task && taskColour(box.task)) || NEEDS} bold wrap="truncate-end">{box.head}</ui.Text>
 </ui.Box>
 {'Input' in ui ? (
 <ui.Box flexDirection="column" width="100%" flexShrink={0}>
@@ -15461,7 +15475,8 @@ return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined,
 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
 {/* With task colours on, the colour of the task's box in the chat leads its name (colours.tsx), outside the button,
                       as the app draws a button's words in its own colour */}
-{taskColour(one.id) ? <Text color={taskColour(one.id)}>● </Text> : null}
+{/* (moved in by the step a desktop pads a plain Button with, so the dot starts at the card's one left edge) */}
+{taskColour(one.id) ? <Box key={`dot-${one.id}`} paddingLeft={lead} flexShrink={0}><Text color={taskColour(one.id)}>● </Text></Box> : null}
 <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
 <Text bold wrap="truncate-end">{titleOf(one)}</Text>
 </Button>

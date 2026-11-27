@@ -105,6 +105,9 @@ export type Todo = {
   // `talk`: what the person wrote on it with Answer in words, and the task's answers, the oldest first. A release's `reason` is the task's one line for it (bin/release -m), `commits` the subjects of its branch's commits main lacks, newest first, `more` how many more there are, `files` how many files it changes
   admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string; talk?: Talk[]; reason?: string; commits?: string[]; more?: number; files?: number }[]
   startedAt: number
+  // Its place in the task colours' palette: given once, the colour least used by the tasks started just before it, so tasks seen
+  // together differ
+  colour?: number
   // When it first began, kept when it is started again (whose startedAt moves on so its time runs on): the cards keep their places by it
   begunAt?: number
   // 0 while it works

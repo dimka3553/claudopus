@@ -901,6 +901,7 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   await $.prompt.submit({ text: 'Fix the nose on head A', wait: false, origin: composer })
   const r = (await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A' } as never)) as { agentId: string }
   expect(r.agentId).toBe('a1')
+  await $.agent.spawn({ ...spawn, description: 'Make the price page', prompt: 'price' } as never)
   const MSG = { plugin: 'claudopus', component: 'AssistantMessage', requestId: 'r1', props: { text: said, isFirstOfReply: true } } as const
 
   for (const surface of ['desktop', 'terminal'] as const) {
@@ -926,12 +927,19 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: r.agentId, text: 'Release the nose fix?', choices: ['Release it'] } as never)
   await pressed(reply, `task-reply-${r.agentId}`)
-  expect((await until(async () => bar.find({ type: 'Text', text: /^↳ / })))?.text).toBe('↳ Your answer to “Fix the nose”')
+  const head = await until(async () => bar.find({ type: 'Text', text: /^↳ / }))
+  expect(head?.text).toBe('↳ Your answer to “Fix the nose”')
+  // in the task's colour, not only the amber of what waits for you
+  expect(head?.props.color).toBe(colour)
+  expect((await bar.find({ type: 'Text', text: '● ' }))?.props.color).toBe(colour)
   const details = await $.ui.mount({ ...LIST, requestId: `work-${r.agentId}`, surface: 'desktop' } as never)
   expect(await until(async () => details.find({ type: 'Text', text: 'Links' }))).toBeDefined()
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const dotOf = async () => (await list.findAll({ type: 'Text', text: '● ' })).find(one => one.props.color === colour)
   expect(await until(dotOf)).toBeDefined()
+  // Two tasks started one after the other never share a colour, though nothing was said of the second yet
+  const dots = async () => new Set((await list.findAll({ type: 'Text', text: '● ' })).map(one => one.props.color))
+  expect(await until(async () => ((await dots()).size === 2 ? true : undefined))).toBe(true)
 
   // Task colours off in Config: the box and the dot go, the links stay
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)

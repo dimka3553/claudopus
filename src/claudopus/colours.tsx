@@ -16,9 +16,22 @@ let colourTimer: Timer | undefined
 let colourWritten = ''
 
 const colourHex = (slot: number) => PALETTE[slot % PALETTE.length] ?? PALETTE[0]
-// The colour of a task of this chat's, once a reply about it is known; none while colours are off
+// Each card's colour, kept on the card (Todo.colour): the chat's own cards are given one as they are made, in the same change of
+// the list (changeTodos), the one least used by the tasks started just before, so tasks seen together never share one (27 Nov: two
+// working cards were both red). Cards made before this came in get theirs at the next change. The list as last given, by id
+const cardSlots = new Map<string, number>()
+const withColours = (list: Todo[]) => {
+  const own = list.filter(one => !one.parentId && !one.chat)
+  const fresh = slotsFor(own.map(one => ({ id: one.id, startedAt: one.begunAt ?? one.startedAt, colour: one.colour })))
+  const next = Object.keys(fresh).length ? list.map(one => (fresh[one.id] === undefined ? one : { ...one, colour: fresh[one.id] })) : list
+  for (const one of next) if (one.colour !== undefined) cardSlots.set(one.id, one.colour)
+  return next
+}
+// The colour of a task of this chat's: its card's, else the one its replies were given; none while colours are off
 const taskColour = (id: string) => {
   if (!isColoured) return undefined
+  const card = cardSlots.get(id)
+  if (card !== undefined) return colourHex(card)
   const slot = colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id]
   return slot === undefined ? undefined : colourHex(slot)
 }
@@ -139,7 +152,7 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
     </Box>
   ) : null
   // A task's colour and name: from what the transcript told, else its card
-  const colourOfTask = (id: string) => colourHex(colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id] ?? 0)
+  const colourOfTask = (id: string) => taskColour(id) ?? colourHex(colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id] ?? 0)
   const titleOfTask = (id: string) => colourIndex.tasks[id]?.title ?? (() => {
     const card = cards.find(one => one.id === id)
     return card ? titleOf(card) : 'Task'

@@ -56,6 +56,30 @@ export const NO_ANSWER = 'No response requested.'
 
 export type Colours = Record<string, number>
 
+/** The order fresh colours are taken in, each far from those before it: red, blue, green, purple, orange, then the rest. */
+const SPREAD = [0, 5, 3, 6, 1, 10, 7, 2, 8, 4, 11, 9]
+
+/**
+ * A colour for each card that has none, in the order the cards started: the one least used by the eleven cards started just
+ * before it, else of those the one used longest ago, taken far from each other (SPREAD), so any twelve tasks started one after
+ * another differ, and two side by side are never red and orange. Only the new ones.
+ */
+export const slotsFor = (cards: readonly { id: string; startedAt: number; colour?: number }[]) => {
+  const fresh: Record<string, number> = {}
+  const ordered = [...cards].sort((a, b) => a.startedAt - b.startedAt)
+  ordered.forEach((card, at) => {
+    if (card.colour !== undefined) return
+    const before = ordered.slice(Math.max(0, at - (PALETTE.length - 1)), at).map(one => fresh[one.id] ?? one.colour)
+    const uses = PALETTE.map((_, slot) => before.filter(one => one !== undefined && one % PALETTE.length === slot).length)
+    const lastAt = PALETTE.map((_, slot) => before.map(one => (one === undefined ? -1 : one % PALETTE.length)).lastIndexOf(slot))
+    const fewest = Math.min(...uses)
+    const slots = PALETTE.map((_, slot) => slot).filter(slot => uses[slot] === fewest)
+    const oldest = Math.min(...slots.map(slot => lastAt[slot] ?? -1))
+    fresh[card.id] = SPREAD.find(slot => slots.includes(slot) && (lastAt[slot] ?? -1) === oldest) ?? slots[0] ?? 0
+  })
+  return fresh
+}
+
 /** Words too common in task names to tell one task from another. */
 const STOP = new Set(
   (
