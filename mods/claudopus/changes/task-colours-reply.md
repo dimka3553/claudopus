@@ -1,0 +1,3 @@
+- Reply on a coloured reply opens the box above the chat for that task: the answer box while it asks you something, the message box otherwise.
+- A chat reply that passes on a task's result now sits in that task's box, not the box of a task the chat heard from just before.
+- Task colours is now on unless you turn it off in Config.

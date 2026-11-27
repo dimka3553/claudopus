@@ -31,8 +31,8 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 // `adminPassword` is read no more: no admin password is kept
 // `askPictures`: true has Claudopus draw a task's question with buttons as one picture, open it on the screen and show it with the
 // question; off as shipped
-// `taskColours`: true puts each chat reply about a task in a box of that task's colour, with its name and Reply, and gives the
-// task's card the same colour dot; off as shipped. `replyLinks`: false takes away the list of a reply's links at its end; on as shipped
+// `taskColours`: false takes away the box of each chat reply about a task, in that task's colour with its name and Reply, and the
+// colour dot on its card; on as shipped. `replyLinks`: false takes away the list of a reply's links at its end; on as shipped
 export type Config = { name?: string; agents?: boolean; askPictures?: boolean; taskColours?: boolean; replyLinks?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
 
 // When Fable runs and when a second agent checks, each a choice in Config's Tasks band, the shipped one first. `lean` in config.json
@@ -269,10 +269,10 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {below}
     </Box>
   )
-  // On and Off side by side, the one in force filled. `agents` and `replyLinks` are on as shipped, so Off is written as false and On
-  // takes the key out; `askPictures` and `taskColours` are off as shipped, so On is written as true and Off takes the key out
+  // On and Off side by side, the one in force filled. `agents`, `taskColours` and `replyLinks` are on as shipped, so Off is written as
+  // false and On takes the key out; `askPictures` is off as shipped, so On is written as true and Off takes the key out
   const onOff = (key: 'agents' | 'askPictures' | 'taskColours' | 'replyLinks') => {
-    const isShippedOn = key === 'agents' || key === 'replyLinks'
+    const isShippedOn = key === 'agents' || key === 'taskColours' || key === 'replyLinks'
     const isOn = isShippedOn ? config[key] !== false : config[key] === true
     const setTo = (value: boolean) => (value === isShippedOn ? undefined : value)
     return (

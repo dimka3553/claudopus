@@ -1,6 +1,6 @@
 // Task colours: which chat reply is about which task, read from the chat's own transcript, and the links each reply gives.
 // Plain code, nothing here touches the engine: the hooks in src/claudopus/colours.tsx feed it rows and draw what it answers.
-// Config's Task colours (`taskColours`, off as shipped) draws each reply about a task in a box of its colour; Links at the end
+// Config's Task colours (`taskColours`, on as shipped) draws each reply about a task in a box of its colour; Links at the end
 // (`replyLinks`, on as shipped) lists a reply's links at its end and a task's in its Details
 
 import type { SessionMessage, ToolResultSummary, ToolUseSummary } from 'claude-code'
@@ -190,6 +190,19 @@ export const peerIn = (text: string): { id: string; title?: string } | undefined
   return { id, title: /The task "([^"]+)"/.exec(text)?.[1] }
 }
 
+/** Words as compared: no marks, one space, lower case. */
+const plain = (text: string) => text.replace(/[*_`#>\[\]()|]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+/**
+ * The task whose result a reply passes on: the chat is told to pass a task's result on as it came, so the reply's start is in
+ * it. The newest result given first; none for a reply too short to tell.
+ */
+export const passedOn = (reply: string, results: readonly { id: string; text: string }[]) => {
+  const start = plain(reply).slice(0, 120)
+  if (start.length < 40) return undefined
+  return [...results].reverse().find(one => plain(one.text).includes(start))?.id
+}
+
 /** A row's own id, where the transcript gives one. */
 const idOf = (row: SessionMessage) => {
   const id = (row as { uuid?: unknown }).uuid
@@ -297,6 +310,9 @@ export class Builder {
     const turn = this.open()
     if ((row.text ?? '').trim()) turn.replies.push({ uuid: idOf(row), text: row.text ?? '' })
     for (const use of row.toolUses ?? []) this.used(use, turn)
+    // The chat's answer to a notice that needs none closes that turn: what it says next, with no message of the person's between
+    // (a task's own message to the chat is not always in the rows it is given), is a turn of its own, never the noticed task's
+    if ((row.text ?? '').trim() === NO_ANSWER) this.turn = undefined
   }
 
   private used(use: ToolUseSummary, turn: Turn) {
@@ -347,6 +363,11 @@ export class Builder {
     this.colours[id] = slot
     this.coloursChanged = true
     return slot
+  }
+
+  /** The colour of a task found some other way (a result the chat passed on): its own, else the one least used of late. */
+  pick(id: string) {
+    return this.colourOf(id, Object.keys(this.colours).slice(-12))
   }
 
   /** Which task each reply is about, as the drawing reads it. */
