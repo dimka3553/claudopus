@@ -158,8 +158,6 @@ const loadReports = async ($: EngineInterface, isWhole = false) => {
   if (isWritten || !kept) await update($, reportsMark, () => (reportsMarked = Math.max(now, reportsMarked + 1)))
   return found
 }
-// The results as last listed, looked at again when that is over a minute ago: for a search of the memory, which need not list them each time
-const reportsNow = async ($: EngineInterface) => (reportsKept && (await $.clock.now()) - reportsPassAt < REPORTS_STALE ? reportsKept : loadReports($))
 // The Results tab, drawn: every result is read again when the last such read is over a minute old, outside the drawing
 let isReportsLook = false
 const reportsLooked = async ($: EngineInterface) => {

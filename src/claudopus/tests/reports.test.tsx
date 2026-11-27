@@ -586,6 +586,9 @@ test('every button of the results list and of a result takes a new key whenever 
   // The result's own tab follows the same rule: changed on another Mac, it changes with no press here, and every key moves
   expect(await tab.find({ type: 'Text', text: 'Reopen the M4 chat?' })).toBeDefined()
   put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [] })
+  // (a result changed where it lies, with no new folder and no word of the change, is read again by a search or a drawing of
+  // the Results tab once every result was last read over a minute ago)
+  await clock.advance(61_000)
   await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'found' } as never)
   expect(await until(async () => ((await tab.find({ type: 'Text', text: 'Reopen the M4 chat?' })) ? undefined : true))).toBe(true)
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])

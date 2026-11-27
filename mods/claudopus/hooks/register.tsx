@@ -3069,7 +3069,6 @@ if (isWritten) await update($, reports, () => found)
 if (isWritten || !kept) await update($, reportsMark, () => (reportsMarked = Math.max(now, reportsMarked + 1)))
 return found
 }
-const reportsNow = async ($: EngineInterface) => (reportsKept && (await $.clock.now()) - reportsPassAt < REPORTS_STALE ? reportsKept : loadReports($))
 let isReportsLook = false
 const reportsLooked = async ($: EngineInterface) => {
 if (isReportsLook || (await $.clock.now()) - reportsWholeAt < REPORTS_STALE) return
@@ -14772,7 +14771,7 @@ const block = latestIn(page)
 if (block) latest.set(file, page.slice(0, page.indexOf(block) + block.length).split('\n').length)
 }
 const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
-const archived = new Set((await reportsNow($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
+const archived = new Set((await reportsLooked($).then(() => loadReports($)).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
 const seen = new Set<string>()
 const perFile = new Map<string, number>()
 const lines = found
