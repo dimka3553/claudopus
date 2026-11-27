@@ -8,8 +8,9 @@
 const REPORTS_TOLD = 8
 // What a report may name that is copied in beside it: pictures and pages, never data
 const PICTURE = /\.(png|jpe?g|gif|webp|svg|pdf|html?)$/i
-// A folder a report names is copied, its pictures alone, only from where files are temporary
-const TEMP = /^\/(private\/)?(tmp|var\/folders)\//
+// A folder a report names is copied, its pictures alone, only from where files are temporary: on Windows the engine's own (/tmp
+// taken on the drive, C:/tmp/claude-0/...) and the person's own temporary folder (%TEMP%, C:/Users/x/AppData/Local/Temp)
+const TEMP = /^\/(private\/)?(tmp|var\/folders)\/|^[A-Za-z]:\/(?:tmp|Users\/[^/]+\/AppData\/Local\/Temp)\//i
 // The most copies one report keeps, and how much of its text one drawing shows
 const COPIES_KEPT = 40
 const REPORT_CHARS = 40_000
@@ -53,7 +54,14 @@ const gists = new Map<string, string>()
 // A file a report names is a path inside its own folder: never absolute, never one that climbs out with .., whoever wrote it (a
 // report another Mac handed over included)
 const isInside = (file: unknown): file is string =>
-  typeof file === 'string' && Boolean(file) && !file.startsWith('/') && !file.startsWith('~') && !file.includes('\0') && file.split('/').every(part => part !== '..' && part !== '')
+  typeof file === 'string' &&
+  Boolean(file) &&
+  !isAbsPath(file) &&
+  !file.startsWith('~') &&
+  !file.includes('\0') &&
+  // (on Windows a backslash parts a path too, and a drive's letter begins one of its own)
+  !(isWindows && (file.includes('\\') || /^[A-Za-z]:/.test(file))) &&
+  file.split('/').every(part => part !== '..' && part !== '')
 const loadReports = async ($: EngineInterface) => {
   const found: Report[] = []
   for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
@@ -81,11 +89,31 @@ const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
 const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g
 const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g
 const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm
-const namedPaths = (text: string) => {
-  const found = [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN].flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), path: one[1] ?? one[0] })))
-  found.sort((a, b) => a.at - b.at || b.path.length - a.path.length)
-  return [...new Set(found.map(one => one.path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+// On Windows a path from a drive too, as Windows writes it (C:\Users\sam\x.png), with forward slashes (C:/Users/sam/x.png) or as Git's
+// bash does (/c/Users/sam/x.png), each part parted by either slash. A letter and a colon inside a word (https://) begins none
+const DRIVE_ROOT = String.raw`(?:[A-Za-z]:[\\/]|\/[A-Za-z]\/)`
+const DRIVE_PART = String.raw`[^\s\\/\x60'"()<>[\]{}|,;*]+`
+const DRIVE_PLAIN = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}[^\s\x60'"()<>[\]{}|,;*]+`, 'g')
+const DRIVE_SPACED = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}(?:${DRIVE_PART}(?: ${DRIVE_PART})*[\\/])+${DRIVE_PART}`, 'g')
+const DRIVE_TICKED = new RegExp(String.raw`\x60(${DRIVE_ROOT}[^\x60\n]+)\x60`, 'g')
+const DRIVE_LINE = new RegExp(String.raw`^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(${DRIVE_ROOT}[^\n\x60'"<>|*]+?)(?:\*\*)?[ \t]*$`, 'gm')
+// A path as the mod keeps it: a Windows one with forward slashes, and Git's bash's /c/x as C:/x
+const keptPath = (path: string) => {
+  const one = slashed(path)
+  return isWindows && /^\/[A-Za-z]\//.test(one) ? `${one[1]?.toUpperCase()}:${one.slice(2)}` : one
 }
+// Each path as the text has it (`written`), with the path it names as the mod keeps it
+const pathsWritten = (text: string) => {
+  const all = isWindows ? [PATH_LINE, DRIVE_LINE, PATH_TICKED, DRIVE_TICKED, PATH_SPACED, DRIVE_SPACED, PATH_PLAIN, DRIVE_PLAIN] : [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN]
+  const found = all.flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), written: (one[1] ?? one[0]).replace(/[.:!?]+$/, '').replace(/[\\/]$/, '') })))
+  found.sort((a, b) => a.at - b.at || b.written.length - a.written.length)
+  // (on Windows /Users/x inside C:/Users/x is the drive's path, found whole)
+  const seen = new Set<string>()
+  return found
+    .filter(one => !(isWindows && /[A-Za-z]:$/.test(text.slice(Math.max(0, one.at - 2), one.at))))
+    .filter(one => !seen.has(one.written) && (seen.add(one.written), true)).map(one => ({ written: one.written, path: keptPath(one.written) }))
+}
+const namedPaths = (text: string) => [...new Set(pathsWritten(text).map(one => one.path))]
 // What a report found, in plain words: its first sentences that say something. A heading, a path, a line that only leads in to
 // what follows ("Here is the sheet:", "The answer is back. As it came:") or repeats the title says nothing
 const gistOf = (text: string, title = '') => {
@@ -95,7 +123,7 @@ const gistOf = (text: string, title = '') => {
   const paragraphs = text.split(/\n\s*\n/).map(part =>
     part
       .split('\n')
-      .filter(line => !/^\s*(#|```|\|)/.test(line) && !/^\s*\/\S+$/.test(line.trim()) && !/^\s*(?:[-*]|\d+\.)\s/.test(line))
+      .filter(line => !/^\s*(#|```|\|)/.test(line) && !/^\s*(?:\/|[A-Za-z]:[\\/])\S+$/.test(line.trim()) && !/^\s*(?:[-*]|\d+\.)\s/.test(line))
       .map(line => oneLine(line.replace(/[*_`>]/g, '')))
       .filter(line => line.length > 20 && slug(line) !== slug(title))
       .flatMap(line => line.split(/(?<=[.!?:])\s+(?=[A-Z0-9“"])/))
@@ -167,7 +195,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string, isPart =
     chat: chat.title,
     chatId: chat.id,
     // The folder of the subject the work recorded, which need not be the chat's own
-    folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => repo.startsWith('/')) ?? cwd,
+    folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => isAbsPath(repo)) ?? cwd,
     gist: gistOf(text, title),
     files,
     // What its task made in its whole life, listed now and kept with it, so its tiles are there once the task's card is gone

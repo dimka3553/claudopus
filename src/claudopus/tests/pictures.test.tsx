@@ -227,6 +227,32 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   expect(logged.filter(line => !line.startsWith('"Pick a design" has a question for you'))).toEqual([])
 })
 
+// On Windows, where the engine and Claude's tools name a file as Windows writes it (C:\Users\sam\repo\src\app.ts): a file a task
+// wrote in its repo is counted there and a file its command names is shown, each kept with forward slashes, and a press opens the
+// file in Explorer, by its own path with backslashes
+test('on a Windows PC what a task wrote and named, each a Windows path, is on its card: a changed file counted in its repo, a PDF shown, and a press opens it in Explorer', async ($, on) => {
+  const { files, windowsRuns } = world(on, { windows: true })
+  const NEW = '9999999999999'
+  const pdf = 'C:/Users/sam/out/vat-report.pdf'
+  for (const path of [pdf, 'C:/Users/sam/repo/src/app.ts']) (files.set(path, 'x'), files.set(`mtime:${path}`, NEW))
+  files.set('git:top', 'C:/Users/sam/repo')
+  files.set('git:numstat', '12\t3\tsrc/app.ts\n')
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'make the report', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Make the report.' } as never)
+  await $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'a1', file_path: 'C:\\Users\\sam\\repo\\src\\app.ts', content: 'x' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'render "C:\\Users\\sam\\out\\vat-report.pdf"', description: 'Run the render of the report' } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await until(async () => (await keyed(pane, 'made-a1-pdf-0-open')) || undefined)
+  const chips = (await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))
+  expect(chips).toEqual(['vat-report', '1 changed file'])
+  // (counted against its repo by its path inside it)
+  expect(windowsRuns.some(argv => argv.includes('C:/Users/sam/repo') && argv.at(-1) === 'src/app.ts')).toBe(true)
+  await pressed(pane, 'made-a1-pdf-0-open')
+  expect(await until(async () => windowsRuns.find(argv => argv[0] === 'explorer.exe'))).toEqual(['explorer.exe', 'C:\\Users\\sam\\out\\vat-report.pdf'])
+  await pane.unmount()
+})
+
 test("what a task made is on its card under its title, side by side, and as tiles under the title in its Details: a file opens on a press, three of a kind are one stack that opens out, and the files it changed in a repo are a table by kind, an icon and a bar each, each shown in the app's Files pane on a press, or where it can't, what changed in it opens in a tab of the panel", async ($, on) => {
   const { files, shown, logged, tabs, viewed } = world(on, {})
   const NEW = '9999999999999'

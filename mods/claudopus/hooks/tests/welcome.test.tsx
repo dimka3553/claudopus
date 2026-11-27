@@ -375,6 +375,14 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\n`))
       return ok(files.get('clipboard:files') ?? '')
     }
+    // On Windows the same through Windows PowerShell: its Open box, and its clipboard, a picture saved where CLAUDOPUS_PASTE_TO says
+    // (each line ends as Windows ends lines)
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('OpenFileDialog'))) return files.has('picker:chosen') ? ok((files.get('picker:chosen') ?? '').replace(/\n/g, '\r\n')) : ok('')
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('GetFileDropList'))) {
+      const to = String(e.init?.env?.CLAUDOPUS_PASTE_TO ?? '')
+      if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\r\n`))
+      return ok((files.get('clipboard:files') ?? '').replace(/\n/g, '\r\n'))
+    }
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -585,14 +593,16 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       // hold:<fn> keeps the call on its way until the test lets it go: held.get(fn)?.('')
       return files.has(`hold:${fn}`) ? (new Promise(done => held.set(fn, () => done(answer()))) as never) : answer()
     }
+    // jq:missing: none on the PATH (as on Windows, where Git for Windows has none), only one at its own full path
+    if (tool === 'jq' && files.has('jq:missing')) return ok('', 127)
     // hold:jq keeps every chat's records being read, as they are for half a minute after a reload, until the test lets them go
-    if (tool?.endsWith('jq') && files.has('hold:jq')) {
+    if (/jq(?:\.exe)?$/.test(tool ?? '') && files.has('hold:jq')) {
       const sum = files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}'
       return new Promise(done => held.set(`jq:${String(e.argv.at(-1))}`, () => done(ok(sum)))) as never
     }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
-    const stdout = tool?.endsWith('jq')
+    const stdout = /jq(?:\.exe)?$/.test(tool ?? '')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
@@ -962,8 +972,8 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
 
 // On Windows, where the Claude app runs the engine with no HOME and Claude Code's own commands run in Git for Windows' bash: the
 // memory folder is in the person's profile, and every Unix tool and shell the mod asks for runs in Git's bash, each word as it was
-test('on a Windows PC the welcome comes the same, its memory in the profile and each Unix command run in Git for Windows\' bash', async ($, on) => {
-  const { opened, files, windowsRuns } = world(on, { isNew: true, windows: true })
+test('on a Windows PC the welcome comes the same, its memory in the profile and each Unix command run in Git for Windows\' bash, and its old chats brought in with Windows\' own Python', async ($, on) => {
+  const { opened, files, windowsRuns, submitted } = world(on, { isNew: true, windows: true })
   await $.session.start(start)
   expect(opened[0]).toBe('claudopus')
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -976,6 +986,15 @@ test('on a Windows PC the welcome comes the same, its memory in the profile and 
   const bare = windowsRuns.filter(argv => argv[0] !== 'C:/Program Files/Git/bin/bash.exe' && !/^(?:git|where|powershell|explorer|rundll32|notepad|tasklist|taskkill|netstat)(?:\.exe)?$|\.exe$/i.test(argv[0] ?? ''))
   expect(bare).toEqual([])
   expect(windowsRuns.filter(argv => argv[0] === 'C:/Program Files/Git/bin/bash.exe').every(argv => argv[1] === '-c' && argv[2] === 'exec "$0" "$@"')).toBe(true)
+  // There python3 is often missing or only the Store's stand-in: the chat runs python, or py -3, and says how to get Python if neither runs
+  const index = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(index, 'welcome-index')
+  const asked = (await until(async () => submitted.find(text => text.startsWith('Bring in my old chats')))) ?? ''
+  expect(asked).toContain('Run python "')
+  expect(asked).toContain('/onboard/extract.py" "C:/Users/sam/.claude/claudopus/onboard" (or py -3 in its place)')
+  expect(asked).toContain('winget install Python.Python.3.12')
+  expect(asked).not.toMatch(/python3|xcode-select/)
+  await index.unmount()
 })
 
 test('the welcome is put away by Not now, and by the next session even unpressed', async ($, on) => {

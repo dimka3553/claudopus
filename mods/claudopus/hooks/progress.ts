@@ -279,7 +279,12 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
     for (const id of places) if (!(entries.get(id) ?? []).some(isOfEvent)) put(id, { task: event.task, title, at: happened, kind: 'task', outcome: '', report: '', pictures: [], live: '', reason: '' })
   if (event.kind === 'result' || event.kind === 'chat') {
     const files = new Set((event.files ?? []).map(file => `${reportsDir}/${event.report}/${file}`))
-    const pictures = idsIn(answered.pictures).map(path => (path.startsWith('/') ? path : `${reportsDir}/${event.report}/${path}`)).filter(path => files.has(path)).slice(0, 4)
+    // (a path from a drive, C:\x or C:/x, with forward slashes, as the mod keeps paths)
+    const pictures = idsIn(answered.pictures)
+      .map(path => (/^[A-Za-z]:[\\/]/.test(path) ? path.replace(/\\/g, '/') : path))
+      .map(path => (path.startsWith('/') || /^[A-Za-z]:\//.test(path) ? path : `${reportsDir}/${event.report}/${path}`))
+      .filter(path => files.has(path))
+      .slice(0, 4)
     const live = isText(answered.live) && /^https?:\/\/\S+$/.test(answered.live.trim()) ? answered.live.trim() : ''
     const kind: ProgressEntry['kind'] = wasAside ? 'aside' : answered.kind === 'milestone' ? 'milestone' : 'task'
     const entry: ProgressEntry = { task: event.task ?? '', title, at: happened, kind, outcome: plainLine(answered.outcome, 14, 110), report: event.report ?? '', pictures, live, reason: wasAside?.reason ?? '' }

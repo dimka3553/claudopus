@@ -184,7 +184,8 @@ const chatHooks = (on: On) => {
     await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     // and a Mac with no record of the changes seen starts one, from the version this chat moved from
     await noteSeen($).catch(err => log($, `changes seen not noted: ${String(err)}`))
-    cwd = e.cwd
+    // (on Windows as the mod keeps paths, with forward slashes)
+    cwd = slashed(e.cwd)
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses

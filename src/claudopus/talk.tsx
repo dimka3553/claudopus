@@ -31,8 +31,8 @@ const picturesOf = (use: ToolUseSummary) => {
   const input = use.input ?? {}
   const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')
   if (use.isError) return { pictures: [], seen: [] }
-  // One file as /tmp and /private/tmp alike
-  const same = (path: string) => path.replace(/^\/private(?=\/(tmp|var)\/)/, '')
+  // One file as /tmp and /private/tmp alike, and a Windows one with forward slashes
+  const same = (path: string) => slashed(path).replace(/^\/private(?=\/(tmp|var)\/)/, '')
   const sent = use.tool === 'SendUserFile' && Array.isArray(input.files) ? input.files.filter((one): one is string => typeof one === 'string') : []
   const written = ['Write', 'Edit'].includes(use.tool) ? [given('file_path')] : []
   const named = use.tool === 'Bash' ? namedPaths(`${given('command')}\n${use.text ?? ''}`) : use.tool === 'Read' ? [given('file_path')] : []
@@ -43,7 +43,8 @@ const picturesOf = (use: ToolUseSummary) => {
 
 // A tool's name as a person reads it: the last part of a connector's tool, in words
 const toolName = (tool: string) => (tool.startsWith('mcp__') ? (tool.split('__').pop() ?? tool).replaceAll('_', ' ') : tool)
-const fileName = (path: string) => path.split('/').pop() ?? path
+// (on Windows a backslash parts a path as a slash does)
+const fileName = (path: string) => (isWindows ? path.split(/[\\/]/) : path.split('/')).pop() ?? path
 // What a tool step was for: the call's own description where it has one, else what it was pointed at
 const aim = (input: Record<string, unknown>) => {
   const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')

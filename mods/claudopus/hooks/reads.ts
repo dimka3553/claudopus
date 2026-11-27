@@ -73,16 +73,22 @@ export const hereDocs = (command: string) => {
   return { shell, bodies, isWhole: !waiting.length }
 }
 
-// A path as written against the folder given, with ~ and $HOME read; '' when it cannot be told (a variable, a pattern)
+// A path as written against the folder given, with ~ and $HOME read; '' when it cannot be told (a variable, a pattern). Where the
+// home is on a drive (Windows), a path from a drive with either slash (C:\x, C:/x) and Git's bash's /c/x are each C:/x
 const pathAt = (path: string, home: string, folder: string) => {
-  const full = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
-  if (/[$*?[`{]/.test(full) || (!full.startsWith('/') && !folder)) return ''
+  const isDrives = /^[A-Za-z]:\//.test(home)
+  const given = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
+  const full = !isDrives ? given : /^[A-Za-z]:[\\/]/.test(given) ? given.replace(/\\/g, '/') : given.replace(/^\/([A-Za-z])(?=\/|$)/, '$1:')
+  const isFromRoot = full.startsWith('/') || (isDrives && /^[A-Za-z]:\//.test(full))
+  if (/[$*?[`{]/.test(full) || (!isFromRoot && !folder)) return ''
+  const whole = isFromRoot ? full : `${folder}/${full}`
+  const drive = isDrives ? (/^[A-Za-z]:(?=\/)/.exec(whole)?.[0] ?? '') : ''
   const parts: string[] = []
-  for (const part of (full.startsWith('/') ? full : `${folder}/${full}`).split('/')) {
+  for (const part of whole.slice(drive.length).split('/')) {
     if (part === '..') parts.pop()
     else if (part && part !== '.') parts.push(part)
   }
-  return `/${parts.join('/')}`
+  return `${drive}/${parts.join('/')}`
 }
 
 // `split`: the command as the shell splits it, quote by quote, into its commands' words (shellWords); `start`: where a command's

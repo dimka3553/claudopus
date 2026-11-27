@@ -1,0 +1,4 @@
+- On Windows, files a task writes or a result names by their Windows paths show on its card and in its result, and open in Explorer
+- On Windows, Attach and Paste take files and pictures from Windows' own Open box and clipboard, and a command for you to run comes with Copy
+- On Windows, Stats finds the jq that the installer offers, an update finds Claude Code's own program, and Bring in old chats runs with Windows' Python
+- On Windows, Config and the update screen say PC for your computer

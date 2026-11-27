@@ -375,6 +375,14 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\n`))
       return ok(files.get('clipboard:files') ?? '')
     }
+    // On Windows the same through Windows PowerShell: its Open box, and its clipboard, a picture saved where CLAUDOPUS_PASTE_TO says
+    // (each line ends as Windows ends lines)
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('OpenFileDialog'))) return files.has('picker:chosen') ? ok((files.get('picker:chosen') ?? '').replace(/\n/g, '\r\n')) : ok('')
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('GetFileDropList'))) {
+      const to = String(e.init?.env?.CLAUDOPUS_PASTE_TO ?? '')
+      if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\r\n`))
+      return ok((files.get('clipboard:files') ?? '').replace(/\n/g, '\r\n'))
+    }
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -585,14 +593,16 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       // hold:<fn> keeps the call on its way until the test lets it go: held.get(fn)?.('')
       return files.has(`hold:${fn}`) ? (new Promise(done => held.set(fn, () => done(answer()))) as never) : answer()
     }
+    // jq:missing: none on the PATH (as on Windows, where Git for Windows has none), only one at its own full path
+    if (tool === 'jq' && files.has('jq:missing')) return ok('', 127)
     // hold:jq keeps every chat's records being read, as they are for half a minute after a reload, until the test lets them go
-    if (tool?.endsWith('jq') && files.has('hold:jq')) {
+    if (/jq(?:\.exe)?$/.test(tool ?? '') && files.has('hold:jq')) {
       const sum = files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}'
       return new Promise(done => held.set(`jq:${String(e.argv.at(-1))}`, () => done(ok(sum)))) as never
     }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
-    const stdout = tool?.endsWith('jq')
+    const stdout = /jq(?:\.exe)?$/.test(tool ?? '')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
@@ -979,6 +989,23 @@ test('a person\'s own copy that keeps both lines carries both, in their words, i
   expect(told.instructionFiles?.some(one => one.content === SHIPPED_PRINCIPLES)).toBe(false)
   // Nothing the mod does writes over it
   expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(MINE)
+})
+
+// On Windows Config names this computer as a PC, and its memory folder from the home folder (~) as on a Mac
+test('on a Windows PC Config says PC for this computer and names the memory folder from ~', async ($, on) => {
+  const { tabs } = world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(list, 'config-open')
+  expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  expect(await moreShown(config)).toBe(true)
+  expect(await config.find({ type: 'Text', text: 'Busy PC' })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /^When the PC is busy, / })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: 'Busy Mac' })).toBeUndefined()
+  expect((await config.find({ type: 'Text', text: /^Your changes are kept in / }))?.text).toBe('Your changes are kept in ~/.claude/claudopus, so an update never undoes them.')
+  await config.unmount()
+  await list.unmount()
 })
 
 test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', async ($, on) => {

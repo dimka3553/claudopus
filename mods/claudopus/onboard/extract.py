@@ -16,12 +16,17 @@ import os
 import re
 import sys
 
-HOME = os.path.expanduser('~')
+def slashed(path):
+    # A Windows path (C:\Users\x) with forward slashes, as every path here is compared; any other stays as it is
+    return path.replace('\\', '/') if os.name == 'nt' else path
+
+
+HOME = slashed(os.path.expanduser('~'))
 # Claude Code's own folder: ~/.claude, or the one CLAUDE_CONFIG_DIR names
-PROJECTS = os.environ.get('CLAUDE_CONFIG_DIR') or f'{HOME}/.claude'
+PROJECTS = slashed(os.environ.get('CLAUDE_CONFIG_DIR') or f'{HOME}/.claude')
 PROJECTS = f'{PROJECTS.rstrip("/")}/projects'
 # The folder that holds one folder per repo; GitHub Desktop's default unless CLAUDOPUS_REPOS names another
-REPOS = os.environ.get('CLAUDOPUS_REPOS', f'{HOME}/Documents/GitHub').rstrip('/')
+REPOS = slashed(os.environ.get('CLAUDOPUS_REPOS', f'{HOME}/Documents/GitHub')).rstrip('/')
 # Folders that hold no work of mine: test runs and the app's spare sessions
 SKIP = ('scratchpad', 'claude-spares')
 # What a digest keeps of one message and of the chat's last reply
@@ -60,7 +65,8 @@ def read_chat(path):
     # A transcript repeats earlier rows each time the chat is resumed or compacted
     seen = set()
     last = None
-    for line in open(path, errors='replace'):
+    # (in UTF-8 on every system: Windows would read them in its own code page)
+    for line in open(path, encoding='utf-8', errors='replace'):
         try:
             row = json.loads(line)
         except ValueError:
@@ -95,6 +101,10 @@ def read_chat(path):
 
 
 def project_of(cwd):
+    cwd = slashed(cwd)
+    # (Windows names a folder the same in capitals or not)
+    if os.name == 'nt' and cwd.lower().startswith(f'{REPOS.lower()}/'):
+        cwd = REPOS + cwd[len(REPOS):]
     if '/.claude/worktrees/' in cwd:
         cwd = cwd.split('/.claude/worktrees/')[0]
     if cwd.startswith(f'{REPOS}/'):
@@ -131,7 +141,7 @@ def main(out):
         chunk, size, n = [], 0, 1
         for part in parts + [None]:
             if part is None or (chunk and size + len(part) > DIGEST_BYTES):
-                with open(f'{out}/{name}-{n}.md', 'w') as f:
+                with open(f'{out}/{name}-{n}.md', 'w', encoding='utf-8') as f:
                     f.write('\n'.join(chunk))
                 print(f'{name}-{n}.md: {len(chunk)} chats, {size // 1000}k chars')
                 chunk, size, n = [], 0, n + 1

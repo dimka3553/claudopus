@@ -35,7 +35,7 @@ let termHere = ''
 let termPort = ''
 // What the last press on a picture came to, by its path, said under its row
 const pictureSaid = new Map<string, { text: string; copy?: string }>()
-const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']
+const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale', 'C:/Program Files/Tailscale/tailscale.exe']
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
   const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($))
@@ -53,10 +53,11 @@ const sendPicture = async ($: EngineInterface, path: string) => {
     await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
     break
   }
-  const user = (await $.env.get('USER')) ?? ''
+  // (Windows names the person in USERNAME)
+  const user = (isWindows ? await $.env.get('USERNAME') : await $.env.get('USER')) ?? ''
   const port = termPort && termPort !== '22' ? `-P ${termPort} ` : ''
   const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
-  say('Run this on your Mac to open it there:', command)
+  say(`Run this on ${isWindows ? 'your device' : 'your Mac'} to open it there:`, command)
 }
 // Under a picture's row in the terminal: what its press came to, with the command to copy when there is one
 const pictureSaidRow = ($: EngineInterface, ui: Ui, key: string, path: string) => {
@@ -252,7 +253,7 @@ const shots = new Map<string, { key: string; shots: Map<number, Pic[]> }>()
 // One picture as the chat shows it: where it is now (the copy a report kept, once the temporary file is gone) and its small copy.
 // Nothing for a file a command only named that was there before the work began
 const picOf = async ($: EngineInterface, given: string, one: Todo, isSeen: boolean, kept: Report[], isDrawn: boolean): Promise<Pic | null> => {
-  const asked = given.startsWith('/') ? given : `${cwd}/${given}`
+  const asked = isAbsPath(given) ? slashed(given) : `${cwd}/${given}`
   const stat = await $.fs.stat(asked).catch(() => undefined)
   const copy = kept.filter(r => r.agent === one.id).flatMap(r => r.files.filter(file => fileName(file) === fileName(asked)).map(file => `${reportPath(r)}/${file}`))[0]
   if (!stat || stat.kind !== 'file') return copy && !isSeen ? picOf($, copy, one, false, [], isDrawn) : isSeen ? null : { name: fileName(asked), path: '', thumb: null, isGone: true }
@@ -418,8 +419,7 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
     const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-')
     const name = `${c.id}/subagents/agent-${c.agent}.jsonl`
     during("read another chat's task")
-    const r = await $.process
-      .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
+    const r = await runOn($, ['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
       .catch(() => undefined)
     const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
     talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })

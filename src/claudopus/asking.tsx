@@ -23,8 +23,8 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
 let openedKey = ''
 let opens = 0
 const zshQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`
-// Linux has no Terminal app to type it into, so there the card gives the command to copy only
-const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar && !isLinux
+// Linux and Windows have no Terminal app to type it into, so there the card gives the command to copy only
+const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar && !isLinux && !isWindows
 const terminalFiles = (folder: string, home: string) => ({
   // Their own .zshenv runs first; one that moves ZDOTDIR to their own folder is followed there afterwards, not before ours runs
   '.zshenv': [
@@ -622,30 +622,66 @@ function run(argv) {
   return data.writeToFileAtomically(argv[0], true) ? argv[0] : ''
 }`
 const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
+// On Windows, Windows PowerShell's own clipboard: the files copied in Explorer, else a picture saved where CLAUDOPUS_PASTE_TO says,
+// each path on a line of its own, in UTF-8 so a name in any language comes through whole
+const PASTE_WINDOWS = [
+  "$ErrorActionPreference = 'Stop'",
+  '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+  'Add-Type -AssemblyName System.Windows.Forms, System.Drawing',
+  '$files = [Windows.Forms.Clipboard]::GetFileDropList()',
+  'if ($files.Count) { $files | ForEach-Object { $_ }; exit 0 }',
+  '$image = [Windows.Forms.Clipboard]::GetImage()',
+  'if ($image) { $image.Save($env:CLAUDOPUS_PASTE_TO, [Drawing.Imaging.ImageFormat]::Png); $env:CLAUDOPUS_PASTE_TO }',
+].join('; ')
 const pastePicture = async ($: EngineInterface, id: string) => {
   if (!canAttach()) return
   await runOn($, ['mkdir', '-p', attachedDir()])
   // Named by when it was pasted, as a person reads it: pasted-19-Nov-14.05.09.png
   const at = new Date(await $.clock.now())
   const to = `${attachedDir()}/pasted-${at.getDate()}-${MONTHS[at.getMonth()]}-${[at.getHours(), at.getMinutes(), at.getSeconds()].map(n => String(n).padStart(2, '0')).join('.')}.png`
-  const r = await runOn($, isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
-  const got = (r?.exitCode === 0 ? r.stdout : '').split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+  const r = await runOn(
+    $,
+    isWindows ? ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-Command', PASTE_WINDOWS] : isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to],
+    { timeoutMs: 15_000, ...(isWindows ? { env: { CLAUDOPUS_PASTE_TO: to } } : {}) },
+  ).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
+  const got = (r?.exitCode === 0 ? r.stdout : '')
+    .split('\n')
+    .map(line => slashed(line.trim()))
+    .filter(isAbsPath)
   if (got.length) return addAttached($, id, got)
   attachSaid.set(id, NOTHING_TO_PASTE)
   ;((presses += 1), (boxPresses += 1), drawAgain($, true))
 }
 // Attach opens the computer's own file picker, where the engine runs: so not in a chat run on another Mac over ssh, whose picker
-// would open on that Mac's screen (isRunFromAfar). macOS through osascript, Linux through zenity
+// would open on that Mac's screen (isRunFromAfar). macOS through osascript, Linux through zenity, Windows through Windows
+// PowerShell's own Open box, kept in front of the app's window
 const canAttach = () => !isRunFromAfar
 const PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose file with prompt "Attach files" with multiple selections allowed', '-e', 'set out to ""', '-e', 'repeat with f in picked', '-e', 'set out to out & POSIX path of f & linefeed', '-e', 'end repeat', '-e', 'return out']
 const PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files']
+const PICK_WINDOWS = [
+  'powershell',
+  '-NoProfile',
+  '-NonInteractive',
+  '-STA',
+  '-Command',
+  [
+    '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$owner = New-Object Windows.Forms.Form -Property @{ TopMost = $true }',
+    "$box = New-Object Windows.Forms.OpenFileDialog -Property @{ Multiselect = $true; Title = 'Attach files' }",
+    'if ($box.ShowDialog($owner) -eq [Windows.Forms.DialogResult]::OK) { $box.FileNames }',
+  ].join('; '),
+]
 const pickFiles = async ($: EngineInterface, id: string) => {
   if (!canAttach()) return
   // (a picker left open is the person's: it waits for them, the ten minutes a command of the mod's may run at most; cancelled, it
   // adds nothing)
-  const r = await runOn($, isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
+  const r = await runOn($, isWindows ? PICK_WINDOWS : isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
   if (!r || r.exitCode !== 0) return
-  const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+  const picked = r.stdout
+    .split('\n')
+    .map(line => slashed(line.trim()))
+    .filter(isAbsPath)
   if (!picked.length) return
   await addAttached($, id, picked)
 }
@@ -850,18 +886,24 @@ const fileKind = (path: string) => {
   return 'file'
 }
 // The paths a message names: picked with Attach, or typed or dropped into the box as text (a terminal types a dropped file's path,
-// its spaces escaped; a file:// address is a path too). Only the ones that are files on this computer
+// its spaces escaped; a file:// address is a path too). Only the ones that are files on this computer. On Windows a path from a drive
+// too, with either slash (C:\x, C:/x, file:///C:/x, quoted where it has spaces), and Git's bash's /c/x, each kept as C:/x
+const PATHS_SAID = /(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g
+const PATHS_SAID_WINDOWS = /(?:file:\/\/\/?)?((?<![\w:])[A-Za-z]:[\\/][^\s'"`<>]+|\/(?:\\ |[^\s'"`<>])+)|'((?:[A-Za-z]:[\\/]|\/)[^'\n]+)'|"((?:[A-Za-z]:[\\/]|\/)[^"\n]+)"/g
 const pathsIn = async ($: EngineInterface, said: string) => {
   const found = new Set<string>()
-  for (const m of said.matchAll(/(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g)) {
+  for (const m of said.matchAll(isWindows ? PATHS_SAID_WINDOWS : PATHS_SAID)) {
     const raw = m[1] ?? m[2] ?? m[3] ?? ''
-    const path = (() => {
+    // (a backslash before a space escapes it only in a path from the root; in one from a drive it parts the path)
+    const plain = /^[A-Za-z]:/.test(raw) ? raw : raw.replace(/\\ /g, ' ')
+    const given = (() => {
       try {
-        return decodeURIComponent(raw.replace(/\\ /g, ' ').replace(/[.,;:)]+$/, ''))
+        return decodeURIComponent(plain.replace(/[.,;:)]+$/, ''))
       } catch {
-        return raw.replace(/\\ /g, ' ')
+        return plain
       }
     })()
+    const path = isWindows ? keptPath(given.replace(/^\/(?=[A-Za-z]:)/, '')) : given
     if ((await $.fs.stat(path).catch(() => undefined))?.kind === 'file') found.add(path)
   }
   return [...found]
@@ -876,7 +918,7 @@ const filesNote = (files: string[]) =>
             kind === 'picture' || kind === 'pdf'
               ? 'open it with Read'
               : kind === 'picture-other'
-                ? 'turn it into a PNG in your scratch folder (sips -s format png on a Mac, convert on Linux), then open that with Read'
+                ? 'turn it into a PNG in your scratch folder (sips -s format png on a Mac, convert on Linux, magick on Windows), then open that with Read'
                 : kind === 'video'
                   ? 'take stills from it into your scratch folder with ffmpeg (one a second, or more where it moves fast), then open them with Read; ffprobe gives its length'
                   : 'read it as its kind needs'
@@ -892,7 +934,7 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
   if (wasHeld) await changeTodos($, list => list.map(one => (one.id === id && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
   const at = await $.clock.now()
   const files = [...new Set([...picked, ...(await pathsIn($, said))])]
-  const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
+  const shown = [said, ...picked.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join('\n')
   // The messages sent before this one that the task has not read yet, in the order sent
   const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
   await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
@@ -917,7 +959,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const ask = one.ask
   const words = choice.trim()
   // What the card and the chat say was answered: the words, then each file attached by its name
-  const said = [words, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+  const said = [words, ...picked.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join(' ')
   const note = isReply ? filesNote(files) : ''
   if (!ask || !said) return
   const target = ask.from ?? one.id

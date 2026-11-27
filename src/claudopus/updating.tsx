@@ -59,12 +59,38 @@ const lookIo = ($: EngineInterface): LookIo => ({
 // (seen on Linux, in tmux started over ssh) has no ~/.local/bin on its PATH, else claude on the PATH
 const engineOf = async ($: EngineInterface) => {
   const named = await $.env.get('CLAUDE_CODE_EXECPATH')
-  if (named) return named
+  if (named) return slashed(named)
+  if (isWindows) return (await windowsEngine($)) || 'claude'
   // The PATH first, as the shell would find it, so an install by npm or another copy earlier on it is still the one used
   const onPath = ((await $.env.get('PATH')) ?? '').split(':').filter(one => one.startsWith('/')).map(one => `${one.replace(/\/+$/, '')}/claude`)
   for (const one of [...onPath, `${(await homeFolder($)) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
     if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
   return 'claude'
+}
+// The Claude app's own data folders, those that are there: on a Mac ~/Library/Application Support/Claude, on Windows those
+// windowsAppData finds (hooks/update.ts)
+const folderIo = ($: EngineInterface) => ({ exists: (path: string) => $.fs.exists(path).catch(() => false), list: (path: string) => $.fs.list(path) })
+const windowsPlaces = async ($: EngineInterface) => {
+  const read = (value: string | undefined) => (value ?? '').trim()
+  return {
+    path: read(await $.env.get('PATH').catch(() => undefined)) || read(await $.env.get('Path').catch(() => undefined)),
+    profile: await homeFolder($),
+    appData: read(await $.env.get('APPDATA').catch(() => undefined)),
+    localAppData: read(await $.env.get('LOCALAPPDATA').catch(() => undefined)),
+  }
+}
+const appDataFolders = async ($: EngineInterface) => (isWindows ? windowsAppData(folderIo($), await windowsPlaces($)) : [`${await homeFolder($)}/Library/Application Support/Claude`])
+// On Windows the engine as windowsEngine finds it (hooks/update.ts)
+const windowsEngine = async ($: EngineInterface) => windowsEngineOf(folderIo($), await windowsPlaces($))
+// Claude Code's own records name folders as Windows writes them there (C:\Users\...): read with forward slashes, as the mod keeps
+// paths. Elsewhere, and in what is written back, they stay as they are
+const recordRead = (text: string) => {
+  if (!isWindows || !text.includes('\\')) return text
+  try {
+    return JSON.stringify(JSON.parse(text, (_, value: unknown) => (typeof value === 'string' ? slashed(value) : value)))
+  } catch {
+    return text
+  }
 }
 
 // ---- Looking: the version page only ----
@@ -158,7 +184,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
   const from = installedFrom(root)
   const io = lookIo($)
   const plugins = from?.plugins ?? dir.replace(/\/claudopus$/, '/plugins')
-  const known = await readOr($, `${plugins}/known_marketplaces.json`)
+  const known = recordRead(await readOr($, `${plugins}/known_marketplaces.json`))
   const entryOf = (name: string) => {
     try {
       return (JSON.parse(known) as Record<string, { source?: { source?: string; path?: string; repo?: string }; installLocation?: string }>)?.[name]
@@ -166,7 +192,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return undefined
     }
   }
-  const installed = await readOr($, `${plugins}/installed_plugins.json`)
+  const installed = recordRead(await readOr($, `${plugins}/installed_plugins.json`))
   const done = (one: NonNullable<typeof sourceKnown>) => (sourceKnown = one)
   if (from) {
     const entry = entryOf(from.marketplace)
@@ -178,7 +204,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
         cannot: ready.ok ? undefined : { what: `Claude Code's copy is made from ${ready.what}`, why: ready.why },
-        where: ready.ok ? "Claude Code's copy of the released code on this Mac" : `Claude Code's copy of ${ready.what}`,
+        where: ready.ok ? `Claude Code's copy of the released code on ${thisMac()}` : `Claude Code's copy of ${ready.what}`,
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -197,7 +223,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
     return done({ src: { kind: 'none', why: 'its marketplace is not one Claudopus can check a download in' }, cannot: { what: 'This chat runs a copy of Claudopus installed another way', why: 'update it with /plugin in Claude Code' }, where: "Claude Code's installed copy" })
   }
   // Run from a folder of the code: the folder is what a release has to reach
-  const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim()
+  const top = slashed((await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim())
   const ready = top ? await folderReady(io, top) : ({ ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" } as const)
   const marketplace = folderMarketplace(known, root)
   const scopes = (() => {
@@ -208,11 +234,13 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
     }
   })()
   const scope = scopes.includes('user') ? 'user' : (scopes.find(one => typeof one === 'string' && /^(user|project|local)$/.test(one)) as string | undefined)
-  const sub = top && root.startsWith(`${top}/`) ? root.slice(top.length + 1) : 'mods/claudopus'
+  // (Windows names a folder the same in capitals or not)
+  const isUnder = isWindows ? root.toLowerCase().startsWith(`${top.toLowerCase()}/`) : root.startsWith(`${top}/`)
+  const sub = top && isUnder ? root.slice(top.length + 1) : 'mods/claudopus'
   return done({
     src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
     cannot: ready.ok ? undefined : { what: `This chat runs ${ready.what}`, why: ready.why },
-    where: ready.ok ? 'the released code on this Mac' : ready.what,
+    where: ready.ok ? `the released code on ${thisMac()}` : ready.what,
   })
 }
 
@@ -336,7 +364,7 @@ const installStep = async ($: EngineInterface, version: string, commit: string) 
   const beat = (): unknown =>
     $.clock.after(20_000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())))
   beat()
-  const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false))
+  const got = await install(lookIo($), src, page, commit, await engineOf($), isWindows).finally(() => (isOn = false))
   const at = await $.clock.now()
   Object.assign(stepSaid, { version, detail: '', dirty: got.ok && got.dirty })
   if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
@@ -517,7 +545,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus v${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = `Install puts v${v} on this Mac in place of v${loaded}. Then type /reload-plugins to use it.`
+    const replaces = `Install puts v${v} on ${thisMac()} in place of v${loaded}. Then type /reload-plugins to use it.`
     return box(
       'downloaded',
       [title(`Claudopus v${v} downloaded`), line('replaces', replaces), track(1)],
@@ -570,7 +598,7 @@ const installedCopy = async ($: EngineInterface) => {
     const version = versionOnPage(await readOr($, `${root}/.claude-plugin/plugin.json`))
     return version ? { version, installPath: root } : undefined
   }
-  const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
+  const installed = recordRead(await readOr($, `${from.plugins}/installed_plugins.json`))
   const id = `${from.plugin}@${from.marketplace}`
   return copyOf(installed, id, pluginRoot($), cwd)
 }
@@ -653,9 +681,7 @@ const playUpdated = async ($: EngineInterface, version: string) => {
   }
   if (config.sound === false) return
   const played = `${dir}/updated/${version}`
-  const made = await $.process
-    .run(['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played])
-    .catch(() => ({ exitCode: 1 }))
+  const made = await runOn($, ['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played]).catch(() => ({ exitCode: 1 }))
   if (made.exitCode !== 0) return
   // A sound that could not play leaves the version free for the next chat that moves to it
   await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {

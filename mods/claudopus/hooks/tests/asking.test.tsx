@@ -375,6 +375,14 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\n`))
       return ok(files.get('clipboard:files') ?? '')
     }
+    // On Windows the same through Windows PowerShell: its Open box, and its clipboard, a picture saved where CLAUDOPUS_PASTE_TO says
+    // (each line ends as Windows ends lines)
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('OpenFileDialog'))) return files.has('picker:chosen') ? ok((files.get('picker:chosen') ?? '').replace(/\n/g, '\r\n')) : ok('')
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('GetFileDropList'))) {
+      const to = String(e.init?.env?.CLAUDOPUS_PASTE_TO ?? '')
+      if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\r\n`))
+      return ok((files.get('clipboard:files') ?? '').replace(/\n/g, '\r\n'))
+    }
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -585,14 +593,16 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       // hold:<fn> keeps the call on its way until the test lets it go: held.get(fn)?.('')
       return files.has(`hold:${fn}`) ? (new Promise(done => held.set(fn, () => done(answer()))) as never) : answer()
     }
+    // jq:missing: none on the PATH (as on Windows, where Git for Windows has none), only one at its own full path
+    if (tool === 'jq' && files.has('jq:missing')) return ok('', 127)
     // hold:jq keeps every chat's records being read, as they are for half a minute after a reload, until the test lets them go
-    if (tool?.endsWith('jq') && files.has('hold:jq')) {
+    if (/jq(?:\.exe)?$/.test(tool ?? '') && files.has('hold:jq')) {
       const sum = files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}'
       return new Promise(done => held.set(`jq:${String(e.argv.at(-1))}`, () => done(ok(sum)))) as never
     }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
-    const stdout = tool?.endsWith('jq')
+    const stdout = /jq(?:\.exe)?$/.test(tool ?? '')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
@@ -2556,6 +2566,43 @@ test('F-013 · an answer another chat left in a file for ended work wakes nothin
   await clock.advance(12_000)
   expect(resumed.filter(line => line.startsWith('a1: '))).toEqual([])
   expect(files.get(`${MEMORY}/log.md`)).toContain('put away unread')
+})
+
+// On Windows there is no Terminal app to type a command into: the card gives it with Copy alone, from its folder with forward
+// slashes, which Git's bash and PowerShell both take. Attach and Paste go through Windows PowerShell's own Open box and clipboard, and
+// what they give, Windows paths, reaches the task with forward slashes
+test('on a Windows PC a command for the person is given to copy, with no Open in Terminal, and Attach and Paste take files from Windows\' own Open box and clipboard', async ($, on) => {
+  const ended = new Set<string>()
+  const { files, windowsRuns, resumed } = world(on, { windows: true, ended })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'sign me in', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Sign in', prompt: 'sign me in' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const told = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Sign in to GitHub.', command: 'gh auth login', cwd: 'C:\\Users\\sam\\repo\\site' } as never)
+  expect(String(told.result)).toContain("cd 'C:/Users/sam/repo/site' && gh auth login")
+  expect(String(told.result)).toContain('on Windows the card gives it with a Copy button')
+  expect(String(told.result)).not.toContain('Open in Terminal')
+  expect(await until(async () => ((await askButtons(list, 'a1')).includes('Copy') ? askButtons(list, 'a1') : undefined))).not.toContain('Open in Terminal')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: '' } as never)
+  ended.add('a1')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Which skin looks wrong?' } as never)
+  await list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(one => /^ask-a1-inbar-\d+$/.test(one.key ?? ''))))?.key ?? '' })
+  const box = await until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith('band-a1-reply-answer-')))
+  const pressBar = async (label: string) => bar.press({ key: (await bar.findAll({ type: 'Button' })).find(b => b.props.label === label)?.key ?? '' })
+  const tiles = async () => (await bar.findAll({ type: 'Svg' } as never)).map(one => String(one.props.alt)).filter(alt => /^(Picture|Video|PDF|File): /.test(alt))
+  files.set('clipboard:files', 'C:\\Users\\sam\\Desktop\\skin 2.png\n')
+  await pressBar('Paste')
+  files.set('picker:chosen', 'C:\\Users\\sam\\Desktop\\notes.zip\n')
+  await pressBar('Attach')
+  expect(await until(async () => ((await tiles()).length === 2 ? tiles() : undefined))).toEqual(['Picture: skin 2.png', 'File: notes.zip'])
+  expect(windowsRuns.filter(argv => argv[0] === 'powershell').map(argv => argv.slice(1, 5))).toEqual([['-NoProfile', '-NonInteractive', '-STA', '-Command'], ['-NoProfile', '-NonInteractive', '-STA', '-Command']])
+  await bar.input({ key: box?.key ?? '', text: 'The second one' })
+  const answer = (await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('in their own words: The second one')))) ?? ''
+  expect(answer).toContain('\n- C:/Users/sam/Desktop/skin 2.png (open it with Read)')
+  expect(answer).toContain('\n- C:/Users/sam/Desktop/notes.zip (read it as its kind needs)')
+  await bar.unmount()
+  await list.unmount()
 })
 
 test('in a chat run from another Mac a command for the person is given whole, with its folder, and nothing offers to open a terminal here', async ($, on) => {

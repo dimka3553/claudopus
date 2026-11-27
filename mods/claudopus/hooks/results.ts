@@ -9,8 +9,8 @@ export const RESULTS_EVERY = 120_000
 export const RESULTS_A_TRIP = 30
 // A folder under reports/ another Mac may be asked for or handed: no slash, no dot first, nothing the shell reads
 export const isResultId = (one: unknown): one is string => typeof one === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(one)
-// A home a Mac names: /Users/<name>, or another plain absolute path
-export const isHome = (one: string) => /^\/[A-Za-z0-9._/-]{1,200}$/.test(one) && !one.endsWith('/') && !one.includes('..')
+// A home a Mac names: /Users/<name>, or another plain absolute path (on a Windows PC, C:/Users/<name>)
+export const isHome = (one: string) => /^(?:\/|[A-Za-z]:\/)[A-Za-z0-9._/-]{1,200}$/.test(one) && !one.endsWith('/') && !one.includes('..')
 
 const RESULT_MARK = '---claudopus-result---'
 // What one look there answers: its home, then each result as its folder's name, its meta.json's checksum and its meta.json on one line

@@ -77,7 +77,10 @@ export const DOWNLOAD_CMD =
 // Work that says it waits, checks or tests is never a download, whatever it runs
 const CHECKS = /^(wait|poll|check|verify|test|watch|confirm|reload|ping|probe|look)\b/i
 const isFetching = (step: string) => {
-  const head = step.replace(/^[^\s/]*\//, '/').replace(/^\/\S*\//, '')
+  // (on Windows a program by its whole path, C:\x\curl.exe or quoted with its spaces, is the program alone)
+  const windows = /^"([A-Za-z]:[\\/][^"]*)"(.*)$/s.exec(step) ?? /^([A-Za-z]:[\\/]\S*)(.*)$/s.exec(step)
+  const plain = windows ? `${lastPart(windows[1] ?? '').replace(/\.exe$/i, '')}${windows[2] ?? ''}` : step
+  const head = plain.replace(/^[^\s/]*\//, '/').replace(/^\/\S*\//, '')
   if (head.search(DOWNLOAD_CMD) !== 0) return false
   if (/^curl\b/.test(head)) return /\s(-[a-zA-Z]*[oO]\b|-[a-zA-Z]*[oO]\S|--output\b|--remote-name|--output-dir\b)|\s>>?\s*[^&\s]/.test(head)
   if (/^wget\b/.test(head)) return !/\s--spider\b|\s-[a-zA-Z]*O\s*-(\s|$)|\s-qO-/.test(head)
@@ -558,7 +561,7 @@ export const labelOf = (what: string, cmd: string) => {
   const isCommand = !what || (cmd.trim() && cmd.replace(/\s+/g, ' ').trim().startsWith(what.replace(/\s+/g, ' ').trim().slice(0, 40)))
   if (isCommand) return commandName(cmd) || what
   const head = what.split(': ')[0] ?? what
-  const first = cmd.trim().split(/\s+/).find(word => !/^(cd|&&|nohup|setsid)$/.test(word) && !word.startsWith('/')) ?? ''
+  const first = cmd.trim().split(/\s+/).find(word => !/^(cd|&&|nohup|setsid)$/.test(word) && !word.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(word)) ?? ''
   return head !== what && first && what.slice(head.length + 2).startsWith(first.slice(0, 6)) ? head : what
 }
 
@@ -574,7 +577,8 @@ export const endedName = (what: string, cmd?: string) => {
 }
 
 // What a shell line runs, in a few words: its first step that does more than move or set up, as its program and the file or word
-// it works on, each without its folders
+// it works on, each without its folders (on Windows, C:\x\y.exe is y)
+const lastPart = (word: string) => (/^[A-Za-z]:[\\/]/.test(word) ? word.split(/[\\/]/) : word.split('/')).filter(Boolean).at(-1) ?? ''
 const LEAD = /^(cd|pushd|popd|export|source|\.|mkdir|set|unset|umask|ulimit|echo|printf|true|sleep|wait|clear)\b/
 export const commandName = (cmd: string) => {
   const steps = stepsOf(cmd).map(one => one.replace(/^(do|then|else)\s+/, ''))
@@ -584,13 +588,13 @@ export const commandName = (cmd: string) => {
   let words = (step.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map(word => word.replace(/^["']|["']$/g, ''))
   // A runner of runners says what it runs: uv run python train.py is python train.py
   while (/^(uv|poetry|pipenv|pdm|hatch|conda|mamba)$/.test(words[0] ?? '') && words.includes('run')) words = words.slice(words.indexOf('run') + 1).filter((word, n, all) => !(n < 2 && (/^-n$|^--name$/.test(word) || /^-n$|^--name$/.test(all[n - 1] ?? ''))))
-  const program = (words[0] ?? '').split('/').filter(Boolean).at(-1) ?? ''
+  const program = lastPart(words[0] ?? '').replace(/\.exe$/i, '')
   if (!program) return ''
   const isRunner = /^(python\d?(\.\d+)?|node|bash|sh|zsh|ruby|perl|deno|bun|uv|npx|Rscript|julia|ssh)$/.test(program)
   // A runner says what it runs; any other program what it works on first, past a folder it is pointed at (git -C <folder>)
   const rest = words.slice(1).filter((word, n, all) => !(/^-[Cc]$/.test(all[n - 1] ?? '') || /^-[Cc]$/.test(word)))
   const arg = rest.find(word => word && !word.startsWith('-') && !/^[<>|&]/.test(word) && !/^\d+>/.test(word) && (!isRunner || !/^(run|exec|-m)$/.test(word)))
-  const short = (arg ?? '').split('/').filter(Boolean).at(-1) ?? ''
+  const short = lastPart(arg ?? '')
   return `${program}${short && short.length <= 40 ? ` ${short}` : ''}`
 }
 
@@ -600,7 +604,7 @@ export type Wait = { what: string; pattern?: string; pid?: string; file?: string
 // A quoted word, blanked so what it holds splits nothing
 const unquoted = (text: string) => text.replace(/"(\\.|[^"\\])*"|'[^']*'/g, '""')
 const LIGHT = /^(date|tail|head|grep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed|jq|true|cd|uptime|pwd)\b/
-const nameOf = (path: string) => path.replace(/^["']|["']$/g, '').split('/').filter(Boolean).at(-1) ?? path
+const nameOf = (path: string) => lastPart(path.replace(/^["']|["']$/g, '')) || path
 export const waitOf = (cmd: string): Wait | undefined => {
   // A leading cd, joined with && or ; (on 15 Nov a wait led by `cd <folder>;` was not known as one)
   const cd = cmd.match(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;]+)\s*(?:&&|;)/)?.[1]?.replace(/^["']|["']$/g, '')
@@ -614,7 +618,7 @@ export const waitOf = (cmd: string): Wait | undefined => {
   if (!steps.every(step => LIGHT.test(step) || /^\d?>/.test(step))) return undefined
   const isUntil = word === 'until'
   // A file named from the folder a leading cd moved to is named whole
-  const whole = (path: string) => (path.startsWith('/') || path.startsWith('~/') || !cd ? path : `${cd.replace(/\/$/, '')}/${path}`)
+  const whole = (path: string) => (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('~/') || !cd ? path : `${cd.replace(/\/$/, '')}/${path}`)
   const grep = cond.match(/\b(?:grep|rg)\s+(?:-\w+\s+)*-\w*q\w*\s+(?:-\w+\s+)*("[^"]+"|'[^']+'|\S+)\s+("[^"]+"|'[^']+'|\S+)/)
   if (grep) return { what: `${grep[1]?.replace(/^["']|["']$/g, '').replace(/\\\|/g, ' or ')} in ${nameOf(grep[2] ?? '')}`, file: whole(grep[2]?.replace(/^["']|["']$/g, '') ?? '') }
   const pg = cond.match(/(!\s*)?pgrep\s+(?:-\w+\s+)*("[^"]+"|'[^']+'|\S+)/)
