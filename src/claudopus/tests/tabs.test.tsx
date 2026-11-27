@@ -175,11 +175,14 @@ const progressFiles = (files: Map<string, string>) => {
 test('the Progress tab opens from its button beside Results: a square for each task by goal under the north star, each area a row under its goal, an area opened with its next steps and timeline, a step ticked, and nothing says anything waits', async ($, on) => {
   const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
   const bytes = (path: string) => (path.includes('/thumbs/') ? 'B'.repeat(path.endsWith('.small.jpg') ? 4_000 : 30_000) : undefined)
-  const { files, opened, tabs, submitted } = world(on, { sips, bytes })
+  const { files, opened, tabs, submitted, clock } = world(on, { sips, bytes })
   progressFiles(files)
   // Past results still being sorted: 10 read in, 4 left in the queue
   files.set(`${MEMORY}/progress/backfilled`, '2023-11-14T10:00:00Z\n10\n')
   for (const n of [1, 2, 3, 4]) files.set(`${MEMORY}/progress/queue/00169999999000${n}-x.json`, JSON.stringify({ kind: 'result', at: 0, chat: '', task: '', report: `r${n}`, title: '', topic: '', files: [], text: 'Old work.', isBackfill: true }))
+  // A kept result that was never counted, as its task had reported before: read in again once, only to be counted
+  files.set(`${MEMORY}/reports/r-more/meta.json`, JSON.stringify({ id: 'r-more', title: 'Checkout tried on phones', subject: 'Shop', at: 1_699_000_100_000, chat: 'c', chatId: 'c', folder: '/repo', gist: 'Done.', files: [], agent: 't3' }))
+  files.set(`${MEMORY}/reports/r-more/report.md`, 'Done.\n')
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Seed photos on every page', prompt: 'Put seed photos on every page.' } as never)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
@@ -198,8 +201,13 @@ test('the Progress tab opens from its button beside Results: a square for each t
   expect(String(chart?.props.alt)).toContain('Seed shop: 2 done, 2 aside, 1 next, working now.')
   // Under it each goal's areas, and those under no goal folded as Other
   for (const text of ['More gardens', 'A calm company', 'Other', 'Working', 'Seed photos on every page', 'October books closed', '1 area']) expect(await texts()).toContain(text)
-  // Above the chart, how far the sorting has got: the 4 past results left and the start of the task above
+  // Above the chart, how far the sorting has got: the 4 past results left, the one to count again and the start of the task above
   expect(await texts()).toContain('Sorting your past results into areas: 5 of 10 done. This page fills in as it goes.')
+  // Once the sorting starts, the result never counted is queued to be, once, and those with an entry are left alone
+  await clock.advance(5_000)
+  expect(await until(async () => files.get(`${MEMORY}/progress/recounted`))).toMatch(/\n1\n$/)
+  const recount = [...files].filter(([path, text]) => path.startsWith(`${MEMORY}/progress/queue/`) && text.includes('"isEntryOnly":true')).map(([, text]) => JSON.parse(text).report)
+  expect(recount).toEqual(['r-more'])
   expect((await tab.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Seed shop' && String(one.props.source).includes('base64,BBBB'))).toBe(true)
   // Nothing on the page says it waits on the person
   const said = async () => JSON.stringify(await tab.drawn())

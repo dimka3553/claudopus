@@ -30,7 +30,7 @@ import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
-import { answerJson, applyProgress, areasFrom, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressNext, ProgressPicture } from './progress'

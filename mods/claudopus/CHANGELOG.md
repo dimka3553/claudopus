@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.284 · 27 November 2026
+- Progress now also sorts your chats from before Claudopus came in, read from their saved words, each as one piece of work in its area. It starts by itself after the update and only places that work: it adds or ticks no next steps.
+- The Progress chart runs back up to half a year: by week once it covers more than five weeks, with a dashed line where Claudopus came in. On a very busy chart one square stands for a few results, and the key under it says how many.
+- Someone who never says their goals outright gets them worked out from what their messages keep aiming at, in words close to theirs.
+- Progress counts every result, not one per task: a task that reported many times now shows each of them. Results sorted before this are counted again by themselves after the update, and the tab says how far that has got.
+
 ## 0.2.283 · 27 November 2026
 - While your past results are still being sorted into areas, the Progress tab says how far it has got, such as "Sorting your past results into areas: 300 of 1,430 done", and fills in as it goes. Nothing needs pressing: it starts by itself after an update.
 - Past results are sorted four times faster: 16 at once instead of 4.

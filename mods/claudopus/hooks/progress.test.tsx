@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { answerJson, applyProgress, areasFrom, asideLines, entriesFrom, pictureOf, progressPrompt, progressThumb, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, asideLines, chatEventOf, entriesFrom, pictureOf, progressPrompt, progressThumb, withSetAside, wordsIn } from './progress'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
 const REPORTS = '/home/sam/.claude/claudopus/reports'
@@ -35,6 +35,12 @@ test("a task's start gives it its area at once, and its result takes that entry'
   expect(entries.get('nose')?.length).toBe(1)
   expect(entries.get('site')).toEqual([])
   expect(done.areas[0]?.next.map(n => n.state)).toEqual(['done', 'open'])
+  // (the task's next result is an entry of its own beside the first; one read in again only to be counted ticks no step)
+  const again = apply(event({ kind: 'result', task: 'a1', report: 'r2', isEntryOnly: true }), { entry: { title: 'Nose checked on ten more faces', kind: 'milestone' }, next: { done: ['n2'] } }, entries, done.areas)
+  expect(entries.get('nose')?.map(e => e.report).sort()).toEqual(['r1', 'r2'])
+  expect(again.areas[0]?.next.map(n => n.state)).toEqual(['done', 'open'])
+  apply(event({ kind: 'result', task: 'a1', report: 'r2' }), { areas: ['nose'], entry: { title: 'Nose checked on ten more faces', kind: 'milestone' } }, entries, again.areas)
+  expect(entries.get('nose')?.length).toBe(2)
   expect(progressThumb(REPORTS, `${REPORTS}/r1/shots/a.png`)).toBe(`${REPORTS}/r1/thumbs/shots--a.png.jpg`)
 })
 
@@ -107,4 +113,18 @@ test('the picture is made only from the person\'s own messages, and a task is to
   const entries = new Map([['nose', [entry({ task: 'a1', title: 'Nose for side faces', kind: 'aside', reason: 'Not needed now' })]], ['site', [entry({ task: 'a2', title: 'Hero video', kind: 'aside', reason: 'Too slow' })]]])
   expect(asideLines('Fix the nose', 'The nose on side faces looks wrong', areas(), entries)).toEqual(['- In Nose: "Nose for side faces" (2026-11-19), set aside: Not needed now'])
   expect(asideLines('Render the song', 'Stills for it', areas(), entries)).toEqual([])
+})
+
+test('a chat from before Claudopus came in is read from its saved words into one piece of work in its area, dated by its first message, and changes no next step', async () => {
+  const words = `## 2026-09-20T09:00:00.000Z\nMake the nose fit side faces\n\n### Claude 2026-09-20T09:05:00.000Z\nLooking\n\n## 2026-09-21T10:00:00.000Z (from the phone)\nand the chin\n\n### Claude 2026-09-21T10:30:00.000Z\nThe nose and chin now fit side faces.\n`
+  const one = chatEventOf('c-old', words, Date.parse('2026-11-11'))
+  expect(one).toEqual({ kind: 'chat', at: Date.parse('2026-09-20T09:00:00.000Z'), chat: 'c-old', task: 'chat-c-old', title: 'Make the nose fit side faces', text: '- Make the nose fit side faces\n- and the chin\n\nLast reply: The nose and chin now fit side faces.', isBackfill: true })
+  // A chat begun since Claudopus came in has results of its own, and one with no message of the person's is nothing
+  expect(chatEventOf('c-new', words, Date.parse('2026-09-01'))).toBe(undefined)
+  expect(chatEventOf('c-none', '### Claude 2026-09-20T09:05:00.000Z\nHello\n', Date.parse('2026-11-11'))).toBe(undefined)
+  expect(progressPrompt(one as ProgressEvent, picture, areas(), new Map(), NOW)).toContain('A chat from before Claudopus came in, titled "Make the nose fit side faces"')
+  const entries = new Map<string, ProgressEntry[]>()
+  const done = apply(one as ProgressEvent, { areas: ['nose'], entry: { title: 'Nose and chin fit side faces', kind: 'milestone' }, next: { done: ['n1'], add: ['A chin that fits'], reword: [{ id: 'n2', text: 'Moves' }] } }, entries)
+  expect(entries.get('nose')?.map(e => [e.task, e.title, e.kind, e.at])).toEqual([['chat-c-old', 'Nose and chin fit side faces', 'milestone', '2026-09-20T09:00:00.000Z']])
+  expect(done.areas[0]?.next.map(n => [n.text, n.state])).toEqual([['A nose that fits side faces', 'open'], ['A nose that moves with the mouth', 'open']])
 })

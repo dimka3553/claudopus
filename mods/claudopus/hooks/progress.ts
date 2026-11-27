@@ -25,7 +25,8 @@ export type ProgressEntry = {
 }
 // One event waiting in progress/queue to be indexed
 export type ProgressEvent = {
-  kind: 'start' | 'result' | 'said' | 'answer' | 'aside'
+  // (a chat: one from before Claudopus came in, read from its saved words)
+  kind: 'start' | 'result' | 'said' | 'answer' | 'aside' | 'chat'
   at: number
   chat: string
   task?: string
@@ -37,6 +38,8 @@ export type ProgressEvent = {
   text: string
   tries?: number
   isBackfill?: boolean
+  // A result read in again only to be counted: it makes its entry and changes nothing else
+  isEntryOnly?: boolean
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string'
@@ -129,26 +132,26 @@ export const progressLine = (name: string, dir: string) =>
 
 // ---- What the indexer asks: one answer of the model's for each event, given the picture, the areas and their newest entries ----
 
-export const PROGRESS_SYSTEM = `You keep a map of one person's work for a page that shows, at a glance, what was done and what is next in each area of it. You are given the person's north star and goals, the areas so far, the newest entries of each, and one event: a task starting, a task's result, a message the person wrote, an answer the person gave to a task's question, or the person pressing Set aside on a question. Reply with one JSON object and nothing else:
+export const PROGRESS_SYSTEM = `You keep a map of one person's work for a page that shows, at a glance, what was done and what is next in each area of it. You are given the person's north star and goals, the areas so far, the newest entries of each, and one event: a task starting, a task's result, a chat from before Claudopus came in, a message the person wrote, an answer the person gave to a task's question, or the person pressing Set aside on a question. Reply with one JSON object and nothing else:
 {"areas": ["<area id>", ...], "newArea": {"name": "...", "goal": "<goal id or empty>", "aim": "..."}, "state": "...", "entry": {"title": "...", "kind": "milestone" | "task", "outcome": "...", "live": "<web address where it went live, or empty>", "pictures": ["<path>", ...]}, "next": {"done": ["<step id>"], "add": ["..."], "aside": ["<step id>"], "reword": [{"id": "<step id>", "text": "..."}]}, "aside": {"task": "<task id>", "reason": "..."}, "rename": [{"id": "<area id>", "name": "...", "aim": "..."}], "merge": [{"from": "<area id>", "into": "<area id>"}]}
 Leave out every key that does not apply.
 Rules:
 - "areas": the smallest existing area that covers the whole of the work; several only when it truly spans them. Make a "newArea" only for a new direction that no area covers; its name is 1 to 3 plain words, its aim one plain line, its goal the id of the goal it serves or empty.
-- "entry", for a task's start or result: "title" at most 8 plain words of what came out of it (such as "Lawyer brief and evidence pack ready"), never the task's own title or instructions repeated; "outcome" at most 14 plain words of what came of it. No code, file names, paths, versions, ids or model names. "kind" is "milestone" only when something shipped, went live or a clear finding came out; otherwise "task". "pictures": only paths from the result's own pictures, the one or two that show it best.
+- "entry", for a task's start or result, or a chat from before Claudopus: "title" at most 8 plain words of what came out of it (such as "Lawyer brief and evidence pack ready"), never the task's own title or instructions repeated; "outcome" at most 14 plain words of what came of it. No code, file names, paths, versions, ids or model names. "kind" is "milestone" only when something shipped, went live or a clear finding came out; otherwise "task". "pictures": only paths from the result's own pictures, the one or two that show it best.
 - "state", for a result: at most 6 plain words of where this line of work stands now, starting with "done" once it shipped or went live.
-- "next": an area's next steps are 1 to 5 plain sentences, each saying what will exist when it is done (an outcome, never a chore), with no owner. Change them only when the event shows it: "done" when a result delivers one; "add" when the person asks for something or a result names a clear next step; "reword" to make one clearer. Never add a step that repeats or overlaps an open one: reword that one instead. A task's start only places the task and makes its entry: it never adds, ticks or rewords a step. "aside" only when the person's own words or press set that step aside: never because nothing happened or nobody answered.
+- "next": an area's next steps are 1 to 5 plain sentences, each saying what will exist when it is done (an outcome, never a chore), with no owner. Change them only when the event shows it: "done" when a result delivers one; "add" when the person asks for something or a result names a clear next step; "reword" to make one clearer. Never add a step that repeats or overlaps an open one: reword that one instead. A task's start, or a chat from before Claudopus, only places the work and makes its entry: it never adds, ticks or rewords a step. "aside" only when the person's own words or press set that step aside: never because nothing happened or nobody answered.
 - "aside" (a task set aside): only when the person's own words or press set that task aside; the reason in their words, short.
 - "rename" and "merge": only when the person's words ask for it.
 - Never write that anything waits on the person or is theirs to do. Plain everyday words throughout.`
 
-export const PICTURE_SYSTEM = `You keep the bigger picture of one person's work: their north star (the one thing all of it is for) and their goals (2 to 6), each in the person's own words, with the date they said it. You are given the picture so far and the person's own messages of the past days. Change it only where their words changed it: a goal they named, dropped or reworded, or a new north star. Keep each unchanged goal's id. Reply with one JSON object and nothing else:
-{"star": {"text": "<at most 16 words, theirs>", "said": "<YYYY-MM-DD>"}, "goals": [{"id": "<short id of lowercase letters and dashes>", "name": "<1 to 4 words>", "words": "<their words, at most 30>", "said": "<YYYY-MM-DD>"}]}
-No code, file names or ids in the words. Never invent what they did not say: with nothing to go on, give the picture back as it was.`
+export const PICTURE_SYSTEM = `You keep the bigger picture of one person's work: their north star (the one thing all of it is for) and their goals (2 to 6), with the date each rests on. Take each from what they said they want, in their own words where they said it. Where they never said a goal or a north star outright, work it out from what their messages keep aiming at and asking for, in plain words close to theirs, dated by the newest message it rests on. You are given the picture so far and the person's own messages. Change it only where their words changed it: a goal they named, dropped or reworded, work that now plainly aims somewhere new, or a new north star. Keep each unchanged goal's id. Reply with one JSON object and nothing else:
+{"star": {"text": "<at most 16 words>", "said": "<YYYY-MM-DD>"}, "goals": [{"id": "<short id of lowercase letters and dashes>", "name": "<1 to 4 words>", "words": "<their words, or what their messages show, at most 30 words>", "said": "<YYYY-MM-DD>"}]}
+No code, file names or ids in the words. Nothing their messages do not bear out: with nothing to go on, give the picture back as it was.`
 
 // How much of each event the model reads
-export const EVENT_CHARS: Record<ProgressEvent['kind'], number> = { start: 4000, result: 8000, said: 3000, answer: 2000, aside: 2000 }
+export const EVENT_CHARS: Record<ProgressEvent['kind'], number> = { start: 4000, result: 8000, said: 3000, answer: 2000, aside: 2000, chat: 6000 }
 // The most each area keeps, and the most open steps it has
-export const ENTRIES_MOST = 400
+export const ENTRIES_MOST = 3000
 const NEXT_OPEN_MOST = 5
 
 const dayOf = (at: number) => new Date(at).toISOString().slice(0, 10)
@@ -199,6 +202,7 @@ export const progressPrompt = (event: ProgressEvent, picture: ProgressPicture, a
   const what =
     event.kind === 'start' ? `A task starts (task ${event.task}). Its title and instructions:`
     : event.kind === 'result' ? `A task's result${event.task ? ` (task ${event.task})` : ''}${titled}${event.files?.length ? `. Its pictures: ${event.files.join(', ')}` : ''}. The result:`
+    : event.kind === 'chat' ? `A chat from before Claudopus came in${titled}: the person's messages, then the last reply. The chat:`
     : event.kind === 'said' ? 'The person wrote in a chat:'
     : event.kind === 'answer' ? `The person answered a question of a task (task ${event.task})${titled}:`
     : `The person pressed Set aside on a question of a task (task ${event.task})${titled}:`
@@ -273,11 +277,15 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
     }
   }
   // The entry of a task's start, result or set-aside press, in each area it belongs to
-  const isOfEvent = (e: ProgressEntry) => (event.task ? e.task === event.task : Boolean(event.report) && e.report === event.report)
+  // Every result is an entry of its own: it takes the place of its task's start and of itself sorted before, never of the task's
+  // other results, so a task that reports many times counts each time
+  const isOfTask = (e: ProgressEntry) => Boolean(event.task) && e.task === event.task
+  const isOfEvent = (e: ProgressEntry) => (event.kind === 'result' && event.report ? e.report === event.report || (isOfTask(e) && !e.report) : event.task ? isOfTask(e) : Boolean(event.report) && e.report === event.report)
   const before = [...entries].flatMap(([id, list]) => list.filter(isOfEvent).map(e => ({ id, e })))
-  const wasAside = before.find(one => one.e.kind === 'aside')?.e
+  const ofTask = [...entries].flatMap(([id, list]) => list.filter(e => isOfTask(e) || isOfEvent(e)).map(e => ({ id, e })))
+  const wasAside = ofTask.find(one => one.e.kind === 'aside')?.e
   const answered = (answer.entry ?? {}) as { title?: unknown; kind?: unknown; outcome?: unknown; live?: unknown; pictures?: unknown }
-  const places = picked.length ? picked : [...new Set(before.map(one => one.id))].filter(id => known.has(id))
+  const places = picked.length ? picked : [...new Set(ofTask.map(one => one.id))].filter(id => known.has(id))
   const title = plainLine(answered.title, 8, 60) || plainLine(event.title, 8, 60) || 'A task'
   const put = (id: string, entry: ProgressEntry) => {
     entries.set(id, [entry, ...(entries.get(id) ?? []).filter(e => !isOfEvent(e))].sort(byNewest))
@@ -285,7 +293,7 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
   }
   if (event.kind === 'start' && event.task)
     for (const id of places) if (!(entries.get(id) ?? []).some(isOfEvent)) put(id, { task: event.task, title, at: happened, kind: 'task', outcome: '', report: '', pictures: [], live: '', reason: '' })
-  if (event.kind === 'result') {
+  if (event.kind === 'result' || event.kind === 'chat') {
     const files = new Set((event.files ?? []).map(file => `${reportsDir}/${event.report}/${file}`))
     const pictures = idsIn(answered.pictures).map(path => (path.startsWith('/') ? path : `${reportsDir}/${event.report}/${path}`)).filter(path => files.has(path)).slice(0, 4)
     const live = isText(answered.live) && /^https?:\/\/\S+$/.test(answered.live.trim()) ? answered.live.trim() : ''
@@ -314,15 +322,17 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
     const wanted = new Set(ids)
     areas = areas.map(area => (area.next.some(n => wanted.has(n.id) && n.state !== state) ? (touched.add(area.id), { ...area, next: area.next.map(n => (wanted.has(n.id) ? { ...n, state, at } : n)) }) : area))
   }
-  if (event.kind !== 'start') set(idsIn(next.done), 'done')
+  // (a start or an old chat only places work)
+  const isPlacing = event.kind === 'start' || event.kind === 'chat' || event.isEntryOnly === true
+  if (!isPlacing) set(idsIn(next.done), 'done')
   if (isPersons) set(idsIn(next.aside), 'aside')
-  for (const one of event.kind !== 'start' && Array.isArray(next.reword) ? next.reword : []) {
+  for (const one of !isPlacing && Array.isArray(next.reword) ? next.reword : []) {
     const r = one as { id?: unknown; text?: unknown }
     const text = plainLine(r.text, 24, 160)
     if (text) areas = areas.map(area => (area.next.some(n => n.id === r.id && n.state === 'open') ? (touched.add(area.id), { ...area, next: area.next.map(n => (n.id === r.id ? { ...n, text } : n)) }) : area))
   }
   const into = areas.find(area => area.id === (picked[0] ?? places[0]))
-  if (into && event.kind !== 'aside' && event.kind !== 'start') {
+  if (into && event.kind !== 'aside' && !isPlacing) {
     const added = idsIn(next.add)
       .map(text => plainLine(text, 24, 160))
       .filter((text, n, all) => text && !into.next.some(o => slug(o.text) === slug(text) || (o.state === 'open' && isSameStep(o.text, text))) && !all.slice(0, n).some(o => isSameStep(o, text)))
@@ -332,7 +342,7 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
       touched.add(into.id)
     }
   }
-  if (event.kind === 'result' && event.topic) {
+  if (event.kind === 'result' && event.topic && !event.isEntryOnly) {
     const topic = event.topic
     areas = areas.map(area => (places.includes(area.id) && area.topics?.[0] !== topic ? (touched.add(area.id), { ...area, topics: [topic, ...(area.topics ?? []).filter(one => one !== topic)].slice(0, 5) }) : area))
   }
@@ -351,6 +361,17 @@ export const wordsIn = (text: string, since: number) => {
     if (m?.[1] && m[3]?.trim() && Date.parse(m[1]) >= since) found.push({ at: m[1], text: m[3].trim() })
   }
   return found
+}
+// A chat from before Claudopus came in (`before`), as the event that puts it into its area: from its saved words, the person's
+// messages and the last reply, dated by its first message; nothing for a chat with no message of theirs, or one begun since
+export const chatEventOf = (id: string, text: string, before: number): ProgressEvent | undefined => {
+  const mine = wordsIn(text, 0)
+  const first = mine[0]
+  if (!first || !(Date.parse(first.at) < before)) return undefined
+  const replies = [...text.matchAll(/(?:^|\n)### Claude [^\n]*\n([\s\S]*?)(?=\n#{2,3} |$)/g)].map(m => (m[1] ?? '').trim()).filter(Boolean)
+  const said = mine.map(one => `- ${oneLine(one.text).slice(0, 300)}`).join('\n').slice(0, 2200)
+  const reply = oneLine(replies.at(-1) ?? '').slice(0, 700)
+  return { kind: 'chat', at: Date.parse(first.at), chat: id, task: `chat-${id}`, title: oneLine(first.text).slice(0, 80), text: `${said}${reply ? `\n\nLast reply: ${reply}` : ''}`, isBackfill: true }
 }
 // What the model is asked for the picture, and its answer as a picture; nothing for an answer that is not one
 export const picturePrompt = (was: ProgressPicture, words: { at: string; text: string }[], now: number, most: number) =>

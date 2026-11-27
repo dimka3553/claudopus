@@ -16,7 +16,7 @@ const progressPictures = (data: ProgressRead, entry: ProgressEntry): ProgressRef
   })
 
 const progressRead = async ($: EngineInterface): Promise<ProgressRead> => {
-  const [picture, areas, kept, cards, sorting] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos), readSorting($)])
+  const [picture, areas, kept, cards, sorting, since] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos), readSorting($), installedAt($)])
   const entries = new Map(await Promise.all(areas.map(async area => [area.id, await readEntries($, area.id)] as const)))
   return {
     star: picture.star.text,
@@ -27,6 +27,7 @@ const progressRead = async ($: EngineInterface): Promise<ProgressRead> => {
     working: new Set(cards.filter(card => !card.parentId && !card.chat && card.status === 'working').map(card => card.id)),
     reports: new Map(kept.map(r => [r.id, r])),
     sorting,
+    since,
   }
 }
 // The small copy a row shows, made once from the result's own (makeThumbs): about 4,000 characters, where that one is 40,000
