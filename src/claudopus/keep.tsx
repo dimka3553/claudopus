@@ -86,7 +86,7 @@ const saveLedger = async ($: EngineInterface) => {
 // and at most one every LEDGER_GAP: the list changes at every call of every task, and each save builds the whole ledger to see
 // whether it differs (27 Nov: as costly as the change itself). A change that comes sooner is saved when the gap is over, so a quit
 // or a crash loses at most that long
-const LEDGER_GAP = 2000
+const LEDGER_GAP = 5000
 let isLedgerBusy = false
 let isLedgerDue = false
 let ledgerAt = 0
