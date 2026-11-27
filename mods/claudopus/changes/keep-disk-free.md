@@ -1,0 +1,3 @@
+- Code copies whose work is merged are now removed even when they hold only what a build makes (a type cache, Next's or Vercel's own files) or a settings file the same as the main copy's, and when their branch was squashed onto main. On 28 Nov 18 merged copies had stayed for that.
+- A code copy that stays, because its work isn't merged or has unsaved changes, loses its installed packages and build folder once it has been left alone for two days. An install brings them back. These had kept 1 to 3 GB each.
+- When the disk runs low, its notice at the top of the panel names your own big new files on the Desktop and in Movies and Downloads, such as a screen recording left running. Claudopus never deletes them.
