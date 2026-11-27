@@ -700,7 +700,7 @@ test('the list too big for the app at a wide pane is drawn with less in it, ever
   for (let t = 1; t <= 10; t += 1) {
     const me = `a${(id += 1)}`
     kinds[me] = 'general-purpose'
-    titles.push(`Task number ${t} with a fairly long title that says what it does in plain words ${more(23)}`.trim())
+    titles.push(`Task number ${t} with a fairly long title that says what it does in plain words ${more(25)}`.trim())
     await $.prompt.submit({ text: `job ${t}`, wait: false, origin: composer })
     await $.agent.spawn({ ...spawn, description: titles[t - 1], prompt: `job ${t}` } as never)
     const call = (agentId: string, tool: string, input: Record<string, unknown>) => $.tool.call({ tool, tool_use_id: `u${(use += 1)}`, agentId, ...input } as never)
