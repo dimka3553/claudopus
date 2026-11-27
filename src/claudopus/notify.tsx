@@ -253,10 +253,7 @@ const remindAsks = async ($: EngineInterface) => {
 // What the chat's model reads with a message of the person's: what the latest cards show, so it answers how things stand from the
 // cards rather than from memory (18 Nov: "I can't see your panel, so I'm guessing which card is which"), sent again only once they
 // changed, and what has waited on a card, so its reply names each once an hour at most while nobody answers it, until the last reminder
-const ASK_NAMED_AFTER = 5 * 60_000
-const ASK_NAMED_EVERY = 60 * 60_000
 const ASK_NAMED_MOST = REMIND_AT.at(-1)!
-const askNamed = new Map<string, number>()
 let cardsSent = ''
 const cardsNow = async ($: EngineInterface) => {
   const now = await $.clock.now()
@@ -276,19 +273,9 @@ const cardsNow = async ($: EngineInterface) => {
         : `${one.status}${one.status === 'failed' && one.why ? ` (${one.why.charAt(0).toLowerCase()}${one.why.slice(1)})` : ''}`
     return { one, waits, what, row: `- "${cut(titleOf(one), 80)}" (${one.id}): ${waits ? `${what.replace(/^waiting for \{name\}/, `waiting for {name} for ${minutesSaid(Math.round((now - waits.at) / 60_000))}`)}` : one.status === 'working' ? what : `${what} ${minutesSaid(Math.round((now - one.endedAt) / 60_000))} ago`}` }
   })
-  const toName = facts.filter(({ one, waits }) => {
-    const key = waits ? `${one.id}:${waits.at}` : ''
-    if (!waits || now - waits.at < ASK_NAMED_AFTER || now - (askNamed.get(key) ?? -Infinity) < ASK_NAMED_EVERY) return false
-    askNamed.set(key, now)
-    return true
-  })
-  // (sent again only when something on them changed, not their times, or a card is to be named)
   const sign = mark(facts.map(f => `${f.one.id}:${f.what}`).join('\n'))
-  if (!toName.length && sign === cardsSent) return ''
-  cardsSent = sign
-  if (!facts.length) return ''
-  const nameThem = toName.length
-    ? `\nWaiting on {name} on ${toName.length === 1 ? 'a card' : 'cards'}, unanswered: ${toName.map(({ one }) => `"${cut(titleOf(one), 80)}"`).join(', ')}. Unless your reply is about ${toName.length === 1 ? 'it' : 'them'}, end it with one short line saying which card waits for {name} and what for, so it isn't missed.`
-    : ''
-  return `What the latest task cards show now, for when {name} asks how things stand: answer from this, not from memory, and leave it out of a reply about something else:\n${facts.map(f => f.row).join('\n')}${nameThem}`
+if (sign === cardsSent) return ''
+cardsSent = sign
+if (!facts.length) return ''
+  return `What the latest task cards show now, for when {name} asks how things stand: answer from this, not from memory, and leave it out of a reply about something else. Never remind {name} of a card that waits for them, at the end of a reply or anywhere in it: {name} sees the waiting cards in the panel and is still deciding. Name a card's question only when {name} asks how things stand:\n${facts.map(f => f.row).join('\n')}`
 }

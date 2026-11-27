@@ -940,7 +940,7 @@ const PANEL_RULE =
 const AFAR_RULE =
 "## This chat runs on another Mac\n\n- I work from my own device and can't see this Mac's screen. Anything that needs my hands, I do from my own device: a sign-in by device code, or a link that works when I open it on my device. Never a browser, window, dialog or keychain prompt on this Mac, and nothing I would need to see its screen for. Give me a command only I can run in full, with its folder and full paths, so I can run it as it is in my own SSH session to this Mac; never open a terminal on this Mac for it."
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[], others: string[] = []) =>
-`In the background task "${title}", Claude asked {name} a question.${others.length ? ` Its card also still shows ${others.length === 1 ? 'an earlier question' : `${others.length} other questions`}, each answered on its own: ${others.map(one => `"${cut(one, 160)}"`).join(', ')}.` : ''} {Name} sees it in full on the task's card, and nothing of it in this chat: ${ask.text} (${answers.length ? `buttons: ${answers.join(' · ')}` : 'answered in words'}${ask.details ? `; what it is about, which {name} sees in full with it on the card: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words${others.length ? ', saying which question they answer' : ''}; its card then stops showing the question.`
+`In the background task "${title}", Claude asked {name} a question.${others.length ? ` Its card also still shows ${others.length === 1 ? 'an earlier question' : `${others.length} other questions`}, each answered on its own: ${others.map(one => `"${cut(one, 160)}"`).join(', ')}.` : ''} {Name} sees it in full on the task's card, and nothing of it in this chat: ${ask.text} (${answers.length ? `buttons: ${answers.join(' · ')}` : 'answered in words'}${ask.details ? `; what it is about, which {name} sees in full with it on the card: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, never remind {name} of it in a later reply, as {name} sees it waiting in the panel and is still deciding, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words${others.length ? ', saying which question they answer' : ''}; its card then stops showing the question.`
 const ASK_ANSWERED = (title: string, said: string, asked = '') => `✓ {Name} answered "${title}" on its card: ${said}${asked ? `, to its question "${cut(asked, 160)}"` : ''}. Claude already has the answer from the card, so it needs no second copy.`
 const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer {name} gave on that task's card. Claude already has it from there and has asked nothing since, so a second copy would only start it again. If {name} means those words for something new, send them with what they are for.`
 const ANSWER_ECHO = 60 * 60_000
@@ -6410,10 +6410,7 @@ await aloud($, 'ask', `${titleOf(one)} still waits for you`, `Waiting ${minutesS
 }
 }
 
-const ASK_NAMED_AFTER = 5 * 60_000
-const ASK_NAMED_EVERY = 60 * 60_000
 const ASK_NAMED_MOST = REMIND_AT.at(-1)!
-const askNamed = new Map<string, number>()
 let cardsSent = ''
 const cardsNow = async ($: EngineInterface) => {
 const now = await $.clock.now()
@@ -6433,20 +6430,11 @@ const what = waits
 : `${one.status}${one.status === 'failed' && one.why ? ` (${one.why.charAt(0).toLowerCase()}${one.why.slice(1)})` : ''}`
 return { one, waits, what, row: `- "${cut(titleOf(one), 80)}" (${one.id}): ${waits ? `${what.replace(/^waiting for \{name\}/, `waiting for {name} for ${minutesSaid(Math.round((now - waits.at) / 60_000))}`)}` : one.status === 'working' ? what : `${what} ${minutesSaid(Math.round((now - one.endedAt) / 60_000))} ago`}` }
 })
-const toName = facts.filter(({ one, waits }) => {
-const key = waits ? `${one.id}:${waits.at}` : ''
-if (!waits || now - waits.at < ASK_NAMED_AFTER || now - (askNamed.get(key) ?? -Infinity) < ASK_NAMED_EVERY) return false
-askNamed.set(key, now)
-return true
-})
 const sign = mark(facts.map(f => `${f.one.id}:${f.what}`).join('\n'))
-if (!toName.length && sign === cardsSent) return ''
+if (sign === cardsSent) return ''
 cardsSent = sign
 if (!facts.length) return ''
-const nameThem = toName.length
-? `\nWaiting on {name} on ${toName.length === 1 ? 'a card' : 'cards'}, unanswered: ${toName.map(({ one }) => `"${cut(titleOf(one), 80)}"`).join(', ')}. Unless your reply is about ${toName.length === 1 ? 'it' : 'them'}, end it with one short line saying which card waits for {name} and what for, so it isn't missed.`
-: ''
-return `What the latest task cards show now, for when {name} asks how things stand: answer from this, not from memory, and leave it out of a reply about something else:\n${facts.map(f => f.row).join('\n')}${nameThem}`
+return `What the latest task cards show now, for when {name} asks how things stand: answer from this, not from memory, and leave it out of a reply about something else. Never remind {name} of a card that waits for them, at the end of a reply or anywhere in it: {name} sees the waiting cards in the panel and is still deciding. Name a card's question only when {name} asks how things stand:\n${facts.map(f => f.row).join('\n')}`
 }
 
 

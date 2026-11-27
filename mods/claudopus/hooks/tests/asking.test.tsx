@@ -1992,6 +1992,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   expect(logged.some(line => line.includes('Which logo do you want?'))).toBe(false)
   expect(relay).toContain('Which logo do you want? (buttons: A · B; pictures: /w/shots/a.png, /w/shots/b.png)')
   expect(relay).toContain('do not pass it on')
+  expect(relay).toContain('never remind the person of it in a later reply')
   expect(relay).toContain('SendUserFile')
   // Pictures sent as "proactive" did not show in the chat; "normal" ones did
   expect(relay).toContain('status "normal"')
@@ -3364,7 +3365,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
 })
 
 
-test('a question nobody answers on its card is said again at 15 minutes and an hour, once each, and no more once answered; with each message of the person the chat reads what every card shows and is asked to name the question once an hour', SLOW, async ($, on) => {
+test('a question nobody answers on its card is said again at 15 minutes and an hour, once each, and no more once answered; with each message of the person the chat reads what every card shows and is told never to remind them of it', SLOW, async ($, on) => {
   const { notified, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'push the fix', wait: false, origin: composer })
@@ -3384,12 +3385,14 @@ test('a question nobody answers on its card is said again at 15 minutes and an h
   expect(reminders()[0]).toMatch(/^Push the fix still waits for you \| Waiting 1[56]m · Sign in to GitHub in the browser pane\.$/)
   await minutes(30)
   expect(reminders()).toHaveLength(1)
-  // The person types in the chat: the chat reads every card as it is, and is asked to name the question in its reply, once an hour
+  // The person types in the chat: the chat reads every card as it is, and is told never to remind them of a waiting card
   const said = async (text: string) => ((await $.prompt.submit({ text, wait: false, origin: composer })) as { context?: string[] }).context?.join('\n') ?? ''
   const first = await said('how is it going?')
   expect(first).toContain('What the latest task cards show now, for when the person asks how things stand')
   expect(first).toMatch(/- "Push the fix" \(a1\): waiting for the person for 4\dm: Sign in to GitHub in the browser pane\./)
-  expect(first).toContain('Waiting on the person on a card, unanswered: "Push the fix". Unless your reply is about it, end it with one short line')
+  // 27 Nov: every reply ended with "Still waiting on you: ..."; the person sees the waiting cards and is still deciding, so the chat is told never to remind them
+  expect(first).toContain('Never remind the person of a card that waits for them')
+  expect(first).not.toContain('end it with one short line')
   // Within the hour, with nothing on the cards changed, the chat is not told again
   expect(await said('and the other one?')).not.toContain('What the latest task cards show')
   await minutes(16)

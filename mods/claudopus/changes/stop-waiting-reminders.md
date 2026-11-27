@@ -1,0 +1,1 @@
+- The chat no longer ends its replies with a line about which cards wait for you. You see the waiting cards in the panel, so it names a card's question only when you ask how things stand.
