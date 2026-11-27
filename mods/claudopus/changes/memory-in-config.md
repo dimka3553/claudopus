@@ -1,0 +1,1 @@
+- Memory moved from the top of the panel into Config, under You: its Open opens the folder where Claudopus keeps what it remembers.

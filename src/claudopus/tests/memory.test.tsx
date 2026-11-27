@@ -1,4 +1,4 @@
-// Memory files in the mod's tabs, and the Memory button
+// Memory files in the mod's tabs, and Config's Memory
 
 test('a memory path in a reply opens in a tab of the mod on the desktop, never the app file pane; the terminal keeps its own', async ($, on) => {
   const { files, tabs } = world(on)
@@ -45,13 +45,19 @@ test('a memory path in a reply opens in a tab of the mod on the desktop, never t
   expect(await until(async () => tabs.find(one => /^memory-streams-launch-md-\d+: Launch$/.test(one)))).toBeDefined()
 })
 
-test('Memory, beside Stats, opens the memory folder in Finder', async ($, on) => {
-  const { shown } = world(on)
+test("Memory is in Config, not at the panel's top: its Open opens the memory folder in Finder, and in the terminal as a tab of the panel", async ($, on) => {
+  const { shown, tabs } = world(on)
   await $.session.start(start)
-  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect((await keyed(pane, 'memory-open'))?.props.label).toBe('Memory')
-  await pressed(pane, 'memory-open')
+  const panel = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await panel.findAll({ type: 'Button' })).some(one => one.props.label === 'Memory')).toBe(false)
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect(await config.find({ type: 'Text', text: 'Memory' })).toBeDefined()
+  expect((await keyed(config, 'config-memory-open'))?.props.label).toBe('Open')
+  await pressed(config, 'config-memory-open')
   expect(await until(async () => shown.find(argv => argv[1] === MEMORY))).toEqual(['open', MEMORY])
+  const terminal = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 80 }, surface: 'terminal' } as never)
+  await pressed(terminal, 'config-memory-open')
+  expect(await until(async () => tabs.find(tab => /^memory-.*: Memory$/.test(tab)))).toBeDefined()
 })
 
 test('every chat starts the catch-up a minute after it loads and every ten minutes, with memory and its chat records only, never the other Macs; and the tidy of what tasks left two minutes after it loads, every ten minutes and as a task stops', async ($, on) => {

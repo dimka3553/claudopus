@@ -883,7 +883,7 @@ const appDraws = (tree: unknown) => {
 }
 
 // The terminal's look: no grey bars from the app's see-through tint, a key for each button and a line that says how to reach them,
-// Memory as a tab, and the Stats timeline drawn in cells
+// and the Stats timeline drawn in cells
 
 test('in the terminal no Box carries the faint tint the app draws, and the app keeps it', async ($, on) => {
   world(on)
@@ -914,7 +914,7 @@ test('in the terminal each header button has a key, and a line says how to reach
     (await pane.findAll({ type: 'Text' })).map(one => one.text).join('\n')
 
   const idle = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
-  expect(await keysOf(idle as never)).toMatchObject({ Stats: 's', Memory: 'm', Config: 'c', About: 'a' })
+  expect(await keysOf(idle as never)).toMatchObject({ Stats: 's', Config: 'c', About: 'a' })
   expect(await textOf(idle as never)).toContain('ctrl+x then Tab')
   await idle.unmount()
 

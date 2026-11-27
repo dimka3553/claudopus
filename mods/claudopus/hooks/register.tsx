@@ -1259,6 +1259,7 @@ await setConfig($, dir, 'notifications', one.notifications ? undefined : false)
 more: (isOpen: boolean) => configAct($, '', async () => void (configMore.isOpen = isOpen)),
 gateMode: (mode: 'each' | 'work' | 'never') => configAct($, "Couldn't save the setting", () => regate($, { mode })),
 gateRemove: (host: string, command: string) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
+memory: (surface: string) => void showMemory($, surface as RenderSurface).catch(err => log($, `memory folder not opened: ${String(err)}`)),
 lookEvery: (hours: number) =>
 configAct($, "Couldn't save the setting", async () => {
 await setConfig($, dir, 'updates', hours ? undefined : false)
@@ -3562,11 +3563,6 @@ if (isRunFromAfar || surface === 'terminal' || !hasDesktop) return openMemory($,
 const opened = await openOn($, dir)
 if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
 }
-const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
-<ui.Box key="memory-button" flexShrink={0}>
-<ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} plain={isKeyed ? true : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
-</ui.Box>
-)
 
 const CATCH_UP_AFTER = 60_000
 const CATCH_UP_EVERY = 10 * 60_000
@@ -16668,7 +16664,6 @@ nameLine(ui, updated)
 {progressButton($, ui, isKeyed)}
 {statsButton($, ui, isKeyed)}
 {boardButton($, ui, isKeyed)}
-{memoryButton($, ui, isKeyed)}
 {configButton($, ui, isKeyed)}
 {aboutButton($, ui, isKeyed)}
 {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x then Tab to use the keys</Text> : null}
