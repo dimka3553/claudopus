@@ -1481,7 +1481,7 @@ const PROGRESS_AFTER = 3000
 const PROGRESS_RETRY = 5 * 60_000
 const PROGRESS_LOAD_AFTER = 90_000
 const PROGRESS_TRIES = 3
-const BACKFILL_AT_ONCE = 4
+const BACKFILL_AT_ONCE = 16
 const BACKFILL_DAYS = 30
 const DRAIN_STALE = 10 * 60_000
 const FILES_STALE = 30_000
@@ -1658,6 +1658,12 @@ draining = false
 if (isLate) drainSoon($, PROGRESS_RETRY)
 }
 
+const readSorting = async ($: EngineInterface) => {
+const left = (await $.fs.list(queueDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json')).length
+const total = Number((await readOr($, `${progressDir()}/backfilled`)).split('\n')[1] ?? 0) || 0
+return { left, total }
+}
+
 const backfillProgress = async ($: EngineInterface) => {
 const isAsked = await $.fs.exists(`${progressDir()}/backfill`)
 if (!isAsked && ((await $.fs.exists(`${progressDir()}/backfilled`)) || (await readAreas($)).length)) return
@@ -1669,7 +1675,7 @@ if (!text) continue
 const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', task: r.agent ?? '', report: r.id, title: r.title, topic: r.subject, files: r.files.filter(file => PICTURE.test(file)), text: hideKeys(clip(text, EVENT_CHARS.result / 2)), isBackfill: true }
 await $.fs.write(`${queueDir()}/${queueName(r.at)}`, `${JSON.stringify(one)}\n`)
 }
-await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n`)
+await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n${all.length}\n`)
 if (isAsked) await $.process.run(['rm', '-f', `${progressDir()}/backfill`]).catch(() => undefined)
 await indexLog($, `history queued: ${all.length} results`)
 }
@@ -14788,7 +14794,7 @@ return r && thumb ? [{ key: full, report: r, thumb }] : []
 })
 
 const progressRead = async ($: EngineInterface): Promise<ProgressRead> => {
-const [picture, areas, kept, cards] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos)])
+const [picture, areas, kept, cards, sorting] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos), readSorting($)])
 const entries = new Map(await Promise.all(areas.map(async area => [area.id, await readEntries($, area.id)] as const)))
 return {
 star: picture.star.text,
@@ -14797,6 +14803,7 @@ areas,
 entries,
 working: new Set(cards.filter(card => !card.parentId && !card.chat && card.status === 'working').map(card => card.id)),
 reports: new Map(kept.map(r => [r.id, r])),
+sorting,
 }
 }
 const thumbsAsked = new Set<string>()

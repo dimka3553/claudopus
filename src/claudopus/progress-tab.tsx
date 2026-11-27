@@ -1,4 +1,4 @@
-// The Progress tab: a ring for each goal of the bigger picture at the top, each area as a row under its goal, and an area's own page with its
+// The Progress tab: each goal's tasks as squares under the north star at the top, each area as a row under its goal, and an area's own page with its
 // next steps and its timeline. Read from the progress folder (progress.tsx) and drawn by mods/claudopus/hooks/progress-page.tsx
 
 const PROGRESS_PANE = 'progress'
@@ -16,7 +16,7 @@ const progressPictures = (data: ProgressRead, entry: ProgressEntry): ProgressRef
   })
 
 const progressRead = async ($: EngineInterface): Promise<ProgressRead> => {
-  const [picture, areas, kept, cards] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos)])
+  const [picture, areas, kept, cards, sorting] = await Promise.all([readPicture($), readAreas($), read($, reports), read($, todos), readSorting($)])
   const entries = new Map(await Promise.all(areas.map(async area => [area.id, await readEntries($, area.id)] as const)))
   return {
     star: picture.star.text,
@@ -26,6 +26,7 @@ const progressRead = async ($: EngineInterface): Promise<ProgressRead> => {
     // (a task of this chat at work, as areasBeingBuilt counts them)
     working: new Set(cards.filter(card => !card.parentId && !card.chat && card.status === 'working').map(card => card.id)),
     reports: new Map(kept.map(r => [r.id, r])),
+    sorting,
   }
 }
 // The small copy a row shows, made once from the result's own (makeThumbs): about 4,000 characters, where that one is 40,000

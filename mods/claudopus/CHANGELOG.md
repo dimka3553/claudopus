@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.283 · 27 November 2026
+- While your past results are still being sorted into areas, the Progress tab says how far it has got, such as "Sorting your past results into areas: 300 of 1,430 done", and fills in as it goes. Nothing needs pressing: it starts by itself after an update.
+- Past results are sorted four times faster: 16 at once instead of 4.
+
 ## 0.2.282 · 27 November 2026
 - Claudopus now sorts each task into an area of your work in the background, as it starts and when its result comes. It keeps each area's next steps up to date from your messages and answers.
 - Every question a task asks has a Set aside button. It drops that work and keeps it in Progress as set aside, with why, and a later task in that area is told about it.
