@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.302 · 27 November 2026
+- The grey quote over a coloured reply is now the message it answers wherever you sent it: a task's Message box, its answer box, Reply on a reply, or the chat.
+- A chat message you sent while Claude was working is quoted only over replies about the task it went to, never over another task's.
+
 ## 0.2.301 · 27 November 2026
 - A command Claude Code blocked now always shows Allow beside Don't allow on its card, also when the card comes up just as Claudopus updates. Before, such a card could show Don't allow alone.
 

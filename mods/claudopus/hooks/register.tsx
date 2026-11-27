@@ -31,8 +31,8 @@ import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, Prog
 import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
-import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, slotsFor, textHash as colourTextHash } from './colours'
-import type { ColourIndex, TaskLink } from './colours'
+import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
+import type { CardWords, ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
 
@@ -3566,7 +3566,7 @@ ui,
 
 let isColoured = true
 let isLinked = true
-const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, quotes: {}, asked: {} }
+const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, rows: {}, said: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
 let colourBuilder: ColourBuilder | undefined
 let colourRunning: Promise<void> | undefined
@@ -3613,6 +3613,32 @@ return { ids: [passed], cards }
 return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards }
 }
 
+const HEARD_KEPT = 40
+let personHeard: string[] = []
+let isHeardRead = false
+const heardSaid = (text: string) => {
+const words = personWords(text)
+if (words) personHeard = [...personHeard, words].slice(-HEARD_KEPT)
+}
+const readHeard = async ($: EngineInterface) => {
+if (isHeardRead || !dir) return
+isHeardRead = true
+const { id } = await read($, me)
+const text = id ? await readOr($, `${dir}/words/${id}.said.md`) : ''
+const kept = text.slice(-60_000).split(/^## \S+.*$/m).slice(1).map(one => personWords(one)).filter(Boolean)
+personHeard = [...kept, ...personHeard].slice(-HEARD_KEPT)
+}
+const cardWords = (list: readonly Todo[]): CardWords[] => list.flatMap(one => (one.parentId || one.chat ? [] : (one.written ?? []).map(w => ({ id: one.id, ...w }))))
+const WRITTEN_KEPT = 6
+const writtenOnCard = async ($: EngineInterface, id: string, text: string) => {
+if (!isColoured || !text.trim()) return
+await colourBuild($, false)
+const at = colourBuilder?.stamp()
+if (!at) return
+await changeTodos($, list => list.map(one => (one.id === id ? { ...one, written: [...(one.written ?? []), { text: text.trim(), ...at }].slice(-WRITTEN_KEPT) } : one)))
+await colourBuild($, false)
+}
+
 const colourPass = async ($: EngineInterface, isWhole: boolean) => {
 const every = await $.session.messages().catch(() => [])
 const rows = Array.isArray(every) ? every : []
@@ -3621,7 +3647,8 @@ if (!builder || isWhole || rows.length < builder.read) builder = new ColourBuild
 const fresh = rows.slice(builder.read)
 colourBuilder = builder
 builder.ingest(fresh)
-const value = builder.index()
+await readHeard($).catch(err => log($, `messages said not read back: ${String(err)}`))
+const value = builder.index({ cards: cardWords(await read($, todos)), heard: personHeard })
 const json = JSON.stringify(value)
 if (json === colourWritten) return
 colourWritten = json
@@ -3708,7 +3735,7 @@ if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
 const given = isLinked ? replyLinksIn(e.props.text) : []
 const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
 const hash = colourTextHash(e.props.text)
-if (isColoured && !colourIndex.texts[hash] && !colourIndex.quotes[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
+if (isColoured && !colourIndex.texts[hash] && colourIndex.rows[hash] === undefined && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
 const [first] = ids
 if (!first && !given.length) return reply
 const { Box, Button, Markdown, Text } = ui
@@ -3749,9 +3776,8 @@ return (
 })}
 </Box>
 {(() => {
-const hash = colourTextHash(e.props.text)
-const isIndexed = (colourIndex.replies[e.requestId] ?? colourIndex.texts[hash])?.[0] === first
-const words = ((isIndexed ? (colourIndex.quotes[e.requestId] ?? colourIndex.quotes[hash]) : undefined) ?? colourIndex.asked[first] ?? cards.find(one => one.id === first)?.words ?? '').trim()
+const row = colourIndex.rows[e.requestId] ?? colourIndex.rows[hash]
+const words = (quoteFor(colourIndex, first, row) ?? cards.find(one => one.id === first)?.words ?? '').trim()
 return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
 })()}
 {reply}
@@ -7861,6 +7887,7 @@ const files = [...new Set([...picked, ...(await pathsIn($, said))])]
 const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
 const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
+void writtenOnCard($, id, shown).catch(err => log($, `message on a card not kept for quotes: ${String(err)}`))
 const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
 if (isNow && card.status === 'working' && (await interruptStep($, card))) {
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: one.entries.map(entry => (entry.kind === 'steer' && entry.at === at ? { ...entry, isNow: true } : entry)) } : one)))
@@ -7903,6 +7930,7 @@ await changeTodos($, list =>
 )
 askPressed.delete(mark)
 if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
+void writtenOnCard($, one.id, said).catch(err => log($, `answer on a card not kept for quotes: ${String(err)}`))
 await answerCleared($, one, ask, said, isReply, target, at, line, note)
 } catch (err) {
 askPressed.delete(mark)
@@ -8018,6 +8046,7 @@ await changeTodos($, list =>
 ((isHeld = false), list).map(card => (card.id === one.id && hasAsk(card, ask) ? ((isHeld = true), { ...mapAsk(card, ask, kept => ({ ...kept, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(kept.refused ? { talk: [...(kept.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) })), entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
 )
 if (!isHeld) return
+void writtenOnCard($, one.id, said).catch(err => log($, `reply on a card not kept for quotes: ${String(err)}`))
 dropDrafts($, one.id, ask)
 replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
 freeTimes($)
@@ -11674,6 +11703,7 @@ context.push(PASTED)
 
 said = text
 heard = [...heard, text]
+heardSaid(e.text)
 fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
 const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
 await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))

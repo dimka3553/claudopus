@@ -566,6 +566,8 @@ const chatHooks = (on: On) => {
 
     said = text
     heard = [...heard, text]
+    // and for the quote over a reply about a task: which task each message went to (colours.tsx)
+    heardSaid(e.text)
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
