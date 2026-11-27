@@ -1,0 +1,2 @@
+- Text you pasted into a message shows in its quote as your words, without the marks around it.
+- A task's result quotes your newest message to it, even when that message came after the chat was last read.
