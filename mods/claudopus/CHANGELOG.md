@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.316 · 28 November 2026
+- Code copies whose work is merged are now removed even when they hold only what a build makes (a type cache, Next's or Vercel's own files) or a settings file the same as the main copy's, and when their branch was squashed onto main. On 28 Nov 18 merged copies had stayed for that.
+- A code copy that stays, because its work isn't merged or has unsaved changes, loses its installed packages and build folder once it has been left alone for two days. An install brings them back. These had kept 1 to 3 GB each.
+- When the disk runs low, its notice at the top of the panel names your own big new files on the Desktop and in Movies and Downloads, such as a screen recording left running. Claudopus never deletes them.
+
 ## 0.2.315 · 28 November 2026
 - A pressed button in the panel or the bar keeps spinning until the panel shows what the press did, where it used to go back to its plain look for up to a second first.
 - Closing the update note, and the update's other buttons, show at once again while the panel is scrolled down: since 0.2.313 they could take seconds.

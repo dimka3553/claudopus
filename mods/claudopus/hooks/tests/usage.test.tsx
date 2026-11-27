@@ -1469,10 +1469,12 @@ test("a disk nearly full says so at the top of the panel with Free up space and 
   await pane.press({ key: String((await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Free up space')?.key) })
   expect(own.filter(one => String(one[5] ?? '').endsWith('/bin/tidy')).map(one => one.slice(6))).toEqual([['--now', '--deep', MEMORY]])
   expect((await until(() => pane.find({ type: 'Text', text: 'Freeing up space' })))?.text).toBe('Freeing up space')
-  files.set(`${MEMORY}/tidy/last.json`, JSON.stringify({ at: clock.now(), freed: 9 * 1024 ** 3 }))
+  // and names the person's own big new files, which it never removes
+  files.set(`${MEMORY}/tidy/last.json`, JSON.stringify({ at: clock.now(), freed: 9 * 1024 ** 3, big: [{ path: '/Users/sam/Desktop/Screen Recording 2026-11-22 at 14.27.31.mov', bytes: 113 * 1024 ** 3, at: clock.now() }, { path: '/Users/sam/Downloads/photo.zip', bytes: 17 * 1024 ** 3, at: clock.now() }] }))
   df(12.2)
   await clock.advance(31_000)
   expect((await until(() => pane.find({ type: 'Text', text: /^Freed/ })))?.text).toBe('Freed 9 GB')
+  expect(String((await until(() => pane.find({ type: 'Markdown', text: /Your big new files/ } as never)))?.props.text)).toContain('Your big new files, which only you can delete: “Screen Recording 2026-11-22 at 14.27.31.mov” on your Desktop, 113 GB; “photo.zip” in your Downloads, 17 GB.')
   // With room again it goes, and nobody was told twice
   df(40)
   await clock.advance(31_000)

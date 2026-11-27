@@ -20,7 +20,9 @@ let diskLowSince = 0
 let diskToldAt = -Infinity
 // The person's press on Free up space, and what the last run of bin/tidy freed (its tidy/last.json)
 let tidyPressedAt = 0
-let tidyLast: { at: number; freed: number } | undefined
+// and the person's big new files, which it never removes (28 Nov: a 113 GB screen recording)
+type BigFile = { path: string; bytes: number }
+let tidyLast: { at: number; freed: number; big: BigFile[] } | undefined
 
 // In a session of its own, at a low priority, as the catch-up: it outlives the chat, and its log is set aside past a megabyte
 const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
@@ -46,13 +48,18 @@ const diskOf = (text: string, at: number): DiskKept | undefined => {
 }
 const lastOf = (text: string) => {
   try {
-    const j = JSON.parse(text) as { at?: unknown; freed?: unknown }
-    return typeof j.at === 'number' ? { at: j.at, freed: typeof j.freed === 'number' ? j.freed : 0 } : undefined
+    const j = JSON.parse(text) as { at?: unknown; freed?: unknown; big?: unknown }
+    return typeof j.at === 'number' ? { at: j.at, freed: typeof j.freed === 'number' ? j.freed : 0, big: Array.isArray(j.big) ? (j.big as BigFile[]) : [] } : undefined
   } catch {
     return undefined
   }
 }
 const isDiskLow = (d: DiskKept | undefined) => Boolean(d && d.free < DISK_WARN)
+const bigLine = (one: BigFile) => {
+  const parts = one.path.split(/[\\/]/)
+  const at = parts.find(part => /^(?:Desktop|Movies|Downloads)$/.test(part))
+  return `“${parts.at(-1)}”${!at ? '' : at === 'Desktop' ? ' on your Desktop' : ` in your ${at}`}, ${gbText(one.bytes)} GB`
+}
 const isDiskFull = (d: DiskKept | undefined) => Boolean(d && d.free < DISK_STOP)
 
 // One look when the last is due: the panel redraws when what it says changes, and a disk that runs low is told once in a while
@@ -124,7 +131,8 @@ const diskNeeds = ($: EngineInterface): Need[] => {
         isDiskFull(d) ? `Tasks' downloads, installs, builds, renders and browser commands wait until more than ${stop} GB is free.` : `Below ${stop} GB, tasks' downloads, installs, builds, renders and browser commands wait.`,
         isWindows
           ? "Free up space isn't on Windows yet. Remove what tasks left behind yourself: their scratch folders, browser profiles and code copies whose work is merged."
-          : 'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
+          : 'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, packages of code copies idle for 2 days, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
+        ...(tidyLast?.big.length ? [`Your big new files, which only you can delete: ${tidyLast.big.map(bigLine).join('; ')}.`] : []),
       ].join('\n\n'),
       buttons: isFreeing || isWindows ? [] : [{ key: `disk-free-${tidyPressedAt}-${presses}`, label: 'Free up space', onPress: () => void freeSpace($).catch(err => log($, `space not freed: ${String(err)}`)) }],
       ...(isFreeing ? { line: 'Freeing up space' } : isDone && tidyLast ? { line: `Freed ${gbText(tidyLast.freed)} GB` } : {}),

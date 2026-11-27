@@ -4,8 +4,11 @@
 #      at each launch, which a Chrome that was stopped leaves behind;
 #   B. Claudopus's own leftovers in the temp folder, and anything else there unchanged for longer than macOS keeps it;
 #   C. old task scratch folders, after copying any file a result names into that result's own folder;
-#   D. worktrees whose branch is merged and which hold nothing unsaved, and their branches;
-#   E. with --deep, uv's and npm's caches.
+#   D. worktrees whose branch is merged (or squashed onto main) and which hold nothing unsaved, and their branches; in a worktree
+#      kept, its packages and build folder once it has been left alone for days, as an install brings them back;
+#   E. with --deep, uv's and npm's caches;
+#   F. it removes nothing here: the biggest files made lately on the desktop, in Movies and in Downloads, said in last.json so the
+#      panel's disk block can name them.
 # A folder holding CT data, the person's own pictures, films and desktop, anything in use or changed lately, and anything outside
 # the folder it was found in are kept. Every removal and every keep is said on a line of its own, and what came out is written
 # to <memory folder>/tidy/last.json.
@@ -32,6 +35,8 @@ $mem =~ s{(?<=.)/+$}{};
 my $EVERY = $ENV{TIDY_EVERY} // 600;                   # seconds between two runs
 my $DAYS = $ENV{TIDY_DAYS} // 2;                       # days a task's scratch folder is kept unchanged
 my $IDLE = $ENV{TIDY_WORKTREE_IDLE} // 60;             # minutes a merged worktree stays unchanged before it goes
+my $PACKAGES = $ENV{TIDY_PACKAGES_IDLE} // 2;           # days a kept worktree stays unchanged before its packages go
+my $BIG = $ENV{TIDY_BIG} // 10 * 2**30;                 # bytes from which a new file of the person's is named
 make_path("$mem/locks", "$mem/tidy");
 
 # One run at a time: the run that made the lock is the only one that removes it, and a lock left by a run that died goes after
@@ -101,7 +106,7 @@ elsif (open my $idx, '<', "$mem/index.md") {
 if ($^O =~ /^(?:msys|cygwin|MSWin32)$/ && !defined $ENV{TIDY_PS}) {
   print "on Windows the running commands and their folders can't be listed, so nothing was removed\n";
   my $at = int(Time::HiRes::time() * 1000);
-  if (open my $fh, '>', "$mem/tidy/last.json") { print $fh qq({"at": $at, "freed": 0, "removed": {"browser": 0, "temp": 0, "scratch": 0, "worktrees": 0}, "rescued": 0, "kept": 0}\n); close $fh }
+  if (open my $fh, '>', "$mem/tidy/last.json") { print $fh qq({"at": $at, "freed": 0, "removed": {"browser": 0, "temp": 0, "scratch": 0, "worktrees": 0, "packages": 0}, "rescued": 0, "kept": 0, "big": []}\n); close $fh }
   exit 0;
 }
 my @commands = lines_of('sh', '-c', $ENV{TIDY_PS} // 'ps axww -o command=');
@@ -111,12 +116,15 @@ elsif (-d '/proc/self') { for (glob '/proc/[0-9]*/cwd') { my $l = readlink $_; p
 else { @cwds = lines_of('sh', '-c', q{lsof -a -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'}) }
 @cwds = map { my $r = realpath($_); (defined $r && $r ne $_) ? ($_, $r) : ($_) } @cwds;
 
-my %removed = (browser => 0, temp => 0, scratch => 0, worktrees => 0);
+my %removed = (browser => 0, temp => 0, scratch => 0, worktrees => 0, packages => 0);
 my ($freed, $rescued, $kept) = (0, 0, 0);
+my @big;
+sub json_text { my $t = shift; $t =~ s/(["\\])/\\$1/g; $t =~ s/([\x00-\x1f])/sprintf('\\u%04x', ord $1)/ge; return qq("$t") }
 sub finish {
   my $at = int(Time::HiRes::time() * 1000);
-  my $json = sprintf('{"at": %d, "freed": %d, "removed": {"browser": %d, "temp": %d, "scratch": %d, "worktrees": %d}, "rescued": %d, "kept": %d}',
-    $at, $freed, @removed{qw(browser temp scratch worktrees)}, $rescued, $kept);
+  my $bigs = join(', ', map { sprintf('{"path": %s, "bytes": %d, "at": %d}', json_text($_->[0]), $_->[1], $_->[2] * 1000) } @big);
+  my $json = sprintf('{"at": %d, "freed": %d, "removed": {"browser": %d, "temp": %d, "scratch": %d, "worktrees": %d, "packages": %d}, "rescued": %d, "kept": %d, "big": [%s]}',
+    $at, $freed, @removed{qw(browser temp scratch worktrees packages)}, $rescued, $kept, $bigs);
   if (open my $fh, '>', "$mem/tidy/last.json.new") { print $fh "$json\n"; close $fh; rename "$mem/tidy/last.json.new", "$mem/tidy/last.json" }
 }
 # Without knowing what runs, nothing is safe to remove
@@ -392,17 +400,46 @@ for my $root (@scratchRoots) {
   }
 }
 
-# ---- D. Worktrees whose branch is merged, with nothing unsaved in them, unchanged for IDLE minutes, and their branches ----
+# ---- D. Worktrees whose branch is merged, with nothing unsaved in them, unchanged for IDLE minutes, and their branches; and in
+# a worktree kept, once it is unchanged for PACKAGES days, its packages and build folder ----
+# On 28 Nov 81 worktrees held 167 GB: 18 merged ones were kept only for a build's type cache (tsconfig.tsbuildinfo), Next's
+# next-env.d.ts, Vercel's link or a .env copied from the main checkout, and every kept one still held its 1 to 3 GB of packages
 stage('looking for merged worktrees');
 my %REBUILT = map { $_ => 1 } qw(node_modules .venv venv __pycache__ dist build .next .turbo .cache target out coverage .pytest_cache
-  .mypy_cache .ruff_cache .parcel-cache .svelte-kit .DS_Store);
+  .mypy_cache .ruff_cache .parcel-cache .svelte-kit .DS_Store .vercel next-env.d.ts);
+my @DROPPED = qw(node_modules .next);
+# An ignored path a build or an install makes again, or a settings file the same as the main checkout's
 sub rebuildable {
-  my @parts = grep { length } split m{/}, shift;
+  my ($path, $wt, $main) = @_;
+  my @parts = grep { length } split m{/}, $path;
   return 0 unless @parts;
   return 1 if grep { $REBUILT{$_} } @parts;
-  return $parts[-1] =~ /\.pyc$/ ? 1 : 0;
+  return 1 if $parts[-1] =~ /\.(?:pyc|tsbuildinfo)$/;
+  return 0 unless defined $main && $parts[-1] =~ /^\.env/;
+  my ($mine, $theirs) = ("$wt/$path", "$main/$path");
+  return (-f $mine && !-l $mine && -f $theirs && compare($mine, $theirs) == 0) ? 1 : 0;
 }
 sub git_ok { my (undef, $code) = capture(0, 'git', '-C', @_); return $code == 0 }
+# Merged: the branch's head is in a base, or each of its commits has the same change there, as a squash merge leaves it
+sub merged {
+  my ($main, $head, $bases) = @_;
+  return 1 if grep { git_ok($main, 'merge-base', '--is-ancestor', $head, $_) } @$bases;
+  for my $base (@$bases) {
+    my ($said, $code) = capture(0, 'git', '-C', $main, 'cherry', $base, $head);
+    return 1 if $code == 0 && $said =~ /\S/ && $said !~ /^\+/m;
+  }
+  return 0;
+}
+# A kept worktree's packages and build folder, once nothing else in it changed for PACKAGES days: an install brings them back
+sub drop_packages {
+  my ($wt, $real) = @_;
+  my @there = grep { -d "$wt/$_" && !-l "$wt/$_" && git_ok($wt, 'check-ignore', '-q', $_) } @DROPPED;
+  return unless @there;
+  my $since = $t0 - $PACKAGES * 86400;
+  my $l = look($real, $since, +{ map { ($_ => 1) } @DROPPED, '.git' });
+  return kept("$wt/$there[0]", 'its worktree changed within ' . ($PACKAGES == 1 ? '1 day' : "$PACKAGES days")) if $l->{newest} > $since;
+  take('packages', 'packages', "$wt/$_") for @there;
+}
 my $rHOME = length $HOME ? real_or($HOME) : '';
 sub consider_tree {
   my ($main, $t, $bases) = @_;
@@ -414,15 +451,21 @@ sub consider_tree {
   return kept($wt, 'it is locked') if exists $t->{locked};
   return kept($wt, 'it has no branch') unless $t->{branch} && $t->{HEAD};
   (my $branch = $t->{branch}) =~ s{^refs/heads/}{};
-  return kept($wt, 'its branch is not merged') unless grep { git_ok($main, 'merge-base', '--is-ancestor', $t->{HEAD}, $_) } @$bases;
   my @forms = forms($wt, $real);
   return kept($wt, 'it is your own pictures, films or desktop') if guarded(@forms);
   if (my $why = in_use(@forms)) { return kept($wt, $why) }
-  my ($status, $code) = capture(0, 'git', '-C', $wt, 'status', '--porcelain', '--untracked-files=all');
-  return kept($wt, 'it has changes not committed') if $code != 0 || $status =~ /\S/;
-  my ($ignored, $icode) = capture(0, 'git', '-C', $wt, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory');
-  return kept($wt, 'its ignored files could not be listed') if $icode != 0;
-  for (split /\0/, $ignored) { return kept($wt, 'it has ignored files that may be unsaved') if length && !rebuildable($_) }
+  my $why = '';
+  if (!merged($main, $t->{HEAD}, $bases)) { $why = 'its branch is not merged' }
+  else {
+    my ($status, $code) = capture(0, 'git', '-C', $wt, 'status', '--porcelain', '--untracked-files=all');
+    if ($code != 0 || $status =~ /\S/) { $why = 'it has changes not committed' }
+    else {
+      my ($ignored, $icode) = capture(0, 'git', '-C', $wt, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory');
+      return kept($wt, 'its ignored files could not be listed') if $icode != 0;
+      for (split /\0/, $ignored) { if (length && !rebuildable($_, $wt, $main)) { $why = 'it has ignored files that may be unsaved'; last } }
+    }
+  }
+  if ($why) { kept($wt, $why); drop_packages($wt, $real); return 0 }
   my $since = $t0 - $IDLE * 60;
   my $l = look($real, $since, { node_modules => 1, '.git' => 1 });
   return kept($wt, "changed within $IDLE minutes") if $l->{newest} > $since;
@@ -487,6 +530,25 @@ if ($deep) {
   }
 }
 
+# ---- F. The biggest files of the person's made or grown in the last 7 days, two folders deep: only looked at, never removed ----
+stage('looking for big new files');
+if (length $HOME) {
+  my $week = $t0 - 7 * 86400;
+  my @todo = map { ["$HOME/$_", 0] } qw(Desktop Movies Downloads);
+  while (defined(my $at = shift @todo)) {
+    my ($d, $depth) = @$at;
+    next if -l $d;
+    for my $e (entries($d)) {
+      next if $e =~ /^\./;
+      my $p = "$d/$e";
+      my @st = lstat $p or next;
+      if (-d _) { push @todo, [$p, $depth + 1] if $depth < 1 && $e !~ /\.(?:app|photoslibrary|bundle)$/; next }
+      push @big, [$p, $st[12] * 512, $st[9]] if -f _ && $st[12] * 512 >= $BIG && $st[9] > $week;
+    }
+  }
+  @big = (sort { $b->[1] <=> $a->[1] } @big)[0 .. ($#big < 2 ? $#big : 2)];
+}
+
 sub size_words {
   my $b = shift;
   return sprintf('%.1f GB', $b / 2**30) if $b >= 2**30;
@@ -496,6 +558,7 @@ sub size_words {
 my $n = sub { my ($c, $one, $many) = @_; return "$c " . ($c == 1 ? $one : $many) };
 print 'freed ', size_words($freed), ': removed ', join(', ',
   $n->($removed{browser}, 'browser leftover', 'browser leftovers'), $n->($removed{temp}, 'temp leftover', 'temp leftovers'),
-  $n->($removed{scratch}, 'scratch folder', 'scratch folders'), $n->($removed{worktrees}, 'worktree', 'worktrees')),
+  $n->($removed{scratch}, 'scratch folder', 'scratch folders'), $n->($removed{worktrees}, 'worktree', 'worktrees'),
+  $n->($removed{packages}, 'packages folder', 'packages folders')),
   ', saved ', $n->($rescued, 'file results name', 'files results name'), ', kept ', $kept, "\n";
 finish();

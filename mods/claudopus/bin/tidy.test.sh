@@ -70,18 +70,32 @@ old "$s1/scratchpad/old-task" "$s1/scratchpad/ct-task" "$S/-p/s0"
 echo other > "$mem/reports/r1/files/pic one.png"
 printf 'See the picture `%s`.\nAgain: %s\n' "$s1/scratchpad/old-task/pic one.png" "$s1/scratchpad/old-task/pic one.png" > "$mem/reports/r1/report.md"
 
-# D. Worktrees: merged and clean, merged with only node_modules ignored, merged with an untracked file, merged with an ignored
-# .env, unmerged, and one a running command works in
+# D. Worktrees: merged and clean, merged with only node_modules ignored, merged with only what a build makes and a .env the same
+# as the main checkout's, squashed onto main, merged with an untracked file, merged with its own ignored .env, unmerged, one a
+# running command works in, and two unmerged ones with packages: one left alone for days, one changed today
 git init -q -b main "$R"
-printf 'node_modules/\n.env\n' > "$R/.gitignore"
+printf 'node_modules/\n.next/\n.env\n.vercel\n*.tsbuildinfo\nnext-env.d.ts\n' > "$R/.gitignore"
 echo a > "$R/a"
 git -C "$R" add . && git -C "$R" commit -qm one
-for b in clean nm untracked env busy unmerged; do git -C "$R" worktree add -q -b "$b" "$W/$b" main; done
-echo u > "$W/unmerged/u" && git -C "$W/unmerged" add u && git -C "$W/unmerged" commit -qm u
+echo KEY=main > "$R/.env"
+for b in clean nm built squashed untracked env busy unmerged idle fresh; do git -C "$R" worktree add -q -b "$b" "$W/$b" main; done
+for b in unmerged squashed idle fresh; do echo "$b" > "$W/$b/$b" && git -C "$W/$b" add "$b" && git -C "$W/$b" commit -qm "$b"; done
+git -C "$R" cherry-pick squashed >/dev/null
 mkdir "$W/nm/node_modules" && echo x > "$W/nm/node_modules/x.js"
+mkdir "$W/built/.vercel" && echo '{}' > "$W/built/.vercel/project.json" && echo x > "$W/built/tsconfig.tsbuildinfo" && echo x > "$W/built/next-env.d.ts" && cp "$R/.env" "$W/built/.env"
 echo x > "$W/untracked/new.txt"
 echo KEY=1 > "$W/env/.env"
+for b in idle fresh; do mkdir -p "$W/$b/node_modules/p" "$W/$b/.next" && echo x > "$W/$b/node_modules/p/x.js" && echo x > "$W/$b/.next/b"; done
 old "$W"
+echo y >> "$W/fresh/fresh"
+
+# F. The person's big new files: a new one on the desktop, an old one in Downloads, a small new one in a folder in Movies
+mkdir -p "$HOME/Desktop" "$HOME/Downloads" "$HOME/Movies/clips"
+big=$HOME/Desktop/'Screen "Recording".mov'
+head -c 300000 /dev/zero > "$big"
+head -c 300000 /dev/zero > "$HOME/Downloads/old.zip" && old "$HOME/Downloads/old.zip"
+echo x > "$HOME/Movies/clips/small.mov"
+export TIDY_BIG=100000
 
 run
 cp "$tmp/out" "$tmp/out1"
@@ -98,10 +112,14 @@ copy="$mem/reports/r1/files/pic one-2.png"
 check "a picture a result names is copied beside the result, which now names the copy" '[ "$(cat "$copy")" = pic ] && [ "$(cat "$mem/reports/r1/files/pic one.png")" = other ] && [ "$(cat "$mem/reports/r1/report.md")" = "$(printf "See the picture \`%s\`.\nAgain: %s" "$copy" "$copy")" ]'
 check "a folder holding CT data is kept" '[ -e "$s1/scratchpad/ct-task/scan.nii.gz" ] && [[ "$out" == *"kept $s1/scratchpad/ct-task: it holds CT data"* ]]'
 check "a merged clean worktree goes with its branch, and one with only node_modules ignored" '[ ! -e "$W/clean" ] && [ ! -e "$W/nm" ] && ! git -C "$R" rev-parse -q --verify refs/heads/clean >/dev/null && ! git -C "$R" rev-parse -q --verify refs/heads/nm >/dev/null'
-check "worktrees with an untracked file, an ignored .env, an unmerged branch, or a command in them are kept" '[ -e "$W/untracked/new.txt" ] && [ -e "$W/env/.env" ] && [ -e "$W/unmerged/u" ] && [ -d "$W/busy" ] && [[ "$out" == *"$Wr/untracked: it has changes not committed"* && "$out" == *"$Wr/env: it has ignored files that may be unsaved"* && "$out" == *"$Wr/unmerged: its branch is not merged"* && "$out" == *"$Wr/busy: a running command works in it"* ]] && git -C "$R" rev-parse -q --verify refs/heads/busy >/dev/null'
+check "a merged worktree holding only what a build makes and the main checkout's .env goes, and one squashed onto main" '[ ! -e "$W/built" ] && [ ! -e "$W/squashed" ] && ! git -C "$R" rev-parse -q --verify refs/heads/squashed >/dev/null && [ "$(cat "$R/.env")" = KEY=main ]'
+check "a kept worktree left alone for days loses its packages and build folder, and keeps the rest; one changed today keeps them" '[ ! -e "$W/idle/node_modules" ] && [ ! -e "$W/idle/.next" ] && [ -e "$W/idle/idle" ] && [ -e "$W/fresh/node_modules/p/x.js" ] && [ -e "$W/fresh/.next/b" ] && [[ "$out" == *"removed packages $Wr/idle/node_modules"* && "$out" == *"kept $Wr/fresh/node_modules: its worktree changed within 2 days"* ]]'
+bigJSON=$(printf '%s' "$big" | sed 's/"/\\"/g')
+check "the biggest new file of the person is named in last.json, and nothing of theirs is removed" 'grep -Fq "\"big\": [{\"path\": \"$bigJSON\", \"bytes\": " "$mem/tidy/last.json" && ! grep -Eq "old\.zip|small\.mov" "$mem/tidy/last.json" && [ -e "$HOME/Downloads/old.zip" ] && [ -e "$big" ]'
+check "worktrees with an untracked file, an ignored .env, an unmerged branch, or a command in them are kept" '[ -e "$W/untracked/new.txt" ] && [ -e "$W/env/.env" ] && [ -e "$W/unmerged/unmerged" ] && [ -d "$W/busy" ] && [[ "$out" == *"$Wr/untracked: it has changes not committed"* && "$out" == *"$Wr/env: it has ignored files that may be unsaved"* && "$out" == *"$Wr/unmerged: its branch is not merged"* && "$out" == *"$Wr/busy: a running command works in it"* ]] && git -C "$R" rev-parse -q --verify refs/heads/busy >/dev/null'
 check "the main checkout is untouched" '[ "$(cat "$R/a")" = a ] && [ -z "$(git -C "$R" status --porcelain)" ]'
-check "last.json says what came out" 'grep -Eq "^\{\"at\": [0-9]{13}, \"freed\": [1-9][0-9]*, \"removed\": \{\"browser\": 3, \"temp\": 2, \"scratch\": 2, \"worktrees\": 2\}, \"rescued\": 1, \"kept\": [1-9][0-9]*\}$" "$mem/tidy/last.json"'
-check "the last line says what came out" '[[ "$(tail -1 "$tmp/out")" == "freed "*": removed 3 browser leftovers, 2 temp leftovers, 2 scratch folders, 2 worktrees, saved 1 file results name, kept "* ]]'
+check "last.json says what came out" 'grep -Eq "^\{\"at\": [0-9]{13}, \"freed\": [1-9][0-9]*, \"removed\": \{\"browser\": 3, \"temp\": 2, \"scratch\": 2, \"worktrees\": 4, \"packages\": 2\}, \"rescued\": 1, \"kept\": [1-9][0-9]*, \"big\": \[.*\]\}$" "$mem/tidy/last.json"'
+check "the last line says what came out" '[[ "$(tail -1 "$tmp/out")" == "freed "*": removed 3 browser leftovers, 2 temp leftovers, 2 scratch folders, 4 worktrees, 2 packages folders, saved 1 file results name, kept "* ]]'
 
 # A run within TIDY_EVERY of the last does nothing, one with --now does its work
 mkdir "$T/playwright_chromiumdev_profile-old2" && old "$T/playwright_chromiumdev_profile-old2"
