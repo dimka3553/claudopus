@@ -173,10 +173,17 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
     const { Text } = $.ui.resolve(e)
     return <Text>the engine's own</Text>
   })
-  // On a Windows PC a path from a drive (C:/Users/sam/...) is whole; the kit on a Mac or Linux takes it as under the folder it runs in
-  const inProfile = <T extends { path: string }>(e: T): T => (options.windows ? { ...e, path: e.path.replace(/^.*?\/(?=[A-Za-z]:\/)/, '') } : e)
+  // Each path as the mod asked for it, on whichever system the kit runs. The kit on Windows gives it with backslashes and from a
+  // drive: /home/sam/x comes as D:\home\sam\x, and the plugin's own files as D:\a\...\mods\claudopus\x, which stay whole. On a
+  // Mac or Linux a Windows PC's path from a drive (C:/Users/sam/...) comes under the folder the kit runs in
+  const inProfile = <T extends { path: string }>($: { plugin: { root: string } }, e: T): T => {
+    const path = /^[A-Za-z]:\\/.test(e.path) ? e.path.replace(/\\/g, '/') : e.path
+    if (options.windows) return { ...e, path: path.replace(/^.*?\/(?=[A-Za-z]:\/)/, '').replace(/^[a-z](?=:)/, d => d.toUpperCase()) }
+    const top = $.plugin.root.replace(/\\/g, '/').replace(/\/mods\/claudopus\/?$/, '').toLowerCase()
+    return { ...e, path: /^[A-Za-z]:\//.test(path) && !path.toLowerCase().startsWith(top) ? path.slice(2) : path }
+  }
   on('fs.read', (_, raw) => {
-    const e = inProfile(raw)
+    const e = inProfile(_, raw)
     // A picture's bytes, as base64, where the test gives them
     const bytes = options.bytes?.(e.path)
     if (bytes !== undefined) return { value: { base64: bytes } as never }
@@ -202,20 +209,20 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
     return { value: text }
   })
   on('fs.write', (_, raw) => {
-    const e = inProfile(raw)
+    const e = inProfile(_, raw)
     files.set(e.path, e.text)
     return { value: undefined }
   })
-  on('fs.exists', (_, e) => ({ value: files.has(inProfile(e).path) }))
+  on('fs.exists', (_, e) => ({ value: files.has(inProfile(_, e).path) }))
   // What a folder holds: its files, and the folders its deeper files are in
-  on('fs.list', (_, raw) => { const e = inProfile(raw); return (events.push(`list ${e.path}`), {
+  on('fs.list', (_, raw) => { const e = inProfile(_, raw); return (events.push(`list ${e.path}`), {
     value: [...new Set([...files.keys()].filter(path => path.startsWith(`${e.path}/`)).map(path => path.slice(e.path.length + 1)))]
       // A file's time is 0 unless the test lays it as mtime:<path>
       .map(rest => ({ name: rest.split('/')[0] ?? rest, kind: rest.includes('/') ? 'dir' : 'file', size: 1, mtimeMs: Number(files.get(`mtime:${e.path}/${rest}`) ?? 0), isLink: false }))
       .filter((one, i, all) => all.findIndex(other => other.name === one.name) === i) as never,
   }) })
   on('fs.stat', (_, raw) => {
-    const e = inProfile(raw)
+    const e = inProfile(_, raw)
     const kind = files.has(e.path) ? 'file' : [...files.keys()].some(path => path.startsWith(`${e.path}/`)) ? 'dir' : ''
     if (!kind) throw new Error(`ENOENT ${e.path}`)
     return { value: { kind, size: 1, mtimeMs: Number(files.get(`mtime:${e.path}`) ?? 0), isLink: false } as never }

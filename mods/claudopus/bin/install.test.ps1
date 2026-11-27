@@ -15,9 +15,10 @@ $tmp = Join-Path ([IO.Path]::GetTempPath()) ("claudopus-install-test-" + [guid]:
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $fails = 0
 $version = ([IO.File]::ReadAllText((Join-Path $repo 'mods\claudopus\.claude-plugin\plugin.json')) | ConvertFrom-Json).version
-$shells = @('powershell') + @(if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' })
+# Each by its own full path, as the homes' PATH holds only Git's and the system's folders
+$shells = @((Get-Command powershell -CommandType Application | Select-Object -First 1).Source) + @(Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.Source })
 $system = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
-$git = Split-Path (Get-Command git -CommandType Application).Source
+$git = Split-Path (Get-Command git -CommandType Application | Select-Object -First 1).Source
 
 function Check([string]$what, [scriptblock]$test) {
   $ok = $false; try { $ok = [bool](& $test) } catch { }
@@ -63,14 +64,14 @@ function Cache($h, $v) { (Settings $h) -match "`"subagentPromptCacheTtl`"\s*:\s*
 try {
   foreach ($shell in $shells) {
     # A. A home with nothing in it: installed, on, and the version said
-    $h = Home "empty-$shell"; $r = Install $h $shell
-    Check "$shell - a fresh home installs and exits 0" { $r.Rc -eq 0 }
-    Check "$shell - it is on in settings.json" { IsOn $h }
-    Check "$shell - the marketplace is known to Claude Code" { (Settings $h) -match '"claudopus"' }
-    Check "$shell - Claude Code's record has it" { [IO.File]::ReadAllText((Join-Path $h.Home '.claude\plugins\installed_plugins.json')) -match "claudopus[\\/]+claudopus[\\/]+$([regex]::Escape($version))" }
-    Check "$shell - it says the version and how to start" { $r.Out -match "Claudopus $([regex]::Escape($version)) is installed and on" -and $r.Out -match '/reload-plugins' }
-    Check "$shell - it runs to its last line" { $r.Out -match '/claudopus opens it again' }
-    Check "$shell - tasks keep their prompt cache an hour, and it says so" { (Cache $h '1h') -and $r.Out -match 'prompt cache for an hour' }
+    $name = [IO.Path]::GetFileNameWithoutExtension($shell); $h = Home "empty-$name"; $r = Install $h $shell
+    Check "$name - a fresh home installs and exits 0" { $r.Rc -eq 0 }
+    Check "$name - it is on in settings.json" { IsOn $h }
+    Check "$name - the marketplace is known to Claude Code" { (Settings $h) -match '"claudopus"' }
+    Check "$name - Claude Code's record has it" { [IO.File]::ReadAllText((Join-Path $h.Home '.claude\plugins\installed_plugins.json')) -match "claudopus[\\/]+claudopus[\\/]+$([regex]::Escape($version))" }
+    Check "$name - it says the version and how to start" { $r.Out -match "Claudopus $([regex]::Escape($version)) is installed and on" -and $r.Out -match '/reload-plugins' }
+    Check "$name - it runs to its last line" { $r.Out -match '/claudopus opens it again' }
+    Check "$name - tasks keep their prompt cache an hour, and it says so" { (Cache $h '1h') -and $r.Out -match 'prompt cache for an hour' }
   }
 
   # B. A settings.json with the person's own settings, another plugin, and Claudopus switched off: all kept byte for byte, Claudopus
