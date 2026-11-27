@@ -343,7 +343,8 @@ const isReplaced = async ($: EngineInterface) => {
 }
 // A timer of this load: it stops for good the first time it fires after a newer load took charge
 const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
-  const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
+  const timed = timedAs(`every ${ms} ${String(fn).slice(6, 46)}`, fn)
+  const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : timed())))
   return timer
 }
 // ---- Never holding Claude's helper ----

@@ -9,6 +9,26 @@ const RECORD_SWITCH = 'record-panel.on'
 const RECORD_FRESH = 60_000
 let recording: { path: string; until: number; lines: string[]; written: number; started: number } | undefined
 let recordLooked = 0
+// While recording, each hook's and each timer's runs are counted and timed by the wall clock, its waits for the engine in it
+// (28 Nov: with six helpers at work the mod's thread used 30% of a core, and no sampling of the app told which of its hooks)
+const hookTimes = new Map<string, [number, number]>()
+const timedAs = <F extends (...args: never[]) => unknown>(name: string, fn: F) =>
+  ((...args: never[]) => {
+    if (!recording) return fn(...args)
+    const from = performance.now()
+    const done = () => {
+      const one = hookTimes.get(name) ?? [0, 0]
+      hookTimes.set(name, [one[0] + 1, one[1] + performance.now() - from])
+    }
+    let r: unknown
+    try {
+      r = fn(...args)
+    } catch (err) {
+      done()
+      throw err
+    }
+    return r instanceof Promise ? r.finally(done) : (done(), r)
+  }) as F
 let typedCount = new Map<string, number>()
 // Only the shape of a key the mod draws (letters, digits and - _ : . |, at most 96): anything else is kept as its length
 const keyShown = (key: unknown) => (typeof key === 'string' && /^[\w\-:.|]{1,96}$/.test(key) ? key : typeof key === 'string' ? `<${key.length}>` : undefined)
@@ -17,6 +37,9 @@ const isRecording = async ($: EngineInterface) => {
   const at = await $.clock.now()
   if (recording) {
     if (at < recording.until) return true
+    // With the recording's last line: how often each hook and each timer of the mod ran while it recorded, and for how long in all
+    recording.lines.push(JSON.stringify({ t: at - recording.started, ev: 'hooks', times: [...hookTimes].map(([name, [n, ms]]) => [name, n, Math.round(ms)]).sort((a, b) => Number(b[2]) - Number(a[2])) }))
+    hookTimes.clear()
     await recordFlush($)
     recording = undefined
     return false

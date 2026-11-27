@@ -260,7 +260,8 @@ for (const stop of [...whenLeft]) stop()
 return isLeft
 }
 const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
-const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
+const timed = timedAs(`every ${ms} ${String(fn).slice(6, 46)}`, fn)
+const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : timed())))
 return timer
 }
 const HOLD_LOOK = 250
@@ -634,12 +635,32 @@ const RECORD_SWITCH = 'record-panel.on'
 const RECORD_FRESH = 60_000
 let recording: { path: string; until: number; lines: string[]; written: number; started: number } | undefined
 let recordLooked = 0
+const hookTimes = new Map<string, [number, number]>()
+const timedAs = <F extends (...args: never[]) => unknown>(name: string, fn: F) =>
+((...args: never[]) => {
+if (!recording) return fn(...args)
+const from = performance.now()
+const done = () => {
+const one = hookTimes.get(name) ?? [0, 0]
+hookTimes.set(name, [one[0] + 1, one[1] + performance.now() - from])
+}
+let r: unknown
+try {
+r = fn(...args)
+} catch (err) {
+done()
+throw err
+}
+return r instanceof Promise ? r.finally(done) : (done(), r)
+}) as F
 let typedCount = new Map<string, number>()
 const keyShown = (key: unknown) => (typeof key === 'string' && /^[\w\-:.|]{1,96}$/.test(key) ? key : typeof key === 'string' ? `<${key.length}>` : undefined)
 const isRecording = async ($: EngineInterface) => {
 const at = await $.clock.now()
 if (recording) {
 if (at < recording.until) return true
+recording.lines.push(JSON.stringify({ t: at - recording.started, ev: 'hooks', times: [...hookTimes].map(([name, [n, ms]]) => [name, n, Math.round(ms)]).sort((a, b) => Number(b[2]) - Number(a[2])) }))
+hookTimes.clear()
 await recordFlush($)
 recording = undefined
 return false
@@ -17776,7 +17797,11 @@ return (
 }
 
 
-export const register: Register = on => {
+export const register: Register = plain => {
+const on = ((name: string, ...rest: unknown[]) => {
+const fn = rest.pop() as (...args: never[]) => unknown
+return (plain as unknown as (...all: unknown[]) => unknown)(name, ...rest, timedAs(`${name} ${typeof rest[0] === 'object' ? JSON.stringify(rest[0]) : ''}`, fn))
+}) as unknown as On
 recorderHooks(on)
 chatHooks(on)
 promptHooks(on)
