@@ -125,8 +125,9 @@ const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs
+    // The command as written and unquoted, and each script it runs; one that only reads passes (reads.ts)
     const command = String(input.command ?? '')
+    if (readsOnly(command, { home: dir.replace(/\/\.claude\/claudopus$/, ''), folder: '', memory: dir }, shellWords, commandAt)) return ''
     const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
@@ -171,7 +172,7 @@ const touchesKeyring = (e: { tool: string }) => {
 // work's own rules, and its panel's. They are its rules for as long as it runs: a change made since reaches the next task
 const workRules = async ($: EngineInterface) => {
   const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim()
-  const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
+  const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
 // Claudopus's own checkout, when a command would change what is checked out there (changesOf), or nothing. Its own checkout is the
@@ -806,7 +807,9 @@ const workHooks = (on: On) => {
     // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
     const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}` } : isBackground ? { ...e, background: true } : e)
+    // and what was set aside before in the area its words are about, with why (progress.tsx)
+    const aside = isTold ? await asideTold($, e.description ?? '', e.prompt ?? '').catch(err => (void log($, `set-aside work not told: ${String(err)}`), '')) : ''
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}${aside ? `\n\n${aside}` : ''}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A
@@ -825,6 +828,8 @@ const workHooks = (on: On) => {
     // the app's close cut off names that task's carry file, and takes its place
     const carried = isOwn && !e.resume ? carriedFrom(e.prompt ?? '') : ''
     if (isOwn && !e.resume) await saveBrief($, id, e.prompt ?? '').catch(err => log($, `instructions of ${id} not kept: ${String(err)}`))
+    // A task the chat starts goes into the queue of progress/, which sorts it into its area while it works (progress.tsx)
+    if (isOwn && !e.resume) queueSoon($, { kind: 'start', task: id, title: e.description ?? '', text: `${e.description ?? ''}\n\n${e.prompt ?? ''}` })
     await changeTodos($, all => {
       const old = all.find(one => one.id === id)
       const was = carried ? all.find(one => one.id === carried && isInterrupted(one) && !one.closedAt) : undefined

@@ -78,7 +78,9 @@ const askNeed = ($: EngineInterface, card: Todo, surface: string, now: number, a
     ...base,
     kind: 'question',
     buttons: [
-      ...(ask.choices ?? []).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
+      // (and Set aside, after the task's own: the person drops it and it is kept as a data point, progress.tsx; a connector's
+      // question, answered only by the person's own settings, has none)
+      ...(ask.rule ? (ask.choices ?? []) : withSetAside(ask.choices ?? [])).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
       // The last answer opens the box above the chat for this card, and closes it again
       ...(inBar ? [isReplyOpen(card, ask) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
     ],

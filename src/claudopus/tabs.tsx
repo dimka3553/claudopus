@@ -55,6 +55,11 @@ const tabHooks = (on: On) => {
     return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
+  // Progress, in a pane of its own: the goals' rings, the areas, and an area opened; drawn again when the progress folder changes
+  on('ui.render', { component: 'Pane', requestId: PROGRESS_PANE }, async ($, e) => progressTab($, uiOf($, e), Math.max(300, Math.floor(e.props.bodyColumns * 7.4 - 32)), e.props.scroll.bodyRows)).catch(($, e, next) =>
+    next.called ? next(e) : tabFailed($, e, next.error),
+  )
+
   // Stats, in a pane of its own: drawn at once from the figures last added up, while Claude's records are looked at again at most once a minute
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)

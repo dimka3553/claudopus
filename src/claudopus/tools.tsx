@@ -4,33 +4,61 @@
 const RECALL_LINES = 40
 const RECALL_PER_FILE = 6
 const recallRank = (file: string) =>
-  file.startsWith('streams/') ? (file.endsWith('.log.md') ? 1 : 0)
+  file.startsWith('progress/') ? (file.endsWith('.json') ? -2 : 3)
+  : file.startsWith('streams/') ? (/\.log(?:\.\d+)?\.md$/.test(file) ? 1 : 0)
   : file.startsWith('reports/') ? 2
   : file.startsWith('words/') || file.startsWith('asks/') ? 3
   : file.startsWith('work/') ? 5
   : file.startsWith('notes/') ? 6
   : 4
 
+// The files recall searches for one area or topic, as paths inside the memory folder (a folder's ends with /); none when nothing
+// is named so
+const recallWithin = async ($: EngineInterface, named: string) => {
+  const key = slug(await topicNamed($, named))
+  const topic = (await readIndex($)).find(one => slug(one.name) === key)
+  const areas = (await readAreas($)).filter(one => one.id === key || slug(one.name) === key || one.topics?.some(name => slug(name) === key))
+  const topics = [...new Set([...(topic ? [topic.name] : []), ...areas.flatMap(one => one.topics ?? [])].map(slug))]
+  const reports = new Set<string>()
+  for (const area of areas) for (const entry of await readEntries($, area.id)) if (entry.report) reports.add(entry.report)
+  return [...topics.flatMap(one => [`streams/${one}.md:`, `streams/${one}.log.`]), ...areas.flatMap(one => [`progress/areas/${one.id}.said.md:`, `progress/areas/${one.id}.json:`]), ...[...reports].map(id => `reports/${id}/`)]
+}
+// The entries of Progress that match, as lines of their area's file: first of all that recall gives
+const progressLines = async ($: EngineInterface, within: string[] | undefined, holds: (line: string) => boolean) => {
+  const lines: string[] = []
+  for (const area of await readAreas($)) {
+    const file = `${dir}/progress/areas/${area.id}.json`
+    if (within && !within.includes(`progress/areas/${area.id}.json:`)) continue
+    for (const [n, e] of (await readEntries($, area.id)).entries()) {
+      const line = `${file}:${n + 1}:${area.name} · ${e.at.slice(0, 10)} ${e.title}${e.outcome ? `: ${e.outcome}` : ''}${e.kind === 'aside' ? ` (set aside: ${e.reason})` : ''}${e.report ? ` · reports/${e.report}/report.md` : ''}`
+      if (holds(line)) lines.push(line)
+    }
+  }
+  return lines
+}
+
 const toolHooks = (on: On) => {
 
   on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
     const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string; add?: string }
     if (!input.name?.trim()) return { result: 'A topic needs a name.' }
+    // (a topic the tidy renamed is found by its old name)
+    const name = await topicNamed($, input.name.trim())
     // A test's or a scratch folder's topic is kept out of the index every chat is given
-    const known = (await readIndex($)).find(one => slug(one.name) === slug(input.name ?? ''))
+    const known = (await readIndex($)).find(one => slug(one.name) === slug(name))
     if (isScratchTopic(input.repo?.trim() || known?.repo || '')) return { result: named(`Not recorded: ${input.repo?.trim() || known?.repo} is a test or scratch folder, and topics are for {name}'s own work.`) }
     const brief = input.brief?.trim() ?? ''
     const added = input.add?.trim() ?? ''
-    const isLong = brief.length > PAGE_CHARS
-    const saved = await saveStream($, input.name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary })
+    const isLong = withoutLatest(brief).length > PAGE_CHARS
+    const saved = await saveStream($, name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary })
     // The subject a piece of work recorded names the subject of its report
     if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
     const page = pageOf(saved.name)
     if (added) {
       const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId)
-      await appendTo($, historyOf(saved.name), historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
+      await addHistory($, saved.name, historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
     }
-    if (brief && !isLong) await $.fs.write(page, `${hideKeys(brief)}\n`)
+    if (brief && !isLong) await writePage($, saved.name, hideKeys(brief))
     // A page grown past its limit by hand is made short in the background, the whole of it kept in the history
     void shortenPage($, saved.name).catch(err => log($, `page of ${saved.name} not made short: ${String(err)}`))
     const said = [
@@ -42,17 +70,31 @@ const toolHooks = (on: On) => {
   })
 
   on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
-    const query = (e as unknown as { query?: string }).query?.trim() ?? ''
+    const input = e as unknown as { query?: string; area?: string }
+    const query = input.query?.trim() ?? ''
     if (!query) return { result: 'Nothing to search for.' }
-    const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(Boolean)
-    // The phrase as given; when nothing holds it whole, the lines that hold each of its words, in any order
-    const words = [...new Set(query.toLowerCase().split(/\s+/).filter(one => one.length > 1))]
-    let found = await grep(query)
-    const isLoose = !found.length && words.length > 1
+    // Within one area or topic: its topic's page and histories, its entries' results and what the person said of it
+    const within = input.area?.trim() ? await recallWithin($, input.area.trim()) : undefined
+    if (within && !within.length) return { result: `No area or topic is named "${input.area}". The areas: ${(await readAreas($)).map(one => one.name).join(', ') || 'none yet'}.` }
+    const isWithin = (line: string) => !within || within.some(one => line.startsWith(`${dir}/${one}`))
+    const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
+    // The phrase as given; when nothing holds it whole, the lines that hold each of its words in any order, by their stems
+    const words = recallStems(query)
+    const said = (line: string) => line.slice(line.indexOf(':', dir.length + 1))
+    let found = [...(await progressLines($, within, line => said(line).toLowerCase().includes(query.toLowerCase()))), ...(await grep(query))]
+    const isLoose = !found.length && (words.length > 1 || words[0] !== query.toLowerCase())
     if (isLoose) {
       const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? query
-      found = (await grep(longest)).filter(line => words.every(one => line.slice(line.indexOf(':', dir.length + 1)).toLowerCase().includes(one)))
+      found = [...(await progressLines($, within, line => holdsStems(said(line), words))), ...(await grep(longest)).filter(line => holdsStems(said(line), words))]
     }
+    // A topic page's Latest block, the state as Claudopus keeps it, comes before the rest of the page
+    const latest = new Map<string, number>()
+    for (const file of new Set(found.map(line => line.slice(dir.length + 1, line.indexOf(':', dir.length + 1))).filter(file => /^streams\/[^/]+\.md$/.test(file) && !file.includes('.log.')))) {
+      const page = await readOr($, `${dir}/${file}`)
+      const block = latestIn(page)
+      if (block) latest.set(file, page.slice(0, page.indexOf(block) + block.length).split('\n').length)
+    }
+    const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
     // A result the person put away is still found, marked, so it is answered from only when they name it
     const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
     const seen = new Set<string>()
@@ -62,7 +104,7 @@ const toolHooks = (on: On) => {
       .map(line => ({ line, file: line.slice(0, line.indexOf(':')) }))
       // Topic pages first, then their histories, the results newest first, the chats' words, the rest; what a chat's helpers and
       // tools brought and the notes come last, so they never crowd out the rest
-      .sort((a, b) => recallRank(a.file) - recallRank(b.file) || (a.file.startsWith('reports/') && b.file.startsWith('reports/') ? b.file.localeCompare(a.file) : 0))
+      .sort((a, b) => rank(a.file, a.line) - rank(b.file, b.line) || (a.file.startsWith('reports/') && b.file.startsWith('reports/') ? b.file.localeCompare(a.file) : 0))
       // The same line in several files (a result handed in again, a message quoted back) is given once, from where it ranks first;
       // and no file gives more than RECALL_PER_FILE lines, so one long file never fills the answer
       .filter(({ line, file }) => {
@@ -73,7 +115,7 @@ const toolHooks = (on: On) => {
         return (perFile.get(file) ?? 0) <= RECALL_PER_FILE
       })
       .map(({ line, file }) => (archived.has(file.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
-    if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}"${words.length > 1 ? ', nor holds all its words on one line' : ''}.` }
+    if (!lines.length) return { result: `Nothing in ${dir}${within ? ` about ${input.area}` : ''} mentions "${query}"${words.length > 1 ? ', nor holds all its words on one line' : ''}.` }
     const more = lines.length > RECALL_LINES ? `\n(${lines.length - RECALL_LINES} more lines; narrow the phrase)` : ''
     const loose = isLoose ? `No line holds "${query}" as written; these hold each of its words.\n` : ''
     return { result: `${loose}Files are under ${dir}.\n${lines.slice(0, RECALL_LINES).join('\n')}${more}` }

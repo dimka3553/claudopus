@@ -2,8 +2,8 @@
 // question it is asked, what in it is hidden first, and how its answer is read. Nothing here touches the engine
 // (19 Nov: rows read "Run: score" and "Running", and nobody could tell what the command did or how it stood)
 
-// The model asked: the newest Haiku, as small and fast as a label needs
-export const NAMING_MODEL = 'claude-haiku-5-5'
+// The model asked: Sonnet, as every model call of the mod's (never Haiku)
+export const NAMING_MODEL = 'sonnet'
 
 // The kinds a command is said to be, in words at the head of its row
 export const NAMED_KINDS = ['test', 'build', 'download', 'upload', 'install', 'cloud job', 'server', 'watch', 'deploy', 'render', 'train', 'check', 'script'] as const

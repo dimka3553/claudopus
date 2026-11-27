@@ -285,6 +285,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
+    // A lock of the mod's, a folder only one chat makes (takeLock): held while its time is in it
+    if (tool === '/bin/sh' && String(rest[1]).startsWith('mkdir -p "$(dirname "$1")" && mkdir "$1"')) return files.has(`${rest[3]}/at`) ? ok('', 1) : (files.set(`${rest[3]}/at`, String(rest[4])), ok())
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
     // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
@@ -507,7 +509,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     // This Mac's own name, as its Sharing settings give it
     if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (tool === 'rm') files.delete(String(rest.at(-1)))
+    if (tool === 'rm') (files.delete(String(rest.at(-1))), files.delete(`${String(rest.at(-1))}/at`))
     // A file moved aside
     if (tool === 'mv') (files.set(String(rest.at(-1)), files.get(String(rest.at(-2))) ?? ''), files.delete(String(rest.at(-2))))
     // A copy the mod makes of a file
@@ -1471,4 +1473,62 @@ test('every button of the results list and of a result takes a new key whenever 
   await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'found' } as never)
   expect(await until(async () => ((await tab.find({ type: 'Text', text: 'Reopen the M4 chat?' })) ? undefined : true))).toBe(true)
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])
+})
+
+test("each task is sorted into an area of the work in the background: its start gives it its area while it works, its result becomes that area's entry with its own pictures and the step it delivers done, the person's words add a step; with no answer from the model the events wait and nothing changes, and a result never sets anything aside; the result's topic gets its state and the Latest block at the top of its page, and the area a log of the person's words", async ($, on) => {
+  const AREAS = `${MEMORY}/progress/areas.json`
+  const NOSE = `${MEMORY}/progress/areas/nose.json`
+  let isDown = true
+  const asked: string[] = []
+  const answers = {
+    start: { areas: ['nose'], entry: { title: 'Fix the nose' } },
+    said: { areas: ['nose'], next: { add: ['A nose that moves with the mouth'] } },
+    result: { areas: ['nose'], state: 'nose fits side faces', entry: { title: 'Fixed the nose', kind: 'milestone', outcome: 'The nose fits side faces', pictures: ['nose.png', 'other.png'] }, next: { done: ['n1'], aside: ['n1'] }, aside: { task: 'a1', reason: 'Not needed' } },
+  }
+  const { files, clock } = world(on, {
+    complete: e => {
+      if (!e.system?.includes('map of one person')) return undefined
+      asked.push(e.prompt)
+      if (isDown) return null
+      return JSON.stringify(e.prompt.includes('A task starts') ? answers.start : e.prompt.includes("A task's result") ? answers.result : answers.said)
+    },
+  })
+  files.set(AREAS, JSON.stringify({ areas: [{ id: 'nose', name: 'Nose', goal: '', aim: 'A nose that fits every face', next: [{ id: 'n1', text: 'A nose that fits side faces', state: 'open', at: '' }] }] }))
+  files.set('/private/tmp/s/scratchpad/nose.png', 'PNG')
+  const queued = () => [...files.keys()].filter(path => path.startsWith(`${MEMORY}/progress/queue/`)).map(path => String(JSON.parse(files.get(path) ?? '{}').kind)).sort()
+  const entries = () => (JSON.parse(files.get(NOSE) ?? '{"entries":[]}') as { entries: { task: string; title: string; at: string; kind: string; report: string; pictures: string[]; outcome: string; reason: string }[] }).entries
+  const steps = () => (JSON.parse(files.get(AREAS) ?? '{}') as { areas: { next: { id: string; text: string; state: string }[] }[] }).areas[0]?.next ?? []
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose on side faces', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix the nose on side faces' } as never)
+  // Each hook only queues; with no answer from the model the oldest waits for a later look, and nothing changes
+  expect(await until(async () => (queued().length === 2 ? queued() : undefined))).toEqual(['said', 'start'])
+  await clock.advance(5_000)
+  await until(async () => asked.length || undefined)
+  expect(files.has(NOSE)).toBe(false)
+  expect(queued()).toEqual(['said', 'start'])
+  expect(files.get(`${MEMORY}/progress/index.log`)).toContain('said failed: no answer, to try again')
+  // Answered, the person's words add a step, and the start gives the task its area while it works
+  isDown = false
+  await clock.advance(5 * 60_000)
+  expect(await until(async () => entries()[0])).toMatchObject({ task: 'a1', title: 'Fix the nose', kind: 'task', report: '' })
+  expect(steps().map(n => [n.text, n.state])).toEqual([['A nose that fits side faces', 'open'], ['A nose that moves with the mouth', 'open']])
+  expect(asked.at(-1)).toContain('- nose: Nose · A nose that fits every face\n  Next steps:\n    - n1 [open] A nose that fits side faces')
+  expect(queued()).toEqual([])
+  // The person's words about the area are kept in its own log of them
+  expect(files.get(`${MEMORY}/progress/areas/nose.said.md`)).toMatch(/^## \d{4}-\d\d-\d\dT[\d:.]+Z\nfix the nose on side faces\n\n$/)
+  // Its result takes that entry's place, with only its own pictures; the step it delivers is done, never set aside by it
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 'u1', agentId: 'a1', name: 'Nose work', state: 'started' } as never)
+  await $.turn.complete({ agentId: 'a1', answer: `The nose now fits side faces.\n\nThe picture: /private/tmp/s/scratchpad/nose.png\n`, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(10)
+  const folder = (await until(async () => [...files.keys()].find(path => path.startsWith(`${MEMORY}/reports/`) && path.endsWith('/meta.json'))) ?? '').replace('/meta.json', '')
+  await clock.advance(5_000)
+  expect(await until(async () => (entries()[0]?.report ? entries() : undefined))).toEqual([{ task: 'a1', title: 'Fixed the nose', at: expect.any(String), kind: 'milestone', outcome: 'The nose fits side faces', report: folder.split('/').pop(), pictures: [`${folder}/nose.png`], live: '', reason: '' }])
+  expect(asked.at(-1)).toContain('This task is already in: nose')
+  expect(steps().map(n => n.state)).toEqual(['done', 'open'])
+  // Its topic's state line is the model's, and its page starts with the Latest block of the area: the newest entries and next steps
+  expect(await until(async () => (files.get(`${MEMORY}/index.md`) ?? '').includes('- Nose work |  |  | nose fits side faces |') || undefined)).toBe(true)
+  expect(files.get(`${MEMORY}/streams/nose-work.md`)).toBe(
+    `<!-- Latest: kept by Claudopus from each result; the rest of the page is the tasks' -->\n## Latest (${entries()[0]?.at.slice(0, 10)})\n- Nose: A nose that fits every face\n  - ${entries()[0]?.at.slice(0, 10)} Fixed the nose: The nose fits side faces · ${folder}/report.md\n  - Next: A nose that moves with the mouth\n<!-- End of Latest -->\n`,
+  )
 })

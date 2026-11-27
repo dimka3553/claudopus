@@ -238,7 +238,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'recall',
       description: named("Searches the memory for a phrase: {name}'s messages word for word, what they asked, topic notes, pastes, and the results finished tasks left for {name} (reports/<id>/report.md, each dated). Returns matching lines with their files."),
-      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      inputSchema: { type: 'object', properties: { query: { type: 'string' }, area: { type: 'string', description: "Only this area of Progress or topic of the index, by its name: its topic page and history, its results and what the person said of it" } }, required: ['query'] },
       isDeferred: false,
     })
     await $.tool.register({
@@ -322,6 +322,8 @@ const chatHooks = (on: On) => {
     await loadReports($).catch(() => undefined)
     // A topic page grown past what a fresh task reads whole is made short in the background, the whole of it kept in its history
     afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
+    // and what waits in the queue of progress/ is indexed, the picture written when it is due, the history read in once (progress.tsx)
+    afterLoad($, PROGRESS_LOAD_AFTER, () => void drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`)))
     // What the person had typed into a reply box before a reload of the mod is in its box again
     await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
@@ -527,23 +529,29 @@ const chatHooks = (on: On) => {
       if (board) context.push(named(board))
     }
     let text = e.text
+    let pasted = ''
     const m = await read($, me)
 
     if (!isOff) {
       // The role goes out with the person's first message and after a compaction, each time as this chat first got it (keptRule)
       const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
+      // The topics and areas as this message finds them: what changed since the chat was last given the list is told with it
+      const index = (await readIndex($)).filter(s => !isScratchTopic(s.repo))
+      const areas = await readAreas($)
+      let changed = ''
       if (!m.isChat || m.needsContext) {
         // Each subject with the path of its brief, so a brief for work on it can name that path without a search
-        const subjects = (await readIndex($)).filter(s => !isScratchTopic(s.repo)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
-        context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
-      }
+        context.push(`${role}\n${WORDS_LINE(m.id)}\n${PROGRESS_LINE()}\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${await topicsGiven($)}`)
+      } else changed = listChanges(index, areas, await read($, listSeen))
+      if (!m.isChat || m.needsContext || changed) await update($, listSeen, () => listKeys(index, areas))
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}`)
+      context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}\nProgress: ${progressDir()}${changed ? `\nChanged since you were given the topic list: ${changed}` : ''}`)
       await update($, me, one => ({ ...one, isChat: true, needsContext: false }))
 
       if (text.length > PASTE_CHARS) {
         const stamp = new Date().toISOString().replaceAll(':', '-')
         const path = `${dir}/pastes/${stamp}.md`
+        pasted = path
         await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
         context.push(PASTED)
@@ -556,6 +564,10 @@ const chatHooks = (on: On) => {
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
+    // and on their own, without Claude's replies, so a task reads what they said whole (a paste as its start and where it is)
+    await appendTo($, `${dir}/words/${m.id}.said.md`, hideKeys(saidEntry(await $.clock.now(), how, pasted ? e.text : text, pasted))).catch(err => log($, `message not saved: ${String(err)}`))
+    // and goes into the queue of progress/, where their words may tick, add or set aside next steps (progress.tsx)
+    queueSoon($, { kind: 'said', text })
 
     return next(context.length ? { ...e, text, context } : { ...e, text })
   })

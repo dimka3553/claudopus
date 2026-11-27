@@ -282,6 +282,8 @@ const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks neve
 const SECRETS_MS = 60_000
 // The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
+// Where a chat's words are: the person's own messages on their own, and the whole conversation, too long to read whole
+const WORDS_LINE = (id: string) => `${who(true)}'s own messages in the chat, word for word, the newest last: ${dir}/words/${id}.said.md. The chat's saved words, Claude's replies too, too long to read whole (search them): ${dir}/words/${id}.md`
 const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
 const KEEP =
   "Keep every request the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."

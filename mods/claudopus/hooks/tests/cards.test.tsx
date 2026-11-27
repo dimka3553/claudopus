@@ -285,6 +285,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
+    // A lock of the mod's, a folder only one chat makes (takeLock): held while its time is in it
+    if (tool === '/bin/sh' && String(rest[1]).startsWith('mkdir -p "$(dirname "$1")" && mkdir "$1"')) return files.has(`${rest[3]}/at`) ? ok('', 1) : (files.set(`${rest[3]}/at`, String(rest[4])), ok())
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
     // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
@@ -507,7 +509,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     // This Mac's own name, as its Sharing settings give it
     if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (tool === 'rm') files.delete(String(rest.at(-1)))
+    if (tool === 'rm') (files.delete(String(rest.at(-1))), files.delete(`${String(rest.at(-1))}/at`))
     // A file moved aside
     if (tool === 'mv') (files.set(String(rest.at(-1)), files.get(String(rest.at(-2))) ?? ''), files.delete(String(rest.at(-2))))
     // A copy the mod makes of a file
@@ -1076,7 +1078,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs', 'Mark as done'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeDefined()
   await clock.advance(1_100)
@@ -1086,12 +1088,12 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /^ · I am reading/ }))?.text).toBe(' · I am reading how the other model draws outlines.')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
   await pressed(pane, 'dismiss-a1')
   await clock.advance(2_100)
   // Dismissed, it is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = (await until(async () => ((await pane.findAll({ type: 'Button' })).some(b => b.props.label === '▸ Finished 1') ? pane.findAll({ type: 'Button' }) : undefined))) ?? []
-  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', '▸ Finished 1'])
+  expect(buttons.map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About', '▸ Finished 1'])
   await pane.press({ key: String(buttons.find(b => b.props.label === '▸ Finished 1')?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
   // its top row only its facts, the line under it how it ended
@@ -2860,7 +2862,8 @@ test('a command is named in plain words by a small model, asked in the backgroun
   // Asked of the small model, never waited for by the panel
   const naming = () => completed.filter(e => e.system?.includes(NAMES))
   expect(naming().length).toBeGreaterThan(0)
-  expect(naming().every(e => e.model === 'claude-haiku-5-5')).toBe(true)
+  // on Sonnet, as every model call of the mod's: never Haiku
+  expect(naming().every(e => e.model === 'sonnet')).toBe(true)
   // As its log moves, its second line says what it does now in the model's words
   for (let n = 0; n < 6; n++) await advance(20_000)
   expect(await until(async () => (await texts()).find(text => text === 'Waiting for the cloud machine to start'))).toBeDefined()

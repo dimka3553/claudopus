@@ -318,6 +318,6 @@ export type Flow = {
 
 declare module 'claude-code' {
   interface PluginState {
-    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; figures: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; drafts: Shaped<Record<string, string>>; runs: Shaped<PressRun[]>; load: string }
+    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; figures: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; drafts: Shaped<Record<string, string>>; runs: Shaped<PressRun[]>; progress: Shaped<number>; listSeen: Shaped<string[]>; load: string }
   }
 }

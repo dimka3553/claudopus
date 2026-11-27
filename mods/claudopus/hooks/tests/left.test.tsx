@@ -285,6 +285,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
+    // A lock of the mod's, a folder only one chat makes (takeLock): held while its time is in it
+    if (tool === '/bin/sh' && String(rest[1]).startsWith('mkdir -p "$(dirname "$1")" && mkdir "$1"')) return files.has(`${rest[3]}/at`) ? ok('', 1) : (files.set(`${rest[3]}/at`, String(rest[4])), ok())
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
     // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
@@ -507,7 +509,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     // This Mac's own name, as its Sharing settings give it
     if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (tool === 'rm') files.delete(String(rest.at(-1)))
+    if (tool === 'rm') (files.delete(String(rest.at(-1))), files.delete(`${String(rest.at(-1))}/at`))
     // A file moved aside
     if (tool === 'mv') (files.set(String(rest.at(-1)), files.get(String(rest.at(-2))) ?? ''), files.delete(String(rest.at(-2))))
     // A copy the mod makes of a file
@@ -964,11 +966,12 @@ test('a wait for something far away is a watch: sent in the background it runs, 
     return all.some(text => text.includes('Check that the cloud job has ended')) ? all : undefined
   })
   expect(rows?.filter(text => text.includes('Check that the cloud job has ended'))).toEqual(['Watch · Check that the cloud job has ended'])
-  // Silent for minutes, it is watching, never a command that has said nothing or has no progress
+  // Silent for minutes, it is watching, never a command that has said nothing or has no progress (the header's Progress button is
+  // no line of it)
   await clock.advance(5 * 60_000)
   const later = await leftTexts($)
   expect(later.some(text => text.startsWith('Watching'))).toBe(true)
-  expect(later.filter(text => /progress|nothing for|silent|said nothing/i.test(text))).toEqual([])
+  expect(later.filter(text => text !== 'Progress' && /progress|nothing for|silent|said nothing/i.test(text))).toEqual([])
   // A Monitor that waits for the same is a watch too
   expect(((await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: WAIT, description: 'the second cloud job to end', timeout_ms: 600_000 } as never)) as { deny?: string }).deny).toBeUndefined()
   expect(await until(async () => (await leftTexts($)).find(text => text.includes('the second cloud job to end')))).toBe('Watch · the second cloud job to end')

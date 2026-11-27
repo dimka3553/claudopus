@@ -18,10 +18,10 @@ const TESTS_OUT = join(hooks, 'tests')
 
 // The parts in the order they are joined: a part that uses another's value while the module loads comes after it
 const PARTS = [
-  'common.tsx', 'recorder.tsx', 'rules.tsx', 'settings.tsx', 'subjects.tsx', 'cards.tsx', 'state.tsx', 'talk.tsx', 'servers.tsx', 'reports.tsx', 'welcome.tsx',
+  'common.tsx', 'recorder.tsx', 'rules.tsx', 'settings.tsx', 'subjects.tsx', 'progress.tsx', 'cards.tsx', 'state.tsx', 'talk.tsx', 'servers.tsx', 'reports.tsx', 'welcome.tsx',
   'results-tab.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'term-art.tsx', 'pictures.tsx', 'files.tsx', 'workflows.tsx', 'notify.tsx',
   'updating.tsx', 'changelog.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'afar.tsx', 'boxes.tsx', 'gate.tsx', 'prompts.tsx', 'runit.tsx', 'lean.tsx', 'needs.tsx', 'typed.tsx', 'chat.tsx', 'stuck.tsx', 'jobs.tsx', 'naming.tsx', 'heavy.tsx', 'tidy.tsx', 'steps.tsx', 'keep.tsx', 'keys.tsx', 'crossing.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'usage.tsx', 'pace.tsx', 'band.tsx',
-  'panel.tsx', 'tabs.tsx', 'register.tsx',
+  'progress-tab.tsx', 'panel.tsx', 'tabs.tsx', 'register.tsx',
 ]
 const TEST_PARTS = [
   'world.tsx', 'chat.test.tsx', 'cards.test.tsx', 'left.test.tsx', 'finish.test.tsx', 'notify.test.tsx', 'commands.test.tsx', 'servers.test.tsx',
@@ -69,6 +69,7 @@ const globalsOf = (lines, toPart) => {
 
 // The engine reads no hooks file over 1 MB (1,048,576 bytes), so the shipped file leaves out the parts' whole-line comments, which
 // stay in the parts: a line goes only when it starts with // in plain code, never inside a string, a template or a block comment.
+// A line that starts in plain code goes without its indent too, which no code reads; one inside a template keeps it whole.
 // Regular expressions are told from division by what comes before them, so a // inside one is never taken for a comment
 const HOOKS_MOST = 1_048_576
 const commentLinesOut = text => {
@@ -82,7 +83,7 @@ const commentLinesOut = text => {
   for (const line of lines) {
     const isCode = !inBlock && !stack.length
     if (isCode && /^\s*\/\/(\s|$)/.test(line)) continue
-    out.push(line)
+    out.push(isCode ? line.trimStart() : line)
     // Walk the line to carry the state to the next
     for (i = 0; i < line.length; i++) {
       const c = line[i]

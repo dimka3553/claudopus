@@ -2,6 +2,22 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.282 · 27 November 2026
+- Claudopus now sorts each task into an area of your work in the background, as it starts and when its result comes. It keeps each area's next steps up to date from your messages and answers.
+- Every question a task asks has a Set aside button. It drops that work and keeps it in Progress as set aside, with why, and a later task in that area is told about it.
+- Ask the chat where some work stands or what's next, and it answers at once from Progress.
+- A Progress tab beside Results shows your north star and, for each of your goals, a small square for each task on the day it ran, with its steps done of all, then each area under its goal with what's done, set aside and next, and which have a task at work. Each area opens on its next steps, which you tick, and its timeline of results and pictures, newest first.
+- Each topic's notes now start with a Latest part that Claudopus keeps current from every result: the area's newest results with their dates and links, and what's next. Its line in the topic list says where it stands now.
+- Your own messages are kept on their own for each chat, apart from Claude's replies, and what you say about an area is kept with that area. A task reads these instead of the whole chat.
+- A topic's history that grows past 200 KB has its older half moved to a file of its own, which a search still finds.
+- A memory search can keep to one area or topic, finds words in any order and in other forms (pages, fixing, fixed), and shows Progress and the latest state first.
+- The topic list is tidied once a day: a topic named like a file name takes its page's title, an empty summary is filled from its page, and a topic done and untouched for two weeks is only named on one line.
+- In a long chat, each message tells the chat which topics and areas changed since it last saw the list.
+- Two tasks that update topics at the same moment no longer lose one of the changes.
+- A task's search that only reads Claudopus's own files, such as the list of keys, is no longer refused.
+- Commands are named by Sonnet, no longer by Haiku.
+- Progress no longer adds a next step that repeats one already open, a task's start adds no steps, and a result's title says what came out of it.
+
 ## 0.2.281 · 27 November 2026
 - Stats and the leaderboard now count your work when Claude Code keeps its files somewhere other than ~/.claude (set by CLAUDE_CONFIG_DIR). Before, such a Mac counted nothing, so its leaderboard row stayed at 0 hours. Its past hours, back to the day Claudopus was first installed, now show up too, within a day of updating.
 - Task cards, the Details tab, chat links and Bring in old chats read their files from that same place.
