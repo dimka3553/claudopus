@@ -128,7 +128,7 @@ The panel's header has these buttons (Results once there is a result):
 
 ### Keys, passwords and admin commands
 
-- Claudopus asks for a key or token once, in a box at the top of the panel, and saves it in the macOS keychain (on Linux, in a file only you can read). It is never put in a chat, and its value is hidden in anything a command prints. If Claude asks for a key you've already given, Claudopus tells Claude where it is.
+- Claudopus asks for a key or token once, in a box at the top of the panel, and saves it in the macOS keychain (on Linux and Windows, in a file only you can read). It is never put in a chat, and its value is hidden in anything a command prints. If Claude asks for a key you've already given, Claudopus tells Claude where it is.
 - Before Claude runs a command as administrator, the task's card shows the exact command and the machine, with **Allow**, **Don't allow** and **Always allow this command**, and **Answer in words** to ask the task about it first. In Config you choose whether Claudopus asks each time, once per task, or never. Config also lists what you always allow. Claudopus never saves an admin password. Each admin command asks for it, in macOS's own box on this Mac, or otherwise in a box at the top of the panel.
 - These boxes catch mistakes and common tricks, but code running as you on your machine could still get around them.
 
@@ -163,15 +163,16 @@ More on each in the [guide](mods/claudopus/docs/guide.md#settings).
 
 - macOS 12 or newer. Stats needs `jq`, which macOS 15 and later include.
 - Or Linux, with Claude Code in a terminal (there is no desktop app for Linux), with the same install lines. Keys are saved in files only you can read, an admin password is asked for in the panel each time, notifications need a desktop, there is no Open in Terminal, and small copies of pictures need ImageMagick. [What differs](mods/claudopus/docs/guide.md#on-linux)
+- Or Windows 10 or 11, in the desktop app's Code tab or a terminal, with Git for Windows (which Claude Code needs there). Keys are saved in a file in your profile, admin commands for your PC aren't run (one for a Mac or Linux machine over SSH is), there is no Open in Terminal, the clean-up of what tasks leave behind doesn't run yet, and small copies of pictures need ImageMagick. [What differs](mods/claudopus/docs/guide.md#on-windows)
 - Claude Code in a terminal or the desktop app. It is tested with 2.1.325; older versions may not draw everything.
 - Not under WSL, nor where your organization blocks mods. No panel in `claude -p` or cloud sessions.
-- Seen working in the macOS desktop app and in a terminal on Linux (Ubuntu 24.04); VS Code has not been tried yet. [More](mods/claudopus/docs/guide.md#needs)
+- Seen working in the macOS desktop app, in a terminal on Linux (Ubuntu 24.04), and loaded by Claude Code on Windows (GitHub's Windows Server runner, where its installer and tests run on every change); the Windows desktop app and VS Code have not been tried yet. [More](mods/claudopus/docs/guide.md#needs)
 
 ## Privacy
 
 - Everything Claudopus saves is in `~/.claude/claudopus` on your machine. Delete the folder and it's gone.
 - Claudopus sends data only to Claude, through Claude Code, and to your own Macs over SSH if you name them. It reads the version page on claudopus.ai to check for updates, and it contacts GitHub only when you press Download or Install. There is no telemetry.
-- Keys stay in this Mac's keychain, or on Linux in files under `~/.local/share/claudopus/keyring` that only you can read. Claudopus never saves an admin password. An admin command runs only after you allow it on its card, with the system's own `PATH`.
+- Keys stay in this Mac's keychain, or on Linux and Windows in files under `~/.local/share/claudopus/keyring` that only you can read. Claudopus never saves an admin password. An admin command runs only after you allow it on its card, with the system's own `PATH`.
 - The two small notification apps are committed built; `mods/claudopus/notifier/checksums.txt` holds the SHA-256 of each of their files, and every release checks the committed apps still match it.
 
 The full account of every file, hook and program is in [What Claudopus does on your Mac](mods/claudopus/docs/privacy.md).

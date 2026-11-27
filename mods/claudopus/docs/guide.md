@@ -208,7 +208,7 @@ A card's model is the one that really answered its last step. If that is still a
 - If you turn Claudopus Asks off in System Settings, Notifications, what needs you comes as Claudopus, purple, with Claudopus's own chime instead of the notification's sound. If you turn Claudopus off there, macOS's plain notification is used instead, which can't show the icon or open the chat.
 - Stats reads Claude's records with `jq`, which macOS 15 and later include.
 - The two notification apps come built, so you need no Xcode. How to rebuild them and compare with what's committed is in [What Claudopus does on your Mac](privacy.md#files-that-will-be-held-for-a-reviewer-and-why-they-stay).
-- Seen working in the macOS desktop app and in a terminal on Linux (Ubuntu 24.04). VS Code hasn't been tried yet.
+- Seen working in the macOS desktop app and in a terminal on Linux (Ubuntu 24.04), and loaded by Claude Code on Windows (GitHub's Windows Server runner, where the Windows installer and every test run on each change). The Windows desktop app and VS Code haven't been tried yet.
 
 ## On Linux
 
@@ -222,6 +222,25 @@ Claude Code runs on Linux in a terminal (there is no Claude desktop app for Linu
 - **Small copies of pictures** are made with ImageMagick (`sudo apt install imagemagick`, or your system's own) by `bin/sips`, which answers the calls Claudopus makes of macOS's `sips`. Without it, pictures are listed without their small copies.
 - **Your other Macs** (`macs`) and the keeper of a chat the app runs over SSH work the same. This machine is named by `hostname`.
 - **Not on Linux:** the two notification apps (`notifier/`), which are Mac apps, and anything that reads the desktop app's own folders and logs, which Linux doesn't have. Nothing is shown for them.
+
+## On Windows
+
+Claudopus runs on Windows in the Claude desktop app's Code tab and in a terminal. Install it with one line in PowerShell:
+
+```
+irm https://www.claudopus.ai/install.ps1 | iex
+```
+
+It finds Claude Code (the desktop app's own copy, or `claude` from Anthropic's installer or npm), installs Git for Windows and `jq` with `winget` where they are missing, then installs Claudopus and switches it on, as on a Mac. Claude Code on Windows runs its own commands in Git for Windows' bash, and so does Claudopus: every command of the panel and of the runners in `bin/` runs there, with Git's own Unix tools, perl and openssl. The memory folder is `%USERPROFILE%\.claude\claudopus`. The panel, background tasks, results, memory, Stats, updates and keys all work. Where a Mac has something of its own, Windows does this instead:
+
+- **Passwords and keys.** `bin/keyring` keeps each key in a file of its own under `%USERPROFILE%\.local\share\claudopus\keyring`, as on Linux. Windows lets only you, the system and the PC's administrators read files in your profile. Claudopus refuses commands from Claude that read that folder however its path is written (`C:\`, `C:/` or `/c/`), and those that ask Windows for saved credentials (`cmdkey`, `vaultcmd`, `Get-StoredCredential`).
+- **Admin commands.** Windows has no `sudo`, so `bin/admin here` is refused with a note to run the command yourself in a terminal opened as administrator. An admin command for a Mac or Linux machine over SSH works as on a Mac.
+- **Notifications** are Windows' own, shown through PowerShell; pressing one opens the chat.
+- **Opening things.** A file opens in Explorer and a link in your browser. Attach and Paste use Windows' own Open box and clipboard. A card's Open in Terminal button isn't there: copy the command instead, and paste it in Git Bash.
+- **The bar above the prompt** reads memory, the processor, the disk, the network and the battery from Windows itself, about every 15 seconds. Claude's commands aren't moved to a background mode, which Windows doesn't have.
+- **Small copies of pictures** are made with ImageMagick (`winget install ImageMagick.ImageMagick`) by `bin/sips`. Without it, pictures are listed without their small copies.
+- **Bring in old chats** runs with Windows' Python (`python` or `py`); if neither is there, the chat tells you the `winget` line for it.
+- **Not on Windows yet:** the clean-up of what tasks leave behind. Windows can't say which folder a running program works in, so Claudopus removes nothing rather than risk the profile of a browser that is still open. The two notification apps (`notifier/`) are Mac apps.
 
 ## Settings
 

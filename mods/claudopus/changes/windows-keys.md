@@ -1,3 +1,0 @@
-- On Windows, keys you give Claudopus are kept in a file on your PC that only you can read, and tasks use them by name as on a Mac
-- On Windows, an admin command for your PC is refused with a note to run it yourself in a terminal opened as administrator; one for a Mac or Linux machine over SSH still asks you first
-- On Windows, Claudopus knows your files, its own commands and the chat's scratch folder however a path is written (C:\, C:/ or /c/)
