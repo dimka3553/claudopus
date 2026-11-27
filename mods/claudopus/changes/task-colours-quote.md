@@ -1,0 +1,1 @@
+- Each coloured reply quotes, in small letters under the task's name, what you wrote to start that task: three lines, then View more.
