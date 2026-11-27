@@ -3604,7 +3604,7 @@ givenResults.splice(0, Math.max(0, givenResults.length - 30))
 }
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
 const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
-const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults])
+const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
 if (passed && cards.some(one => one.id === passed)) {
 colourBuilder ??= new ColourBuilder()
 colourBuilder.pick(passed)
@@ -10832,6 +10832,7 @@ await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ?
 await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
 const parts = await Promise.all(given.map(one => Promise.all((one.partsForChat ?? []).map(part => withOpenables($, part).catch(() => part)))))
 given.forEach((one, n) => (parts[n] ?? []).forEach(part => resultGiven(one.id, part)))
+await changeTodos($, list => list.map(one => { const n = given.findIndex(g => g.id === one.id); return n < 0 ? one : { ...one, partsGiven: [...(one.partsGiven ?? []), ...(parts[n] ?? []).map(part => part.slice(0, 20_000))].slice(-3) } }))
 return given.flatMap((one, n) => (parts[n] ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))))
 }
 const quietNotices = (text: string, atWork: Set<string>, given: Set<string> = new Set()): Quiet => {

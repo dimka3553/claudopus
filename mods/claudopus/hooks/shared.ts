@@ -43,6 +43,7 @@ export const shareable = (list: readonly Todo[], now = 0): Todo[] =>
       entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer' && entry.kind !== 'event').slice(0, 1),
       // What the person wrote to it on its card is theirs, as their steers are
       written: undefined,
+      partsGiven: undefined,
       answer: upTo(one.answer, ANSWER_SHARED),
     }))
 // The helpers under the work a chat shares, however deep, cut as their work is: another chat's Details lists them, and opens each

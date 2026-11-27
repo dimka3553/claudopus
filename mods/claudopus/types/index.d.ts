@@ -128,6 +128,9 @@ export type Todo = {
   // The parts of its result it handed in while still at work (the `report` tool), each kept as a result of its own, until the chat
   // is given them with the message Claudopus sends it for them, or with the next message or notice that comes first
   partsForChat?: string[]
+  // The parts of its result the chat was last given to pass on, as given: the chat's reply that passes one on is drawn in this
+  // task's box, after a reload too (colours.tsx). Never shared with other chats
+  partsGiven?: string[]
   // The hand-back call whose report Claudopus took, until the task takes a step of its own: what comes next is that call's result,
   // or Claude Code's press for a report it did not see delivered, answered with no model
   tookReport?: string

@@ -1713,6 +1713,8 @@ test('a task hands in a finished part of its result while it works on: its card 
   const told = ((await $.prompt.submit({ text: `<agent-message from="a1">\n${notice}\n</agent-message>`, wait: false, origin: { kind: 'peer' }, isMeta: true } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(told).toContain(`is still working, and handed in this part of its result`)
   expect(told).toContain(`  ${part}`)
+  // and the card keeps it as given, so the chat's reply that passes it on is drawn in this task's box after a reload too
+  expect(await until(async () => ([...files.values()].some(text => text.includes('"partsGiven"') && text.includes(part)) ? true : undefined))).toBe(true)
   // Claudopus sends the chat nothing of its own for a part, however long it waits (Claude Code draws such a message as the
   // person's): parts whose task never told the chat go with the next message, all at once
   await $.agent.spawn({ ...spawn, description: 'Ears', prompt: 'look into them' } as never)

@@ -79,6 +79,20 @@ describe('which task a reply is about', () => {
 
     expect(tasks[HAIR]?.title).toBe('Grey hair: test the hair colour worker')
     expect(tasks[GAPS]?.status).toBe('finished')
+
+    // A task's part of its result, handed to the chat in a reminder on a row of its own, is that task's, not the one before it's
+    // (27 Nov: the email task's part went under the Allow button task's box); a compaction's summary is no one's message
+    const later = new Builder()
+    later.ingest([
+      ...CHAT,
+      person('This session is being continued from a previous conversation that ran out of context. Ask about the pupil page.'),
+      says('r8', 'Noted.'),
+      person(`<system-reminder>\nFrom Claudopus: the task "Analysis gaps: Notion page" (${GAPS}) is still working, and handed in this part of its result for Sam now. The report:\n  The When column is filled.\n</system-reminder>`),
+      says('r9', 'The When column is filled.'),
+    ])
+    const after = later.index()
+    expect(after.replies.r9).toEqual([GAPS])
+    expect(quoteFor(after, PUPIL, after.rows.r8)).toBe('Wait, before I continue labeling more of the pupils, should I upscale them?')
   })
 
   test('each task gathers the links its replies gave, named and newest first', async () => {
@@ -221,6 +235,32 @@ describe('which task a reply is about', () => {
     expect(quoteFor(reread, GDPR, reread.rows.g5)).toBe(ON_CARD)
     // and with the chat's messages not known yet, the one passed on to the other task is still never quoted for this one
     expect(quoteFor(reread, GDPR, reread.rows.g4)).toBe('Check the GDPR status of the app')
+    // A message the chat passes on to several tasks at once is a note to them all: the chat's reply in that turn quotes it, their
+    // later results quote what each was sent before; a note of the chat's that quotes an older message passes on nothing new
+    const NOTE = 'cause like 50 or 60 watts how??'
+    const CONFUSED = 'im so confused, the colours and the messages dont match'
+    const noted = new Builder()
+    noted.ingest([
+      ...talk,
+      notify(PUPIL, 'Pupil size: labelling and detection'),
+      says('n0', NO_ANSWER),
+      person(NOTE),
+      says('n1', 'Passing that to every task.', [GDPR, ALLOW, PUPIL].map(to => ({ tool_use_id: `note-${to}`, tool: 'SendMessage', input: { to, message: NOTE } }))),
+      notify(GDPR, 'Check FaceIQ GDPR status now'),
+      says('n2', 'The GDPR check is done.'),
+      person(CONFUSED),
+      says('n3', "I've sent that to the GDPR check.", [
+        { tool_use_id: 'confused', tool: 'SendMessage', input: { to: GDPR, message: CONFUSED } },
+        { tool_use_id: 'aside', tool: 'SendMessage', input: { to: GDPR, message: `A note from the chat: it quoted "${NOTE}" again.` } },
+      ]),
+      says('n4', 'It will look at the quotes.'),
+    ])
+    const notes = noted.index({ heard: [...heard, NOTE, CONFUSED] })
+    expect(quoteFor(notes, GDPR, notes.rows.n1)).toBe(NOTE)
+    expect(quoteFor(notes, GDPR, notes.rows.n2)).toBe(OOPS)
+    expect(quoteFor(notes, GDPR, notes.rows.n4)).toBe(CONFUSED)
+    // A picture the person sent is no words to quote
+    expect(personWords('[Image: source: /tmp/shot.png]\n\nlook at this')).toBe('look at this')
     // Words written on a result go to the chat after the result they continue from: the words alone are the person's
     expect(personWords('Continue from the result "Fix the nose" (27 Nov, 16:07), /Users/x/.claude/claudopus/reports/20261127-0807-fix-the-nose/report.md: Make the tip rounder')).toBe('Make the tip rounder')
     // Text the person pasted is quoted as their words, without the app's marks around it
