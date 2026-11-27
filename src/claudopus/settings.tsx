@@ -240,6 +240,7 @@ const configActs = ($: EngineInterface) => ({
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, "Couldn't save the setting", () => regate($, { mode })),
   gateRemove: (host: string, command: string) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
+  memory: (surface: string) => void showMemory($, surface as RenderSurface).catch(err => log($, `memory folder not opened: ${String(err)}`)),
   // How often the look runs, or only at Check now: one choice, written as the two keys
   lookEvery: (hours: number) =>
     configAct($, "Couldn't save the setting", async () => {

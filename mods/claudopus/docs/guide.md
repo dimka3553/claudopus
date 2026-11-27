@@ -115,8 +115,8 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
   - what the tokens would cost at API prices, and what the memory holds.
 - Stats keeps what it has added up, by chat, by day and by month, so it opens at once and reads a record again only when it changes. All time keeps counting work whose records Claude Code has since cleared.
 - Once you have joined the leaderboard, Claudopus sends it only the figures that changed, and of your timeline only its newest tasks.
-- Memory, at the top of the panel, opens Finder at the folder where Claudopus saves what it remembers.
-- About, beside Memory, waves hello once. It says what Claudopus is and shows its version and Claude Code's, the website, the licence and the GitHub repo.
+- Memory, in Config, opens Finder at the folder where Claudopus saves what it remembers.
+- About, beside Config, waves hello once. It says what Claudopus is and shows its version and Claude Code's, the website, the licence and the GitHub repo.
 - `/servers` shows the local servers running on your machine and which chat started each.
 
 ### Admin passwords and commands
@@ -180,7 +180,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 ### In a terminal
 
-- In the terminal, the panel opens one other tab beside it at a time (Results, a result, Stats, Memory, Config, About, the Changelog, a card's Details).
+- In the terminal, the panel opens one other tab beside it at a time (Results, a result, Stats, Config, Memory, About, the Changelog, a card's Details).
 - The tab's first row is `x: Close`. Click it, or press `x` while the tab holds the keys, and the tab closes and the panel comes back. (`ctrl+x Tab` gives the keys to the panel's frame, and `Esc` gives them back to the chat.)
 - Claude Code's own row of tab names above it switches between the panel and the tab by a click. Its `✕` at the frame's top right closes the tab shown.
 - Clicks work in a terminal reached over SSH and inside tmux, as long as Claude Code runs full screen (`"tui": "fullscreen"`).
@@ -218,7 +218,7 @@ Claude Code runs on Linux in a terminal (there is no Claude desktop app for Linu
 - **An admin password** is asked for in the panel's box each time, as a Mac does over SSH, since Linux has no box of its own like macOS's. Claudopus saves none. Admin commands use `sudo` as on a Mac.
 - **A password or key with no panel open** (a `claude -p` command): a Mac asks in a box on its screen. Linux has none, so the runner says to open the panel with `/claudopus` and run it again.
 - **Notifications** use the desktop's own (`notify-send`) when Claude Code runs in a desktop session. In a terminal with no desktop, as over SSH, there's no pop-up: you get the panel, its sound and the terminal's own notice.
-- **Opening things.** Memory opens as a tab of the panel, as in any terminal. A picture or a settings file opens with `xdg-open` on a desktop. With none, a picture's row says where it is, or sends it to your device as it does over SSH from a Mac. A card's Open in Terminal button isn't there: copy the command instead.
+- **Opening things.** Memory, in Config, opens as a tab of the panel, as in any terminal. A picture or a settings file opens with `xdg-open` on a desktop. With none, a picture's row says where it is, or sends it to your device as it does over SSH from a Mac. A card's Open in Terminal button isn't there: copy the command instead.
 - **Small copies of pictures** are made with ImageMagick (`sudo apt install imagemagick`, or your system's own) by `bin/sips`, which answers the calls Claudopus makes of macOS's `sips`. Without it, pictures are listed without their small copies.
 - **Your other Macs** (`macs`) and the keeper of a chat the app runs over SSH work the same. This machine is named by `hostname`.
 - **Not on Linux:** the two notification apps (`notifier/`), which are Mac apps, and anything that reads the desktop app's own folders and logs, which Linux doesn't have. Nothing is shown for them.

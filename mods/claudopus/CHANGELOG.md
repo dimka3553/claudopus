@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.289 · 27 November 2026
+- Memory moved from the top of the panel into Config, under You: its Open opens the folder where Claudopus keeps what it remembers.
+
 ## 0.2.288 · 27 November 2026
 - Config has Task colours, off unless you turn it on: each chat reply about a task sits in a box of that task's colour, headed by its name, which opens its Details, and Reply, which opens the box to that task. Its card in the panel gets the same colour dot.
 - Each chat reply now ends with a list of the links it gave, each led by where it goes, and a task's Details lists every link the chat gave about it. Links at the end in Config turns it off.

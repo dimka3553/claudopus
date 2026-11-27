@@ -241,6 +241,8 @@ export type ConfigActs = {
   lookEvery: (hours: number) => void
   gateMode: (mode: AdminMode) => void
   gateRemove: (host: string, command: string) => void
+  // Open the memory folder: Finder on the Mac the chat runs on, a tab of the panel in a terminal or over ssh
+  memory: (surface: string) => void
 }
 type Band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => JSX.Element
 const SEGMENT = '#80808050'
@@ -369,6 +371,14 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             <Select key="config-alerts-pick" options={ALERTS.map(one => ({ value: one.value, label: one.label }))} value={alerts.value} onSelect={value => acts.alerts(value as (typeof ALERTS)[number]['value'])} />,
             alerts.value !== ALERTS[0].value,
             () => acts.alerts(ALERTS[0].value),
+          )}
+          {item(
+            'config-memory',
+            'Memory',
+            'What Claudopus remembers for you, as plain files: your words in each chat, notes on each topic, and every result.',
+            <Button key={`config-memory-open-${presses}`} label="Open" onPress={press => acts.memory(press.surface)} />,
+            false,
+            () => undefined,
           )}
           {item('config-ask-pictures', 'Pictures of questions', "When a task asks you something with buttons, Claudopus draws the question and each button in one picture, opens it on your screen, and shows it with the question on the card and in the chat.", onOff('askPictures'), config.askPictures !== undefined, () => acts.set('askPictures', undefined))}
           {item('config-task-colours', 'Task colours', "Each chat reply about a task sits in a box of that task's colour, headed by its name and Reply. Its card in the panel gets the same colour dot.", onOff('taskColours'), config.taskColours !== undefined, () => acts.set('taskColours', undefined))}

@@ -455,7 +455,7 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   // A terminal's gap would be a whole blank line between the rows, so it has none
   const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'terminal' } as never)
   expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
   expect(await pane.find({ type: 'Text', text: /^This chat /})).toBeDefined()
 })
@@ -708,7 +708,7 @@ test('the list too big for the app at a wide pane is drawn with less in it, ever
   for (let t = 1; t <= 10; t += 1) {
     const me = `a${(id += 1)}`
     kinds[me] = 'general-purpose'
-    titles.push(`Task number ${t} with a fairly long title that says what it does in plain words ${more(23)}`.trim())
+    titles.push(`Task number ${t} with a fairly long title that says what it does in plain words ${more(25)}`.trim())
     await $.prompt.submit({ text: `job ${t}`, wait: false, origin: composer })
     await $.agent.spawn({ ...spawn, description: titles[t - 1], prompt: `job ${t}` } as never)
     const call = (agentId: string, tool: string, input: Record<string, unknown>) => $.tool.call({ tool, tool_use_id: `u${(use += 1)}`, agentId, ...input } as never)
