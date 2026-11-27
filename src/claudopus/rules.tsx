@@ -340,6 +340,10 @@ const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = fal
   isYou
     ? `Your answer “${said}” to “${title}” (${asked}) couldn't reach its task. It goes with your next message here.`
     : `{Name} answered, on its card, the question asked in "${title}" (${asked}): ${said}. The answer could not reach that task, so it waits here for {name}'s next message.`
+// What the chat's model reads, and the person sees, when what they wrote to a task can't reach it, as the task can't be reached
+const LOST_FOR_CHAT = (title: string, said: string[]) =>
+  `{Name} wrote to the task "${title}" on its card: ${said.map(text => `“${cut(text, 400)}”`).join(', ')}. That task can't be reached any more, as its run is gone, so its card now says so, with Carry on, and none of these words reached it. Take them up here as {name}'s own, with {name}'s next message, alongside whatever that message asks.`
+const LOST_FOR_YOU = (title: string) => `“${title}” can't be reached any more, so the chat has your message instead. Carry on, on its card, starts a fresh task in its place.`
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, continue that task with this answer, as you would with their own words, alongside whatever that message asks.`
 const ASK_CLEARED = (title: string, asked = '') => `Claude took back its question in "${title}"${asked ? ` (${cut(asked, 160)})` : ''}. You don't need to answer it.`
 // What the work is told when the chat passes on the person's answer to its ask, typed in the chat

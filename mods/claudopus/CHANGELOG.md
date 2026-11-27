@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.306 · 27 November 2026
+- A task that can no longer be reached, such as one a rewind of the chat left behind, no longer shows Working for good: its card says Interrupted · Can't be reached any more, keeps its last result, and has Carry on
+- A message you write to such a task is marked "Didn't reach the task · the chat has it" instead of "Not read yet", and the chat gets your words
+
 ## 0.2.305 · 27 November 2026
 - On battery, Claude's commands get only a few fast cores at once, and the rest move to the Mac's slow, low-power cores. Test runs that start a Claude of their own for each test file were never slowed before, and about thirty at once drew 50 to 60 W.
 - On battery, Claudopus looks at the computer a third as often for the line above the prompt, and takes its costliest look once in five minutes instead of every minute.
