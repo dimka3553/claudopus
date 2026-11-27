@@ -1,0 +1,4 @@
+# Every text file keeps LF endings in every checkout, a Windows one too (Git for Windows turns them into CRLF by default), so the
+# shell runners in mods/claudopus/bin run in Git's bash, and the joined hooks file and the notification apps match their checks
+* text=auto eol=lf
+*.ps1 text eol=lf
