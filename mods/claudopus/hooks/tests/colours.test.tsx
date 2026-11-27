@@ -888,18 +888,22 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   const PR = 'https://github.com/acme/heads/pull/7'
   const said = `The nose is fixed and merged: ${PR}`
   // The chat's transcript as the app keeps it: the task is the chat's first, a1
+  const ASKED = 'Fix the nose on head A\nThe left nostril is too wide\nKeep the bridge as it is\nMatch the scan\'s tip\nThen show me a picture'
   const talk: unknown[] = [
-    { role: 'user', text: 'Fix the nose on head A', toolUses: [] },
+    { role: 'user', text: ASKED, toolUses: [] },
     { role: 'assistant', text: 'Starting a task for the nose.', uuid: 'r0', toolUses: [{ tool_use_id: 'launch', tool: 'Agent', input: { description: 'Fix the nose' }, agentId: 'a1' }] },
     { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
     { role: 'assistant', text: said, uuid: 'r1', toolUses: [] },
     { role: 'user', text: 'What is the weather like?', toolUses: [] },
     { role: 'assistant', text: 'I cannot see the weather from here.', uuid: 'r2', toolUses: [] },
+    { role: 'user', text: 'Also make the tip rounder', toolUses: [] },
+    { role: 'assistant', text: 'Passing that to the nose task.', uuid: 'r3', toolUses: [{ tool_use_id: 'pass', tool: 'SendMessage', input: { to: 'a1', message: 'Also make the tip rounder' } }] },
+    { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
+    { role: 'assistant', text: 'The tip of the nose is rounder now, and the bridge is as it was.', uuid: 'r4', toolUses: [] },
   ]
   const { files, tabs } = world(on, { talk })
   await $.session.start(start)
-  const ASKED = 'Fix the nose on head A\nThe left nostril is too wide\nKeep the bridge as it is\nMatch the scan\'s tip\nThen show me a picture'
-  await $.prompt.submit({ text: ASKED, wait: false, origin: composer })
+    await $.prompt.submit({ text: ASKED, wait: false, origin: composer })
   const r = (await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A' } as never)) as { agentId: string }
   expect(r.agentId).toBe('a1')
   await $.agent.spawn({ ...spawn, description: 'Make the price page', prompt: 'price' } as never)
@@ -927,6 +931,10 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   // Its name opens its Details, which lists its links; its card leads with the same colour
   const reply = await $.ui.mount({ ...MSG, surface: 'desktop' } as never)
   const colour = (await until(async () => reply.find({ type: 'Text', text: '● ' })))?.props.color
+  // A later reply quotes the message it answers, not the one that started the task
+  const later = await $.ui.mount({ ...MSG, requestId: 'r4', props: { text: 'The tip of the nose is rounder now, and the bridge is as it was.', isFirstOfReply: true }, surface: 'desktop' } as never)
+  expect(await until(async () => later.find({ type: 'Text', text: '“Also make the tip rounder”' }))).toBeDefined()
+  await later.unmount()
   // View more shows the whole of it
   await reply.press({ key: String((await reply.findAll({ type: 'Button' })).find(one => /^quote-more-/.test(one.key ?? ''))?.key) })
   expect(await until(async () => (await reply.findAll({ type: 'Button' })).find(one => one.props.label === 'View less'))).toBeDefined()

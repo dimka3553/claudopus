@@ -1,0 +1,1 @@
+- A coloured reply quotes the message of yours it answers: the one it replies to, or the newest you sent its task, not only the one that started the task.
