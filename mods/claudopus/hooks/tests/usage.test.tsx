@@ -801,6 +801,39 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
+// The memory folder on the Windows PC of world(on, { windows: true })
+const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
+// A Windows PC's own programs, as a test gives them, for world(windowsPC(on, answer).on, { windows: true }). Each command the mod
+// runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
+// handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
+// no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
+type WindowsRun = { argv: string[]; env: Record<string, string> }
+const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
+  const runs: WindowsRun[] = []
+  const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const wrapped = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => unknown]
+      if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => {
+        const argv = [...e.argv]
+        const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
+        const tool = String(inBash ? argv[3] : argv[0])
+        if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
+        if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
+        if (!inBash) {
+          const one = { argv, env: { ...(e.init?.env ?? {}) } }
+          runs.push(one)
+          const out = answer(one)
+          if (out !== undefined) return said(out)
+        }
+        return handle(c, e)
+      }
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: wrapped, runs }
+}
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
@@ -1483,4 +1516,80 @@ test("with no work at work, the Mac is looked at only while commands are still w
   const seen = looks
   for (let s = 0; s < 12; s++) await clock.advance(1000)
   expect(looks).toBe(seen)
+})
+
+// A Windows PC's look as its PowerShell writes it, t seconds in: the engine under the app, a command it started, another app,
+// Windows' own idle time (never work), the disk's and the ports' running totals, a virtual port, and a battery charging
+const windowsLook = (t: number) =>
+  [
+    '@@SELF@@ 5000',
+    '@@SYS@@',
+    `${16 * 1024 * 1024} ${4 * 1024 * 1024} 8`,
+    '@@PS@@',
+    `0 0 8192 ${Math.round((1000 + t * 4) * 1e7)} System Idle Process`,
+    `4000 900 900000000 ${Math.round((10 + t * 0.5) * 1e7)} Claude.exe`,
+    `5000 4000 1500000000 ${60 * 1e7} claude.exe`,
+    `6000 5000 600000000 ${Math.round((20 + t * 1.5) * 1e7)} node.exe`,
+    `7000 900 2000000000 ${Math.round((30 + t * 2) * 1e7)} chrome.exe`,
+    '@@DISK@@',
+    `0 C:\t${Math.round(1e9 + t * 20e6)}`,
+    '@@NET@@',
+    `Intel[R] Wi-Fi 6 AX201 160MHz\t${Math.round(t * 2e6)}\t${Math.round(t * 1e6)}`,
+    `vEthernet (WSL)\t${Math.round(t * 90e6)}\t${Math.round(t * 90e6)}`,
+    '@@BATT@@',
+    '62 6 71582788',
+    '',
+  ].join('\r\n')
+test('on a Windows PC the line above the prompt reads one PowerShell look, three times less often: memory, the processor, the disk, the network and the battery, Claude its app and engine with what they started; no commands are paced', async ($, on) => {
+  let n = 0
+  let at = () => 0
+  const pc = windowsPC(on, run => (run.argv.join(' ').includes("'@@SELF@@ '") ? ((n += 1), windowsLook(at())) : undefined))
+  const { clock, windowsRuns } = world(pc.on, { windows: true })
+  at = () => (clock.now() - 1_700_000_000_000) / 1000
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  // Six seconds on is too soon for another look; fifteen give the second, and the speeds
+  await clock.advance(6000)
+  expect(n).toBe(1)
+  await clock.advance(9000)
+  await clock.advance(1000)
+  expect(n).toBe(2)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const drawings = await until(async () => {
+    const all = await desk.findAll({ type: 'Svg' })
+    return all.some(d => String(d.props.alt).startsWith('Processor')) ? all : undefined
+  })
+  const alt = (what: string) => drawings?.find(d => String(d.props.alt).startsWith(what))?.props.alt
+  // 12 of 16 GB in use, 2.8 of it Claude's (the app, its engine and the node it started, never Chrome); 4 of the 8 cores at work,
+  // 2 of them Claude's; the disk and the machine's own port, never the virtual one
+  expect(alt('Memory')).toBe('Memory: 12 of 16 GB in use, 2.8 GB by Claude and what it started')
+  expect(alt('Processor')).toBe('Processor: 50% busy, 25% by Claude and what it started')
+  expect(alt('Disk')).toBe('Disk: 20 MB/s read and written')
+  expect(alt('Network')).toBe('Network: 3 MB/s downloaded and uploaded')
+  expect(alt('Battery')).toBe('Battery: 62%, charging')
+  await desk.unmount()
+  // Nothing is asked of Git's ps or a taskpolicy, which see no Windows program
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('@@PACE@@') || argv.join(' ').includes('taskpolicy') || argv.join(' ').includes('vm_stat'))).toEqual([])
+})
+
+test("on a Windows PC a disk nearly full says so at the top of the panel and once in a notification, with nothing to press, as nothing there can tell what is safe to remove; under 5 GB a task's download is refused", async ($, on) => {
+  const { clock, files, notified, windowsRuns } = world(on, { windows: true })
+  files.set('df', `C:/Program Files/Git 971350180 900000000 ${12 * 1024 * 1024} 97% /\n`)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'shoot every page', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Shoot the pages', prompt: 'shoot' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(31_000)
+  expect((await until(() => pane.find({ type: 'Text', text: /disk space left/ })))?.text).toBe('Your PC has 12 GB of disk space left.')
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).not.toContain('Free up space')
+  expect(notified.filter(one => /disk space/.test(one))).toEqual(['Your PC is almost out of disk space | 12 GB left.'])
+  files.set('df', `C:/Program Files/Git 971350180 900000000 ${Math.round(3.2 * 1024 * 1024)} 97% /\n`)
+  await clock.advance(31_000)
+  const deny = ((await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'curl -L -o C:/w/scans.zip https://example.com/scans.zip', description: 'Download the scans', run_in_background: true } as never)) as { deny?: string }).deny
+  expect(deny).toMatch(/^Not run: the PC has 3\.2 GB of disk space left, and "Download the scans" can fill it\. .* once more than 5 GB is free\.$/)
+  // and the tidy of what tasks left is never started, two minutes on or later
+  await clock.advance(10 * 60_000)
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('/bin/tidy'))).toEqual([])
+  await pane.unmount()
 })

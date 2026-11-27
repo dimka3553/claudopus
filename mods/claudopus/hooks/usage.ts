@@ -28,6 +28,27 @@ const USAGE_RU =
 export const USAGE_LINUX =
   "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@LOAD@@; cat /proc/loadavg; getconf _NPROCESSORS_ONLN; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do c=; v=; p=; { read c < $d/class; } 2>/dev/null; case \"$c\" in 0x03*) { read v < $d/vendor; read p < $d/power/runtime_status; } 2>/dev/null; case \"$v\" in 0x10de|0x1002) [ \"$p\" = suspended ] && asleep=1;; esac;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status /sys/class/power_supply/*/power_now /sys/class/power_supply/*/current_now /sys/class/power_supply/*/voltage_now 2>/dev/null; true"
 
+// One look on Windows, by PowerShell, a single call: the engine (the parent of the PowerShell it starts), the memory in kilobytes
+// and the logical processors, every process with its parent, its memory in use, its processor time (in tenths of a microsecond) and
+// its name, each disk's and network port's bytes moved since Windows started (its performance counters' running totals), and the
+// battery, if there is one. Every value is written with no double quote, as the command line carries it to PowerShell whole
+export const USAGE_WINDOWS = [
+  "$ErrorActionPreference = 'SilentlyContinue'",
+  '$p = @(Get-CimInstance Win32_Process)',
+  "'@@SELF@@ ' + ($p | Where-Object ProcessId -eq $PID).ParentProcessId",
+  "'@@SYS@@'",
+  '$o = Get-CimInstance Win32_OperatingSystem',
+  "'' + $o.TotalVisibleMemorySize + ' ' + $o.FreePhysicalMemory + ' ' + (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors",
+  "'@@PS@@'",
+  "$p | ForEach-Object { '' + $_.ProcessId + ' ' + $_.ParentProcessId + ' ' + $_.WorkingSetSize + ' ' + ($_.KernelModeTime + $_.UserModeTime) + ' ' + $_.Name }",
+  "'@@DISK@@'",
+  "Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total' | ForEach-Object { $_.Name + [char]9 + ($_.DiskReadBytesPersec + $_.DiskWriteBytesPersec) }",
+  "'@@NET@@'",
+  'Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface | ForEach-Object { $_.Name + [char]9 + $_.BytesReceivedPersec + [char]9 + $_.BytesSentPersec }',
+  "'@@BATT@@'",
+  "Get-CimInstance Win32_Battery | ForEach-Object { '' + $_.EstimatedChargeRemaining + ' ' + $_.BatteryStatus + ' ' + $_.EstimatedRunTime }",
+].join('; ')
+
 // A process: its parent, its processor time in seconds, its memory in bytes, its name
 export type UsageProc = { pid: string; ppid: string; pgid?: string; cpu: number; mem: number; name: string }
 // One look's running totals. busy and all are the whole computer's processor seconds where it counts them (Linux); disk and net are
@@ -70,7 +91,7 @@ export const secondsOfTime = (time: string) => {
 // shell that started it, is gone too. A shell in a terminal gives each job its own group, so one left there leads its own group and
 // is not taken; an app launchd starts leads its own group too. The system's own and crash reporters left that way are not taken.
 // The Mac's own python3 runs from Xcode, under /Applications, so that is not left out
-const isClaudeName = (name: string) => /^claude$/i.test(name.split('/').pop() ?? '')
+const isClaudeName = (name: string) => /^claude(?:\.exe)?$/i.test(name.split('/').pop() ?? '')
 const isLeftWork = (p: UsageProc, alive: Set<string>) => p.ppid === '1' && !!p.pgid && p.pgid !== p.pid && !alive.has(p.pgid) && !/^\/System\/|crashpad/i.test(p.name)
 export const claudeOf = (procs: UsageProc[], self: string) => {
   const alive = new Set(procs.map(p => p.pid))
@@ -108,7 +129,8 @@ export const gpuMemOf = (text: string, isLinux: boolean): { used: number; total?
 // A program's name as a person knows it: the app a process belongs to, else the command's own name; Claude's in one name
 export const appOf = (name: string) => {
   const app = /([^/]+)\.app\//.exec(name)?.[1]
-  const own = app ?? name.split('/').pop() ?? name
+  // (Windows names a process by its program, node.exe: the name without .exe)
+  const own = (app ?? name.split('/').pop() ?? name).replace(/\.exe$/i, '')
   // Claude Code's own engine is kept under its version's number (claude/versions/2.1.325); Linux names a process by that bare number
   return /^claude$/i.test(own) || /\/claude\/versions\/[^/]+$/.test(name) || /^\d+\.\d+\.\d+$/.test(name) ? 'Claude' : own
 }
@@ -348,6 +370,49 @@ export const rawOfLinux = (text: string, at: number): UsageRaw | undefined => {
   return { names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used, ...(gpuMem.total ? { gpuMemTotal: gpuMem.total } : {}) } : {}), ...netSplitOf(s.NET ?? '', true), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed: Math.max(0, memTotal - kb('MemAvailable')), memTotal, ncpu: 1, ...loadIn(s.LOAD), disk, net, busy, all, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}), ...(battIn !== undefined ? { battIn } : {}) }
 }
 
+// Win32_Battery's state: 1 on battery (4 and 5 low and critically low), 2 on power, 3 full, 6 to 9 charging; its time left in
+// minutes, which Windows gives only on battery (71582788 otherwise)
+export const batteryOfWindows = (text: string): UsageBattery | undefined => {
+  const m = /^(\d+) (\d+) ?(\d*)$/m.exec(text.trim())
+  if (!m) return undefined
+  const [pct, status, time] = [Number(m[1]), Number(m[2]), Number(m[3] || 0)]
+  const state = [1, 4, 5].includes(status) ? 'battery' : [6, 7, 8, 9].includes(status) ? 'charging' : [2, 3].includes(status) ? 'plugged' : 'unknown'
+  const left = state === 'battery' && time > 0 && time < 71582788 ? time : 0
+  return { pct: Math.min(100, pct), state, ...(left ? { left } : {}) }
+}
+// A Windows look: no system process's idle time counted as work (Idle, pid 0), and only the machine's own ports, not its virtual
+// ones. Processes are named by their program (node.exe), as Windows names them
+export const rawOfWindows = (text: string, at: number): UsageRaw | undefined => {
+  const s = sectionsOf(text.replace(/\r\n/g, '\n'))
+  const [totalKb = 0, freeKb = 0, ncpu = 1] = (s.SYS ?? '').trim().split(/\s+/).map(Number)
+  const procs = (s.PS ?? '').split('\n').flatMap(line => {
+    const m = /^(\d+) (\d+) (\d+) (\d+) (.+)$/.exec(line.trim())
+    return m && m[1] !== '0' ? [{ pid: m[1] ?? '', ppid: m[2] ?? '', mem: Number(m[3]), cpu: Number(m[4]) / 1e7, name: (m[5] ?? '').trim() }] : []
+  })
+  const memTotal = totalKb * 1024
+  if (!procs.length || !memTotal || !Number.isFinite(memTotal)) return undefined
+  const disk: Record<string, number> = {}
+  for (const line of (s.DISK ?? '').split('\n')) {
+    const [name = '', bytes = ''] = line.split('\t')
+    if (name.trim() && /^\d+$/.test(bytes.trim())) disk[name.trim()] = Number(bytes)
+  }
+  const net: Record<string, number> = {}
+  let netIn = 0
+  let netOut = 0
+  for (const line of (s.NET ?? '').split('\n')) {
+    const [name = '', got = '', sent = ''] = line.split('\t')
+    if (!name.trim() || !/^\d+$/.test(got.trim()) || !/^\d+$/.test(sent.trim()) || /loopback|isatap|teredo|vethernet|hyper-v|virtual|vmware|vpn|tap-|wireguard|tailscale|bluetooth/i.test(name)) continue
+    net[name.trim()] = Number(got) + Number(sent)
+    netIn += Number(got)
+    netOut += Number(sent)
+  }
+  const claude = claudeOf(procs, (s.SELF ?? '').trim())
+  const claudeMem = procs.filter(p => claude.has(p.pid)).reduce((sum, p) => sum + p.mem, 0)
+  const battery = batteryOfWindows(s.BATT ?? '')
+  const memTop = topOf(procs.map(p => [p.name, p.mem]))
+  return { names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(Object.keys(net).length ? { netIn, netOut } : {}), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed: Math.max(0, memTotal - freeKb * 1024), memTotal, ncpu: ncpu || 1, disk, net, ...(battery ? { battery } : {}) }
+}
+
 // Bytes moved between two looks by the disks or ports that were in both
 const movedOf = (prev: Record<string, number>, cur: Record<string, number>) =>
   Object.entries(cur).reduce((sum, [name, n]) => sum + (typeof prev[name] === 'number' ? Math.max(0, n - (prev[name] ?? 0)) : 0), 0)
@@ -394,8 +459,9 @@ export const figuresOf = (prev: UsageRaw | undefined, cur: UsageRaw): UsageFigur
     cpu,
     cpuClaude: Math.min(cpu, clamp(mine / whole)),
     ...(cpuTop.length ? { cpuTop } : {}),
-    disk: movedOf(prev.disk ?? {}, cur.disk) / span,
-    net: movedOf(prev.net ?? {}, cur.net) / span,
+    // (a look that names no disk or port at all, as Windows' when its counters do not answer, tells no speed rather than none)
+    ...(Object.keys(cur.disk).length ? { disk: movedOf(prev.disk ?? {}, cur.disk) / span } : {}),
+    ...(Object.keys(cur.net).length ? { net: movedOf(prev.net ?? {}, cur.net) / span } : {}),
     ports: Object.keys(cur.net).filter(name => typeof prev.net?.[name] === 'number' && (cur.net[name] ?? 0) > (prev.net[name] ?? 0)),
     disks: Object.keys(cur.disk).filter(name => typeof prev.disk?.[name] === 'number' && (cur.disk[name] ?? 0) > (prev.disk[name] ?? 0)),
     ...(split ? { netIn: ((cur.netIn ?? 0) - (prev.netIn ?? 0)) / span, netOut: ((cur.netOut ?? 0) - (prev.netOut ?? 0)) / span } : {}),
@@ -448,10 +514,10 @@ const claudeShareOf = (prev: UsageRaw, cur: UsageRaw, span: number): Partial<Usa
 }
 
 // The next kept state from a look: top's memory kept for a minute, the figures against the look before
-export const nextKept = (was: UsageKept | undefined, text: string, at: number, isLinux: boolean, isTop = false): UsageKept | undefined => {
-  const top = isLinux ? {} : footprintOf(sectionsOf(text).TOP ?? '')
+export const nextKept = (was: UsageKept | undefined, text: string, at: number, isLinux: boolean, isTop = false, isWindows = false): UsageKept | undefined => {
+  const top = isLinux || isWindows ? {} : footprintOf(sectionsOf(text).TOP ?? '')
   const footprint = Object.keys(top).length ? { at, byPid: top } : was?.footprint && at - was.footprint.at < FOOTPRINT_EVERY * 3 ? was.footprint : undefined
-  const raw = isLinux ? rawOfLinux(text, at) : rawOfMac(text, at, footprint?.byPid)
+  const raw = isWindows ? rawOfWindows(text, at) : isLinux ? rawOfLinux(text, at) : rawOfMac(text, at, footprint?.byPid)
   if (!raw) return undefined
   const topAt = isTop ? at : was?.topAt
   const { names: _names, ...kept } = raw

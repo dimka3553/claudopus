@@ -23,7 +23,10 @@ while [ -e "$0.run" ]; do sleep 0.2; done
 EOF
 chmod +x "$tmp/chat"
 touch "$tmp/chat.run"
+# A chat's process as its beat names it: on Windows the Windows process of Git's, as a chat's engine is one there
+wpid() { cat "/proc/$1/winpid" 2>/dev/null || echo "$1"; }
 "$tmp/chat" & chat=$!
+sleep 0.5; chat=$(wpid "$chat")
 settings=$tmp/settings.json
 printf '{\n  "theme": "dark",\n  "enabledPlugins": {\n    "claudopus@claudopus": true,\n    "claudopus@other": true,\n    "other@else": true\n  },\n  "hooks": {}\n}\n' > "$settings"
 revived() { grep -c '"revived"' "$1" 2>/dev/null | tr -d ' '; }
@@ -116,6 +119,7 @@ within '[ ! -e "$mem/keep/s6.beat" ]' 5 && [ "$(revived "$settings")" = "$before
 
 # Turned off in the settings: nothing is changed
 touch "$tmp/chat.run"; "$tmp/chat" & chat=$!
+sleep 0.5; chat=$(wpid "$chat")
 printf '{ "enabledPlugins": { "claudopus@claudopus": false } }\n' > "$tmp/off.json"
 beat "$chat" claudopus@claudopus "$tmp/off.json" s7; stale s7
 within 'grep -q "chat s7: quiet .* turned off" "$mem/keep/revive.log"' 8 && [ "$(revived "$tmp/off.json")" = 0 ] && ok "Claudopus turned off is left off" || no "Claudopus turned off is left off"
@@ -139,6 +143,7 @@ rm -f "$tmp/chat.run"
 # its watcher
 mem2=$tmp/memory2; mkdir -p "$mem2/keep"
 cp "$tmp/chat" "$tmp/chat2"; touch "$tmp/chat2.run"; "$tmp/chat2" & chat2=$!
+sleep 0.5; chat2=$(wpid "$chat2")
 set2=$tmp/set2.json
 printf '{ "enabledPlugins": { "claudopus@claudopus": true } }\n' > "$set2"
 beat2() { printf '%s\t%s\t%s\n%s\n' "$chat2" claudopus@claudopus "$2" "$3" > "$mem2/keep/$1.beat"; }
@@ -177,6 +182,16 @@ sleep 4
 [ "$(log2 t3 quiet)" = 0 ] && ok "a new watcher keeps to the gap after the last change" || no "a new watcher keeps to the gap after the last change"
 kill "$w3" 2>/dev/null
 rm -f "$tmp/chat2.run"
+
+# Git's Perl, which changes the setting on Windows, keeps every key in its order and every value as written, and leaves a file it
+# cannot read whole as it was
+printf '{\n  "theme": "dark",\n  "enabledPlugins": {\n    "claudopus@claudopus": true\n  },\n  "list": [1, "a\\"b", {"x": null}, []]\n}\n' > "$tmp/perl.json"
+printf '{\n  "theme": "dark",\n  "enabledPlugins": {\n    "claudopus@claudopus": true\n  },\n  "list": [\n    1,\n    "a\\"b",\n    {\n      "x": null\n    },\n    []\n  ],\n  "pluginConfigs": {\n    "claudopus@claudopus": {\n      "options": {\n        "revived": "T1"\n      }\n    }\n  }\n}\n' > "$tmp/perl.want"
+said=$(CLAUDOPUS_REVIVE_PERL=1 "$revive" --change "$tmp/perl.json" claudopus@claudopus T1)
+[ "$said" = set ] && cmp -s "$tmp/perl.json" "$tmp/perl.want" && ok "Perl's change keeps every other key and value as it was" || no "Perl's change keeps every other key and value as it was: $(cat "$tmp/perl.json")"
+[ "$(CLAUDOPUS_REVIVE_PERL=1 "$revive" --change "$tmp/off.json" claudopus@claudopus T1)" = off ] && ok "Perl's change leaves Claudopus turned off alone" || no "Perl's change leaves Claudopus turned off alone"
+CLAUDOPUS_REVIVE_PERL=1 "$revive" --change "$tmp/comments.json" claudopus@inline T1 >/dev/null && no "Perl's change leaves a file with comments as it was" || { cmp -s "$tmp/comments.json" "$tmp/comments.was" && ok "Perl's change leaves a file with comments as it was" || no "Perl's change leaves a file with comments as it was"; }
+[ ! -e "$here/--change" ] && [ ! -e "./--change" ] && ok "a change alone makes no folder" || no "a change alone makes no folder"
 
 [ "$fails" = 0 ] && echo "revive: all passed" || echo "revive: $fails failed"
 exit "$fails"

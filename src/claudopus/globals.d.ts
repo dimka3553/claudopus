@@ -190,6 +190,7 @@ declare global {
   export import OFF_LOOK = M5.OFF_LOOK
   export import offOf = M5.offOf
   export import APP_LOG_LOOK = M5.APP_LOG_LOOK
+  export import APP_LOG_LOOK_IN = M5.APP_LOG_LOOK_IN
   export import stuckOf = M5.stuckOf
   export import Answer = M5.Answer
   export import Off = M5.Off
@@ -329,6 +330,7 @@ declare global {
   export import USAGE_EVERY = M12.USAGE_EVERY
   export import USAGE_LINUX = M12.USAGE_LINUX
   export import USAGE_PURPLE = M12.USAGE_PURPLE
+  export import USAGE_WINDOWS = M12.USAGE_WINDOWS
   export import usageMac = M12.usageMac
   export import usageSvg = M12.usageSvg
   export import UsageTop = M12.UsageTop

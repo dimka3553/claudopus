@@ -96,6 +96,14 @@ elsif (open my $idx, '<', "$mem/index.md") {
 }
 
 # ---- What runs now: each command's whole line, and each one's current folder ----
+# On Windows Git's ps and /proc see only Git's own processes, never a browser, node or Claude, so nothing there says what runs:
+# nothing is removed
+if ($^O =~ /^(?:msys|cygwin|MSWin32)$/ && !defined $ENV{TIDY_PS}) {
+  print "on Windows the running commands and their folders can't be listed, so nothing was removed\n";
+  my $at = int(Time::HiRes::time() * 1000);
+  if (open my $fh, '>', "$mem/tidy/last.json") { print $fh qq({"at": $at, "freed": 0, "removed": {"browser": 0, "temp": 0, "scratch": 0, "worktrees": 0}, "rescued": 0, "kept": 0}\n); close $fh }
+  exit 0;
+}
 my @commands = lines_of('sh', '-c', $ENV{TIDY_PS} // 'ps axww -o command=');
 my @cwds;
 if (defined $ENV{TIDY_CWDS}) { @cwds = lines_of('sh', '-c', $ENV{TIDY_CWDS}) }

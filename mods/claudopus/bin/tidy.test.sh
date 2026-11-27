@@ -124,4 +124,14 @@ chmod +x "$tmp/tools/uv" "$tmp/tools/npm"
 PATH="$tmp/tools:$PATH" run --deep
 check "--deep clears uv's and npm's caches, with what they say" '[ ! -e "$tmp/uvc/wheel" ] && [ ! -e "$tmp/npmc/pkg" ] && grep -q "uv cache pruned" "$tmp/out" && grep -q "npm cache cleaned" "$tmp/out"'
 
+# On Windows nothing lists what runs with its folder, so a run there removes nothing and says why
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    mkdir -p "$T/playwright_chromiumdev_profile-win"; old "$T/playwright_chromiumdev_profile-win"
+    rmdir "$mem/locks/tidy" 2>/dev/null
+    (unset TIDY_PS; run --now)
+    check "on Windows it removes nothing, and says why" '[ -d "$T/playwright_chromiumdev_profile-win" ] && grep -q "can.t be listed" "$tmp/out" && grep -q "\"freed\": 0" "$mem/tidy/last.json"' ;;
+  *) echo "skip the Windows run: this is not Git's bash on Windows" ;;
+esac
+
 if [ "$fails" = 0 ]; then echo "tidy: all passed"; else echo "tidy: $fails failed"; cat "$tmp/out1"; exit 1; fi

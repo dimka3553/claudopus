@@ -27,9 +27,33 @@ const ledgerTasks = (list: Todo[]) => {
   const ids = new Set(tops.map(one => one.id))
   return [...tops, ...list.filter(one => !one.chat && one.parentId && one.status === 'working' && ids.has(topOf(list, one.id)))]
 }
-// The chat's own process, which runs the mod's commands: a load in the same process is a reload of the mod, which ends nothing
+// The chat's own process, which runs the mod's commands: a load in the same process is a reload of the mod, which ends nothing.
+// On Windows the engine is a Windows process, which the $PPID of Git's shells never names (it is the number of an MSYS process, or
+// 1 for one Windows started), so the parent of a PowerShell the engine starts names it
 let enginePid = ''
-const pidOfEngine = async ($: EngineInterface) => ((await runOn($, ['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
+const pidOfEngine = async ($: EngineInterface) =>
+  ((await runOn($, isWindows ? [...POWERSHELL, "(Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID)).ParentProcessId"] : ['/bin/sh', '-c', 'echo $PPID'], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? '').trim()
+
+// ---- Windows' own processes ----
+// On Windows the engine and every program a command starts (node, a browser, Claude itself) are Windows processes, which Git's ps,
+// kill and /proc never see: whether one runs is asked of Windows' own tasklist, and what each runs of PowerShell, one call for all
+const POWERSHELL = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command']
+// The numbers of every process that runs, or undefined when tasklist does not answer (then none is taken for gone)
+const windowsAlive = async ($: EngineInterface) => {
+  const r = await runOn($, ['tasklist.exe', '/FO', 'CSV', '/NH'], { timeoutMs: 15_000 }).catch(() => undefined)
+  if (!r || r.exitCode !== 0) return undefined
+  return new Set(r.stdout.split(/\r?\n/).flatMap(line => /^"[^"]*","(\d+)"/.exec(line)?.[1] ?? []))
+}
+// A command started on its own, to outlive the chat: on Windows by PowerShell's Start-Process, as Git's bash in a hidden window,
+// which no pipe of the engine's reaches, so the start returns at once and nothing waits for it. The shell line comes in an
+// environment value, with its words quoted in it, so nothing of it passes through Windows' quoting of a command line; the line
+// Start-Process is given holds no double quote of the caller's
+const startOnWindows = async ($: EngineInterface, script: string, words: string[]) => {
+  if (!gitBash) return { exitCode: 1, stderr: "Git for Windows' bash was not found" }
+  const line = `unset IFS; set +f; set -- ${words.map(zshQuoted).join(' ')}; ${script}`
+  const start = "Start-Process -WindowStyle Hidden -FilePath $env:CLAUDOPUS_BASH -ArgumentList ('-c ' + [char]34 + 'set -f; IFS=; eval $CLAUDOPUS_RUN' + [char]34)"
+  return runOn($, [...POWERSHELL, start], { timeoutMs: 30_000, env: { CLAUDOPUS_BASH: gitBash, CLAUDOPUS_RUN: line } }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+}
 // Written only once this load has read what the last process left (noteClosed), so a load never writes over it before it is read
 let isLedgerRead = false
 let ledgerSign = ''
@@ -256,8 +280,10 @@ const ledgerOthers = async ($: EngineInterface, me: string, open: Set<string>, n
   // switched off, whose tasks still work
   const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort()
   if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
-    const r = pids.length ? await runOn($, ['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
-    pidsSeen.alive = new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)))
+    // (on Windows by tasklist, as the engines are Windows processes; one that does not answer leaves every process as running)
+    const alive = isWindows && pids.length ? await windowsAlive($) : undefined
+    const r = pids.length && !isWindows ? await runOn($, ['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
+    pidsSeen.alive = isWindows ? new Set(pids.filter(pid => !alive || alive.has(pid))) : new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)))
     pidsSeen.at = now
     pidsSeen.asked = pids.join(',')
   }
@@ -284,7 +310,7 @@ const ledgerOthers = async ($: EngineInterface, me: string, open: Set<string>, n
 // Changed, it loads Claudopus again in every chat, as an update does
 const BEAT_EVERY = 3000
 const beatFile = (id: string) => `${dir}/keep/${id}.beat`
-const configDir = async ($: EngineInterface) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeFolder($)) ?? ''}/.claude`
+const configDir = async ($: EngineInterface) => slashed((await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeFolder($)) ?? ''}/.claude`)
 // The key this copy has in the settings: claudopus@<marketplace> for an installed one, whether Claude Code keeps it in its cache or
 // loads it from the marketplace's own folder (a marketplace of a folder on this Mac, as Claudopus's own checkout); claudopus@inline
 // for one loaded with --plugin-dir. On 16 Nov this Mac's chats ran from the checkout, and claudopus@inline would have changed nothing
@@ -338,7 +364,9 @@ const startReviver = async ($: EngineInterface, id: string) => {
   everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
   // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs
   const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" >/dev/null 2>&1 </dev/null &`
-  const r = await runOn($, ['/bin/sh', '-c', script, 'sh', `${pluginRoot($)}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  const r = isWindows
+    ? await startOnWindows($, 'exec "$1" "$2" >/dev/null 2>&1 </dev/null', [`${pluginRoot($)}/bin/revive`, dir])
+    : await runOn($, ['/bin/sh', '-c', script, 'sh', `${pluginRoot($)}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   if (r.exitCode !== 0) await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`)
 }
 // A chat that ends leaves no beat behind

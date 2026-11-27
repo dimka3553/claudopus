@@ -65,7 +65,9 @@ const snippetOf = (tool: string, input: unknown) => {
 }
 // How many of Claude's shells on this Mac run a command that starts so (the Bash tool runs it as `eval '<command>'`): counted as its
 // prompt opens, so only one more than then is this call's
+// (not on Windows, where Git's ps never shows a command line: there a prompt goes as its call ends)
 const running = async ($: EngineInterface) => {
+  if (isWindows) return undefined
   const r = await runOn($, ['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
   return r.exitCode === 0 ? r.stdout.split('\n') : undefined
 }
@@ -342,16 +344,17 @@ const refusedConnector = async ($: EngineInterface, agent: string, top: string, 
   const name = rule.split('__').slice(2).join('__').replace(/_/g, ' ')
   const input = connectorInput(call)
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  const command = `${zshQuoted(`${pluginRoot($)}/bin/allow-tool`)} ${rule}`
+  // (on Windows a command for Git Bash, which the person copies, as no Terminal opens there)
+  const command = `${isWindows ? 'bash ' : ''}${zshQuoted(`${pluginRoot($)}/bin/allow-tool`)} ${rule}`
   const details = [
     `It wanted to ${name}${input ? `: ${input}` : '.'}`,
     `${reason ? `Blocked as “${reason}”. ` : ''}Claude Code never counts a yes on this card or in the chat as yours for this: only your own Claude Code settings let it through.`,
-    `Open in Terminal and press Return: it adds ${rule} to your Claude Code settings, so your tasks may do this from now on, and nothing else. Then press ${TRY_AGAIN}.`,
+    `${isWindows ? 'Copy the command, paste it in Git Bash and press Return' : 'Open in Terminal and press Return'}: it adds ${rule} to your Claude Code settings, so your tasks may do this from now on, and nothing else. Then press ${TRY_AGAIN}.`,
     own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '',
   ].filter(Boolean).join('\n\n')
   const at = await $.clock.now()
   let isPut = false
-  await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
+  await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, ...(isWindows ? {} : { isCommand: true }), cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same action waits on it already`))
   await log($, `refusal of ${tool} for ${agent} put to the person on its card, with the rule that lets it through`)
   const card = (await read($, todos)).find(one => one.id === top)

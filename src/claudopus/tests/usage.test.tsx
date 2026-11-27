@@ -549,3 +549,79 @@ test("with no work at work, the Mac is looked at only while commands are still w
   for (let s = 0; s < 12; s++) await clock.advance(1000)
   expect(looks).toBe(seen)
 })
+
+// A Windows PC's look as its PowerShell writes it, t seconds in: the engine under the app, a command it started, another app,
+// Windows' own idle time (never work), the disk's and the ports' running totals, a virtual port, and a battery charging
+const windowsLook = (t: number) =>
+  [
+    '@@SELF@@ 5000',
+    '@@SYS@@',
+    `${16 * 1024 * 1024} ${4 * 1024 * 1024} 8`,
+    '@@PS@@',
+    `0 0 8192 ${Math.round((1000 + t * 4) * 1e7)} System Idle Process`,
+    `4000 900 900000000 ${Math.round((10 + t * 0.5) * 1e7)} Claude.exe`,
+    `5000 4000 1500000000 ${60 * 1e7} claude.exe`,
+    `6000 5000 600000000 ${Math.round((20 + t * 1.5) * 1e7)} node.exe`,
+    `7000 900 2000000000 ${Math.round((30 + t * 2) * 1e7)} chrome.exe`,
+    '@@DISK@@',
+    `0 C:\t${Math.round(1e9 + t * 20e6)}`,
+    '@@NET@@',
+    `Intel[R] Wi-Fi 6 AX201 160MHz\t${Math.round(t * 2e6)}\t${Math.round(t * 1e6)}`,
+    `vEthernet (WSL)\t${Math.round(t * 90e6)}\t${Math.round(t * 90e6)}`,
+    '@@BATT@@',
+    '62 6 71582788',
+    '',
+  ].join('\r\n')
+test('on a Windows PC the line above the prompt reads one PowerShell look, three times less often: memory, the processor, the disk, the network and the battery, Claude its app and engine with what they started; no commands are paced', async ($, on) => {
+  let n = 0
+  let at = () => 0
+  const pc = windowsPC(on, run => (run.argv.join(' ').includes("'@@SELF@@ '") ? ((n += 1), windowsLook(at())) : undefined))
+  const { clock, windowsRuns } = world(pc.on, { windows: true })
+  at = () => (clock.now() - 1_700_000_000_000) / 1000
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  // Six seconds on is too soon for another look; fifteen give the second, and the speeds
+  await clock.advance(6000)
+  expect(n).toBe(1)
+  await clock.advance(9000)
+  await clock.advance(1000)
+  expect(n).toBe(2)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const drawings = await until(async () => {
+    const all = await desk.findAll({ type: 'Svg' })
+    return all.some(d => String(d.props.alt).startsWith('Processor')) ? all : undefined
+  })
+  const alt = (what: string) => drawings?.find(d => String(d.props.alt).startsWith(what))?.props.alt
+  // 12 of 16 GB in use, 2.8 of it Claude's (the app, its engine and the node it started, never Chrome); 4 of the 8 cores at work,
+  // 2 of them Claude's; the disk and the machine's own port, never the virtual one
+  expect(alt('Memory')).toBe('Memory: 12 of 16 GB in use, 2.8 GB by Claude and what it started')
+  expect(alt('Processor')).toBe('Processor: 50% busy, 25% by Claude and what it started')
+  expect(alt('Disk')).toBe('Disk: 20 MB/s read and written')
+  expect(alt('Network')).toBe('Network: 3 MB/s downloaded and uploaded')
+  expect(alt('Battery')).toBe('Battery: 62%, charging')
+  await desk.unmount()
+  // Nothing is asked of Git's ps or a taskpolicy, which see no Windows program
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('@@PACE@@') || argv.join(' ').includes('taskpolicy') || argv.join(' ').includes('vm_stat'))).toEqual([])
+})
+
+test("on a Windows PC a disk nearly full says so at the top of the panel and once in a notification, with nothing to press, as nothing there can tell what is safe to remove; under 5 GB a task's download is refused", async ($, on) => {
+  const { clock, files, notified, windowsRuns } = world(on, { windows: true })
+  files.set('df', `C:/Program Files/Git 971350180 900000000 ${12 * 1024 * 1024} 97% /\n`)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'shoot every page', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Shoot the pages', prompt: 'shoot' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(31_000)
+  expect((await until(() => pane.find({ type: 'Text', text: /disk space left/ })))?.text).toBe('Your PC has 12 GB of disk space left.')
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).not.toContain('Free up space')
+  expect(notified.filter(one => /disk space/.test(one))).toEqual(['Your PC is almost out of disk space | 12 GB left.'])
+  files.set('df', `C:/Program Files/Git 971350180 900000000 ${Math.round(3.2 * 1024 * 1024)} 97% /\n`)
+  await clock.advance(31_000)
+  const deny = ((await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'curl -L -o C:/w/scans.zip https://example.com/scans.zip', description: 'Download the scans', run_in_background: true } as never)) as { deny?: string }).deny
+  expect(deny).toMatch(/^Not run: the PC has 3\.2 GB of disk space left, and "Download the scans" can fill it\. .* once more than 5 GB is free\.$/)
+  // and the tidy of what tasks left is never started, two minutes on or later
+  await clock.advance(10 * 60_000)
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('/bin/tidy'))).toEqual([])
+  await pane.unmount()
+})

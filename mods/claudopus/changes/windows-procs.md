@@ -1,0 +1,3 @@
+- On Windows, Claudopus knows each chat's own process, so tasks cut off when the Claude app closes come back as Interrupted, and the watcher that brings Claudopus back starts and keeps running.
+- On Windows, a command you run from a card stops with everything it started, the Servers tab lists your servers and stops them, and the line above the prompt shows memory, the processor, the disk, the network and the battery.
+- On Windows, notifications come as Windows' own, chats are caught up in memory, and a connector's blocked action gives you a command to paste in Git Bash.

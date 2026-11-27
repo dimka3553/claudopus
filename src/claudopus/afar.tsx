@@ -13,8 +13,10 @@ const lookAfar = async ($: EngineInterface, now: number) => {
   if (now - afarAt < AFAR_EVERY) return false
   afarAt = now
   const failed = { exitCode: -1, stdout: '' }
-  const here = await runOn($, ['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-  const app = await runOn($, ['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+  // On Windows no chat of this PC is looked for: what the look finds are chats another computer's app runs here over SSH, which
+  // reach a Mac or Linux, and Git's ps never sees an engine there. The app's log is in its data folder there
+  const here = isWindows ? failed : await runOn($, ['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+  const app = await runOn($, isWindows ? ['sh', '-c', APP_LOG_LOOK_IN, 'sh', ...(await appLogFolders($))] : ['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
   const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : []
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
@@ -27,6 +29,13 @@ const lookAfar = async ($: EngineInterface, now: number) => {
   stuckAt = stuck
   return isChanged
 }
+// The Claude app's log folders on Windows, as each of its builds keeps its data: the installer's in APPDATA, another's in
+// LOCALAPPDATA, the Store's in its package's own copy of APPDATA
+const appLogFolders = async ($: EngineInterface) => {
+  const roaming = slashed((await $.env.get('APPDATA').catch(() => undefined)) ?? '')
+  const local = slashed((await $.env.get('LOCALAPPDATA').catch(() => undefined)) ?? '')
+  return [...(roaming ? [`${roaming}/Claude/logs`] : []), ...(local ? [`${local}/Claude-Data/logs`, `${local}/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/logs`] : [])]
+}
 // A chat's name for the panel: its own title, else the one this Mac's app gives it, else a word
 const offName = (one: Off) => one.title || appTitles.get(one.chat) || (one.chat === 'new' ? 'A chat just started' : 'A chat')
 
@@ -36,8 +45,8 @@ const afarPart = (ui: Ui) => {
   if (!stuckAt && !offChats.length) return null
   const there = macs.length === 1 ? macName(macs[0] ?? '') : 'the Mac it runs chats on over SSH'
   const lines = [
-    ...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} this Mac's Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
-    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
+    ...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} ${thisMac()}'s Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
+    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ` on ${thisMac()}`} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
   ]
   return (
     <ui.Box key="afar" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>

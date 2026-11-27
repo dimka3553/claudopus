@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { appOf, batteryOfLinux, batteryOfMac, batteryShown, batterySvg, CHART_W, chartSvg, gpuOf, HISTORY_SPAN, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
+import { appOf, batteryOfLinux, batteryOfMac, batteryOfWindows, batteryShown, batterySvg, CHART_W, chartSvg, gpuOf, HISTORY_SPAN, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
 
 const GiB = 1024 ** 3
 // A figure to six places, as two sums of tenths rarely meet exactly
@@ -213,6 +213,14 @@ test('the battery is taken as the system says it: the Mac own battery only, a ti
   // A server, and a wireless mouse's battery
   expect(batteryOfLinux('')).toBeUndefined()
   expect(batteryOfLinux(sys({ 'hidpp_battery_0': { type: 'Battery', scope: 'Device', capacity: '90', status: 'Discharging' } }))).toBeUndefined()
+  // Windows: its state by number, a time only on battery (on power it says 71582788), and none on a desktop
+  expect(batteryOfWindows('85 1 252')).toEqual({ pct: 85, state: 'battery', left: 252 })
+  expect(batteryOfWindows('9 4 71582788')).toEqual({ pct: 9, state: 'battery' })
+  expect(batteryOfWindows('62 6 71582788')).toEqual({ pct: 62, state: 'charging' })
+  expect(batteryOfWindows('80 2 71582788')).toEqual({ pct: 80, state: 'plugged' })
+  expect(batteryOfWindows('100 3 ')).toEqual({ pct: 100, state: 'plugged' })
+  expect(batteryOfWindows('70 11 0')).toEqual({ pct: 70, state: 'unknown' })
+  expect(batteryOfWindows('')).toBeUndefined()
 })
 
 test('the battery as the bar shows it never puts a time beside a charge the system calls full while charging, or empty on battery', async () => {

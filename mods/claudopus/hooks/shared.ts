@@ -248,6 +248,9 @@ export const offOf = (text: string): Off[] => {
 // The app's own log on this Mac: the last time it started, or decided a Mac's own install didn't load there. The decision holds,
 // in the app's memory only, until the app is quit, so the last of the two says whether it holds now
 export const APP_LOG_LOOK = `cd "$HOME/Library/Logs/Claude" 2>/dev/null && cat main1.log main.log 2>/dev/null | grep -a -E "\\[info\\] Starting app|own install did not load there" | tail -1`
+// The same on Windows, in the first of the app's own log folders that is there (its data folder's logs, as each build keeps it),
+// each given after the script's name
+export const APP_LOG_LOOK_IN = `for d; do cd "$d" 2>/dev/null && break; done && cat main1.log main.log 2>/dev/null | grep -a -E "\\[info\\] Starting app|own install did not load there" | tail -1`
 // When the app decided it, by its log's own clock, or '' while it does not hold
 export const stuckOf = (text: string) => {
   const line = text.trim().split('\n').at(-1) ?? ''

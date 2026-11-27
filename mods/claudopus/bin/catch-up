@@ -14,6 +14,7 @@ use File::Basename qw(basename dirname);
 use File::Path qw(make_path remove_tree);
 use File::Spec;
 use File::Temp qw(tempdir);
+use File::Glob qw(bsd_glob);
 use Digest::MD5 qw(md5_hex);
 use POSIX qw(strftime);
 use Time::Local qw(timegm);
@@ -26,6 +27,8 @@ while (@ARGV && $ARGV[0] =~ /^--/) {
 }
 my ($mem, $projects) = @ARGV;
 die "usage: catch-up [--now] [--hide-existing] <memory folder> <projects folder>\n" unless $mem && $projects && -d $mem;
+# (a Windows path as Claude Code gives it, C:\Users\x, with one separator, as every path here is built)
+if ($^O =~ /^(?:msys|cygwin)$/) { tr{\\}{/} for $mem, $projects }
 my $EVERY = $ENV{CLAUDOPUS_CATCH_UP_EVERY} // 540;     # seconds between two runs, whichever chat starts it
 my $QUIET = $ENV{CLAUDOPUS_CATCH_UP_QUIET} // 600;     # seconds a record stays unchanged before it is read
 my $state_dir = "$mem/caught";
@@ -93,7 +96,7 @@ touch_file($stamp);
 # to it meanwhile
 $hideExisting = 1 unless -e "$state_dir/hidden-2";
 if ($hideExisting) {
-  for my $f (map { glob("$mem/$_/*.md") } qw(words work asks pastes)) {
+  for my $f (map { bsd_glob("$mem/$_/*.md") } qw(words work asks pastes)) {
     my $before = size_of($f);
     open my $in, '<', $f or next;
     local $/;
@@ -109,8 +112,12 @@ if ($hideExisting) {
   touch_file("$state_dir/hidden-2");
 }
 
-# Without jq no record is read
-my $JQ = (grep { -x $_ } map { "$_/jq" } split /:/, ($ENV{PATH} // ''))[0] // (-x '/usr/bin/jq' ? '/usr/bin/jq' : '');
+# Without jq no record is read. On Windows, in Git's bash, jq is a Windows program of its own (jq.exe, from winget, whose links
+# folder Git's PATH may not hold), handed Windows paths
+my $isWindows = $^O =~ /^(?:msys|cygwin)$/;
+my @jqPlaces = ((map { ("$_/jq", "$_/jq.exe") } split /:/, ($ENV{PATH} // '')), '/usr/bin/jq');
+push @jqPlaces, "$ENV{LOCALAPPDATA}/Microsoft/WinGet/Links/jq.exe" if $isWindows && $ENV{LOCALAPPDATA};
+my $JQ = (grep { -x $_ && !-d $_ } @jqPlaces)[0] // '';
 print "jq is missing: no chat record is read\n" unless $JQ;
 
 # ---- What jq takes from a record's lines ----
@@ -196,13 +203,34 @@ sub lines_from {
   close $in;
   return $at;
 }
+my $scratch;
+# Each program is handed to jq in a file of its own, as a long program given whole as a word does not reach a Windows jq whole
+my %jqFile;
 sub jq {
   my ($program, $file, @args) = @_;
-  open my $p, '-|', $JQ, '-nRrj', @args, $program, $file or return '';
+  my $from = $jqFile{$program} //= do {
+    my $path = "$scratch/program-" . (scalar(keys %jqFile) + 1) . '.jq';
+    open my $out, '>', $path or return '';
+    print $out $program;
+    close $out;
+    $path;
+  };
+  # (a Windows jq is given the files' Windows paths, every other word as it is, and its lines ended in CR LF come back as LF)
+  local $ENV{MSYS2_ARG_CONV_EXCL} = '*' if $isWindows;
+  my @files = map { $isWindows ? win_path($_) : $_ } ($from, $file);
+  open my $p, '-|', $JQ, '-nRrj', @args, '-f', @files or return '';
   local $/;
   my $text = <$p> // '';
   close $p;
+  $text =~ s/\r\n/\n/g if $isWindows;
   return $text;
+}
+my %winPaths;
+sub win_path {
+  my ($path) = @_;
+  my ($folder, $name) = $path =~ m{^(.*)/([^/]*)$} ? ($1, $2) : ('.', $path);
+  $winPaths{$folder} //= do { my $w = `cygpath -m "$folder" 2>/dev/null`; chomp $w; length $w ? $w : $folder };
+  return "$winPaths{$folder}/$name";
 }
 
 # ---- What was read of each record, kept beside memory: its bytes read, whether its words are Claudopus's own (live), written
@@ -256,7 +284,7 @@ if (opendir my $dh, $tmpdir) {
   }
   closedir $dh;
 }
-my $scratch = tempdir('claudopus-catch-up.XXXXXX', TMPDIR => 1, CLEANUP => 1);
+$scratch = tempdir('claudopus-catch-up.XXXXXX', TMPDIR => 1, CLEANUP => 1);
 my $tmp = "$scratch/lines";
 my %seen;
 my ($done, $total, $said, $chats, $works) = (0, scalar @records, time, 0, 0);

@@ -48,13 +48,20 @@ const jobHead = (job: Job) => {
   return `${kind} · ${job.label}`
 }
 
-// Where this chat's background output is written: the engine's tasks folder under its own temporary folder, named by the chat
+// Where this chat's background output is written: the engine's tasks folder under its own temporary folder, named by the chat.
+// On Windows the engine's folder is CLAUDE_CODE_TMPDIR's, else "/tmp" as Windows takes it, on the drive it runs from (C:/tmp),
+// with no user number: claude-0
 const findTasks = async ($: EngineInterface) => {
   const sid = await $.session.id().catch(() => '')
   if (!sid) return ''
-  const r = await $.process
-    .run(['sh', '-c', 'for d in /private/tmp/claude-*/*/"$1"/tasks /tmp/claude-*/*/"$1"/tasks "${TMPDIR%/}"/claude-*/*/"$1"/tasks; do [ -d "$d" ] && { echo "$d"; exit 0; }; done; exit 1', 'sh', sid], { timeoutMs: 5000 })
-    .catch(() => undefined)
+  const own = isWindows ? slashed((await $.env.get('CLAUDE_CODE_TMPDIR').catch(() => undefined)) ?? '').replace(/\/+$/, '') : ''
+  const r = await runOn(
+    $,
+    isWindows
+      ? ['sh', '-c', 'for d in "$2"/claude-*/*/"$1"/tasks; do [ -d "$d" ] && { echo "$d"; exit 0; }; done; exit 1', 'sh', sid, own || 'C:/tmp']
+      : ['sh', '-c', 'for d in /private/tmp/claude-*/*/"$1"/tasks /tmp/claude-*/*/"$1"/tasks "${TMPDIR%/}"/claude-*/*/"$1"/tasks; do [ -d "$d" ] && { echo "$d"; exit 0; }; done; exit 1', 'sh', sid],
+    { timeoutMs: 5000 },
+  ).catch(() => undefined)
   return r?.exitCode === 0 ? r.stdout.trim().split('\n')[0] ?? '' : ''
 }
 
@@ -142,7 +149,8 @@ const lookJobs = async ($: EngineInterface) => {
     return now - (seen.wroteAt && !seen.isEmpty ? seen.wroteAt : b.at) >= SILENT_WARN
   })
   for (const o of asked) if (!quiet.includes(o) && jobLog.get(o.id)?.live) (jobLog.set(o.id, { ...(jobLog.get(o.id) as Seen), live: undefined }), (isChanged = true))
-  if (quiet.length && now - liveLookedAt >= LIVE_LOOK) {
+  // (not on Windows, where nothing says which program holds a file open: a silent command's row is then neither busy nor idle)
+  if (quiet.length && !isWindows && now - liveLookedAt >= LIVE_LOOK) {
     liveLookedAt = now
     const r = await runOn($, ['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
     for (const m of (r?.stdout ?? '').matchAll(/^@@LIVE@@ (\d+) (.*)$/gm)) {
@@ -297,7 +305,7 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
   // A press moves the buttons' keys, so the panel does not keep pulling back to this row
   presses += 1
   drawAgain($)
-  if (!file || !canOpenFile(file) || isLinux) return
+  if (!file || !canOpenFile(file) || isLinux || isWindows) return
   const at = await $.clock.now()
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
@@ -370,7 +378,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
         <Box flexDirection="row" gap={2} flexShrink={0}>
           {job && canStopJob(job) ? <Button key={`log-stop-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain onPress={() => void stopJob($, one.id, job).catch(err => log($, `run not stopped: ${String(err)}`))} /> : null}
           <Button key={`log-details-${presses}`} label="Details" plain onPress={() => openWork($, one.id)} />
-          {file && canOpenFile(file) && !isLinux ? <Button key={`log-terminal-${presses}`} label="Open in Terminal" plain onPress={() => void openJobOutput($, { id: job?.id ?? run?.id ?? '', label }, file).catch(err => log($, `output not opened: ${String(err)}`))} /> : null}
+          {file && canOpenFile(file) && !isLinux && !isWindows ? <Button key={`log-terminal-${presses}`} label="Open in Terminal" plain onPress={() => void openJobOutput($, { id: job?.id ?? run?.id ?? '', label }, file).catch(err => log($, `output not opened: ${String(err)}`))} /> : null}
         </Box>
       </Box>
       <Box key="log-lines" flexDirection="column" backgroundColor={OUTPUT_FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -380,7 +388,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
             <Text key={`log-line-${n}`} wrap="wrap">{line || ' '}</Text>
           ))
         ) : (
-          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? (kind === 'remote' ? 'Nothing has come back from the cloud machine yet. The command that started the job still waits for it, and its task has been told to bring the job\'s own output here as it runs.' : 'No output yet. It shows here as soon as the command writes something.') : 'It wrote nothing.'}</Text>
+          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? `This log isn't on ${thisMac()}.` : job ? (kind === 'remote' ? 'Nothing has come back from the cloud machine yet. The command that started the job still waits for it, and its task has been told to bring the job\'s own output here as it runs.' : 'No output yet. It shows here as soon as the command writes something.') : 'It wrote nothing.'}</Text>
         )}
       </Box>
     </Box>

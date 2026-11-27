@@ -87,3 +87,29 @@ test('every chat starts the catch-up a minute after it loads and every ten minut
   await stop('a1')
   expect(tidies().map(one => one.slice(6))).toEqual([[MEMORY], [MEMORY], [MEMORY]])
 })
+
+// On Windows a memory path is from the drive, C:/Users/..., which a file link writes as file:///C:/Users/...; and the catch-up starts
+// apart from the chat by PowerShell, as the watcher does, while nothing tidies what tasks left there
+test('on a Windows PC a memory path in a reply is a file:/// link that opens in a tab of the mod, and the catch-up starts apart by PowerShell with the chat records of the profile', async ($, on) => {
+  const pc = windowsPC(on)
+  const { files, tabs, clock, windowsRuns } = world(pc.on, { windows: true })
+  files.set(`${WINDOWS_MEMORY}/words/chat-1.md`, '# Launch video\n')
+  await $.session.start(start)
+  const MSG = { plugin: 'claudopus', component: 'AssistantMessage', requestId: 'm1' } as const
+  const reply = await $.ui.mount({ ...MSG, props: { text: `Its account is in ${WINDOWS_MEMORY}/words/chat-1.md.`, isFirstOfReply: true }, surface: 'desktop' } as never)
+  const drawn = await reply.find({ type: 'Markdown' })
+  const href = `file:///${WINDOWS_MEMORY}/words/chat-1.md`
+  expect(drawn?.props.text).toBe(`Its account is in [${WINDOWS_MEMORY}/words/chat-1.md](${href}).`)
+  expect(drawn?.props.pressableLinks).toEqual([href])
+  await reply.press({ key: String(drawn?.key), link: { href } })
+  expect(await until(async () => tabs.find(tab => /^memory-words-chat-1-md-\d+: Launch video$/.test(tab)))).toBeDefined()
+  await reply.unmount()
+  // A minute on, the catch-up, its words in the environment of a hidden window of Git's bash, never a shell of the engine's own
+  await clock.advance(61_000)
+  const started = pc.runs.filter(run => String(run.env.CLAUDOPUS_RUN ?? '').includes('/bin/catch-up'))
+  expect(started).toHaveLength(1)
+  expect(started[0]?.argv.join(' ')).toContain('Start-Process -WindowStyle Hidden')
+  expect(started[0]?.env.CLAUDOPUS_RUN).toContain(`set -- '${WINDOWS_MEMORY}' '${PLUGIN}/bin/catch-up' '${WINDOWS_MEMORY}' 'C:/Users/sam/.claude/projects';`)
+  expect(started[0]?.env.CLAUDOPUS_RUN).toMatch(/exec nice -n 10 "\$@" >> "\$l" 2>&1 < \/dev\/null$/)
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('POSIX::setsid'))).toEqual([])
+})
