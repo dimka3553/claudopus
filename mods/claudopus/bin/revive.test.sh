@@ -114,9 +114,12 @@ rm -f "$mem/keep/s4.beat" "$mem/keep/s5.beat"
 
 # A chat whose process ended is forgotten and nothing changed for it
 rm -f "$tmp/chat.run"; wait "$chatjob" 2>/dev/null
+# (on Windows its Windows process may still be listed a moment after Git's bash has seen it end)
+ended() { case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) ! tasklist //FI "PID eq $1" //NH 2>/dev/null | grep -qw "$1" ;; *) ! kill -0 "$1" 2>/dev/null ;; esac; }
+within 'ended "$chat"' 5
 beat "$chat" claudopus@claudopus "$settings" s6; stale s6
 before=$(revived "$settings")
-within '[ ! -e "$mem/keep/s6.beat" ]' 5 && [ "$(revived "$settings")" = "$before" ] && ! grep -q "chat s6" "$mem/keep/revive.log" && ok "a chat whose process ended is forgotten" || no "a chat whose process ended is forgotten"
+within '[ ! -e "$mem/keep/s6.beat" ]' 5 && [ "$(revived "$settings")" = "$before" ] && ! grep -q "chat s6" "$mem/keep/revive.log" && ok "a chat whose process ended is forgotten" || no "a chat whose process ended is forgotten: beat $([ -e "$mem/keep/s6.beat" ] && echo kept || echo gone), revived $(revived "$settings") (was $before), pid $chat $(tasklist //FI "PID eq $chat" //NH 2>/dev/null | tr -d '\r' | head -2), said: $(grep "chat s6" "$mem/keep/revive.log")"
 
 # Turned off in the settings: nothing is changed
 touch "$tmp/chat.run"; "$tmp/chat" & chatjob=$!
