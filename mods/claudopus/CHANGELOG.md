@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.295 · 27 November 2026
+- The chat no longer ends its replies with a line about which cards wait for you. You see the waiting cards in the panel, so it names a card's question only when you ask how things stand.
+
 ## 0.2.294 · 27 November 2026
 - A coloured reply quotes the message of yours it answers: the one it replies to, or the newest you sent its task, not only the one that started the task.
 
