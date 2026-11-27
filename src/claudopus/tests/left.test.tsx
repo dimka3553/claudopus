@@ -130,3 +130,14 @@ test('a task that leaves a preview server going for the person is done only once
   await list.unmount()
   expect(resumed).toEqual([])
 })
+
+// On Windows the engine writes its commands' output under its own temporary folder, "/tmp" on the drive it runs from (C:/tmp), with
+// no user number, and the look runs in Git's bash
+test("on a Windows PC a task's background command is followed from the engine's own folder on the drive", async ($, on) => {
+  const { clock, windowsRuns } = world(on, { windows: true, jobs: { output: () => 'progress: 1 of 4 scans\n', wroteAt: () => 1_700_000_000_000 } })
+  await leftStart($)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip', description: 'Fetch the CT scans', run_in_background: true } as never)
+  await clock.advance(21_000)
+  const looked = await until(async () => windowsRuns.find(argv => argv[0] === 'C:/Program Files/Git/bin/bash.exe' && argv[3] === 'sh' && String(argv[5]).includes('/claude-*/*/"$1"/tasks')))
+  expect(looked?.slice(6)).toEqual(['sh', 'engine-id', 'C:/tmp'])
+})

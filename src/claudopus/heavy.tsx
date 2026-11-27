@@ -34,7 +34,7 @@ const heavyRoom = (list: Todo[], f: UsageFigures | undefined, mode: HeavyMode, n
 const busyWords = (f: UsageFigures | undefined) =>
   !f ? 'busy' : [f.load !== undefined && f.loadCores ? `load ${Math.round(f.load)} on ${f.loadCores} cores` : '', f.memTotal ? `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB memory in use` : ''].filter(Boolean).join(', ')
 const HEAVY_HELD = (what: string, f: UsageFigures | undefined, running: string[], open: number) =>
-  `Not run: the Mac is busy (${busyWords(f)}), and "${what}" is a heavy command, so it waits for ${[...running.map(one => `"${one}"`), ...(open ? [open === 1 ? 'a heavy command now running' : `${open} heavy commands now running`] : [])].join(', ') || 'the Mac to have room'} to end. Do what does not need it, and send the same command again once one of those has ended, or the Mac has room.`
+  `Not run: the ${machineWord()} is busy (${busyWords(f)}), and "${what}" is a heavy command, so it waits for ${[...running.map(one => `"${one}"`), ...(open ? [open === 1 ? 'a heavy command now running' : `${open} heavy commands now running`] : [])].join(', ') || `the ${machineWord()} to have room`} to end. Do what does not need it, and send the same command again once one of those has ended, or the Mac has room.`
 
 // Whether a piece of work's Bash call runs now or must wait its turn: a deny that says why and what it waits for, else the
 // call's id, to take out of heavyOpen as the call ends. Nothing waits here: the answer is given at once, and nothing sends it later
@@ -52,6 +52,6 @@ const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: s
   await lookUsage($).catch(() => undefined)
   const now = await $.clock.now()
   if (heavyRoom(list, usageNow(now), mode, now)) return (heavyOpen.set(id, agent), (heavyLetAt = now), { id })
-  await log($, `work ${agent}'s heavy command refused while the Mac is busy (${busyWords(usageNow(now))})`)
+  await log($, `work ${agent}'s heavy command refused while the ${machineWord()} is busy (${busyWords(usageNow(now))})`)
   return { deny: HEAVY_HELD(cut(oneLine(String(input.description ?? '')) || labelOf('', command), 120), usageNow(now), heavyRuns(list), heavyOpen.size) }
 }

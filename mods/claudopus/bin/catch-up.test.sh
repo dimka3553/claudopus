@@ -8,7 +8,8 @@ trap '[ -n "${CATCH_UP_TEST_KEEP:-}" ] || rm -rf "$tmp"' EXIT
 # The runs' scratch folders go in a temp folder of the test's own
 export TMPDIR=$tmp/tmpdir
 mkdir -p "$TMPDIR"
-mem=$tmp/memory
+# (the memory folder with a space in its name, as a Windows profile may have)
+mem="$tmp/my memory"
 projects=$tmp/projects
 mkdir -p "$mem/words" "$projects/-p-app/c1/subagents" "$projects/-p-app" "$projects/ssh-remote1"
 fails=0

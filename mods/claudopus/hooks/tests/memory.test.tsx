@@ -811,6 +811,39 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
+// The memory folder on the Windows PC of world(on, { windows: true })
+const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
+// A Windows PC's own programs, as a test gives them, for world(windowsPC(on, answer).on, { windows: true }). Each command the mod
+// runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
+// handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
+// no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
+type WindowsRun = { argv: string[]; env: Record<string, string> }
+const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
+  const runs: WindowsRun[] = []
+  const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const wrapped = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => unknown]
+      if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => {
+        const argv = [...e.argv]
+        const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
+        const tool = String(inBash ? argv[3] : argv[0])
+        if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
+        if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
+        if (!inBash) {
+          const one = { argv, env: { ...(e.init?.env ?? {}) } }
+          runs.push(one)
+          const out = answer(one)
+          if (out !== undefined) return said(out)
+        }
+        return handle(c, e)
+      }
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: wrapped, runs }
+}
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
@@ -1031,4 +1064,30 @@ test('every chat starts the catch-up a minute after it loads and every ten minut
   expect(tidies()).toHaveLength(2)
   await stop('a1')
   expect(tidies().map(one => one.slice(6))).toEqual([[MEMORY], [MEMORY], [MEMORY]])
+})
+
+// On Windows a memory path is from the drive, C:/Users/..., which a file link writes as file:///C:/Users/...; and the catch-up starts
+// apart from the chat by PowerShell, as the watcher does, while nothing tidies what tasks left there
+test('on a Windows PC a memory path in a reply is a file:/// link that opens in a tab of the mod, and the catch-up starts apart by PowerShell with the chat records of the profile', async ($, on) => {
+  const pc = windowsPC(on)
+  const { files, tabs, clock, windowsRuns } = world(pc.on, { windows: true })
+  files.set(`${WINDOWS_MEMORY}/words/chat-1.md`, '# Launch video\n')
+  await $.session.start(start)
+  const MSG = { plugin: 'claudopus', component: 'AssistantMessage', requestId: 'm1' } as const
+  const reply = await $.ui.mount({ ...MSG, props: { text: `Its account is in ${WINDOWS_MEMORY}/words/chat-1.md.`, isFirstOfReply: true }, surface: 'desktop' } as never)
+  const drawn = await reply.find({ type: 'Markdown' })
+  const href = `file:///${WINDOWS_MEMORY}/words/chat-1.md`
+  expect(drawn?.props.text).toBe(`Its account is in [${WINDOWS_MEMORY}/words/chat-1.md](${href}).`)
+  expect(drawn?.props.pressableLinks).toEqual([href])
+  await reply.press({ key: String(drawn?.key), link: { href } })
+  expect(await until(async () => tabs.find(tab => /^memory-words-chat-1-md-\d+: Launch video$/.test(tab)))).toBeDefined()
+  await reply.unmount()
+  // A minute on, the catch-up, its words in the environment of a hidden window of Git's bash, never a shell of the engine's own
+  await clock.advance(61_000)
+  const started = pc.runs.filter(run => String(run.env.CLAUDOPUS_RUN ?? '').includes('/bin/catch-up'))
+  expect(started).toHaveLength(1)
+  expect(started[0]?.argv.join(' ')).toContain('Start-Process -WindowStyle Hidden')
+  expect(started[0]?.env.CLAUDOPUS_RUN).toContain(`set -- '${WINDOWS_MEMORY}' '${PLUGIN}/bin/catch-up' '${WINDOWS_MEMORY}' 'C:/Users/sam/.claude/projects';`)
+  expect(started[0]?.env.CLAUDOPUS_RUN).toMatch(/exec nice -n 10 "\$@" >> "\$l" 2>&1 < \/dev\/null$/)
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('POSIX::setsid'))).toEqual([])
 })

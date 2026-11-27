@@ -811,6 +811,39 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
+// The memory folder on the Windows PC of world(on, { windows: true })
+const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
+// A Windows PC's own programs, as a test gives them, for world(windowsPC(on, answer).on, { windows: true }). Each command the mod
+// runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
+// handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
+// no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
+type WindowsRun = { argv: string[]; env: Record<string, string> }
+const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
+  const runs: WindowsRun[] = []
+  const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const wrapped = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => unknown]
+      if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => {
+        const argv = [...e.argv]
+        const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
+        const tool = String(inBash ? argv[3] : argv[0])
+        if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
+        if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
+        if (!inBash) {
+          const one = { argv, env: { ...(e.init?.env ?? {}) } }
+          runs.push(one)
+          const out = answer(one)
+          if (out !== undefined) return said(out)
+        }
+        return handle(c, e)
+      }
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: wrapped, runs }
+}
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
@@ -1128,5 +1161,44 @@ test("a chat of this Mac that is not open and whose process is gone lists the ta
   expect(String(open?.key)).toMatch(/^carry-there-/)
   await list.press({ key: String(open?.key) })
   expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/chat chat-b opened: claude:\/\/code\/continue\?session=local_chat-b/)?.[0])).toBeDefined()
+  await list.unmount()
+})
+
+// On Windows the chat's process is a Windows process, which Git's shells never name ($PPID there is 1) and Git's ps never sees: its
+// number is the parent of a PowerShell the engine starts, whether one runs is tasklist's, and the watcher starts apart by PowerShell
+const ENGINE_PARENT = /Win32_Process -Filter \('ProcessId=' \+ \$PID\)\)\.ParentProcessId/
+test('on a Windows PC the beat names the engine by its Windows process, and the watcher starts apart from the chat by PowerShell', async ($, on) => {
+  const pc = windowsPC(on, run => (ENGINE_PARENT.test(run.argv.join(' ')) ? '6120\r\n' : undefined))
+  const { files, windowsRuns } = world(pc.on, { windows: true })
+  await $.session.start(start)
+  const [first] = (files.get(`${WINDOWS_MEMORY}/keep/engine-id.beat`) ?? '').split('\n')
+  expect(first).toBe('6120\tclaudopus@inline\tC:/Users/sam/.claude/settings.json')
+  // Started by Start-Process in a hidden window of Git's bash, its words in the environment, never by a shell of the engine's own
+  const started = pc.runs.find(run => run.argv.join(' ').includes('Start-Process -WindowStyle Hidden'))
+  expect(started?.env.CLAUDOPUS_BASH).toBe('C:/Program Files/Git/bin/bash.exe')
+  expect(started?.env.CLAUDOPUS_RUN).toBe(`unset IFS; set +f; set -- '${PLUGIN}/bin/revive' '${WINDOWS_MEMORY}'; exec "$1" "$2" >/dev/null 2>&1 </dev/null`)
+  expect(started?.argv.join(' ')).not.toContain('"')
+  expect(windowsRuns.filter(argv => argv.join(' ').includes('POSIX::setsid'))).toEqual([])
+  expect(files.get(`${WINDOWS_MEMORY}/log.md`)).not.toContain('was not started')
+})
+
+test("on a Windows PC a chat that is not open whose engine is gone lists its tasks as Interrupted, as tasklist says; one whose engine runs lists none", SLOW, async ($, on) => {
+  const at = KEEP_NOW - 600_000
+  const pc = windowsPC(on, run =>
+    ENGINE_PARENT.test(run.argv.join(' ')) ? '6120\r\n' : /^tasklist/i.test(run.argv[0] ?? '') ? '"claude.exe","6120","Console","1","300,000 K"\r\n"claude.exe","700","Console","1","250,000 K"\r\n' : undefined,
+  )
+  const { files, clock } = world(pc.on, { windows: true })
+  const task = (id: string, title: string) => ({ id, title, state: 'working', note: '', transcript: '', card: { id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: at, endedAt: 0, status: 'working' } })
+  const ledger = (chat: string, pid: string, title: string, tasks: object[]) => files.set(`${WINDOWS_MEMORY}/ledger/${chat}.json`, JSON.stringify({ chat, title, folder: 'C:/repo', pid, savedAt: at, link: { bridge: '', app: `local_${chat}` }, tasks }))
+  ledger('chat-b', '3131', 'Billing', [task('b1', 'Send the invoices')])
+  ledger('chat-c', '700', 'Rig', [task('c1', 'Train the splats')])
+  await $.session.start(start)
+  await clock.advance(5_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: '⏸ Interrupted · The app closed while it worked' }))).toBeDefined()
+  const said = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(said).toContain('Send the invoices')
+  expect(said.some(text => /Train the splats/.test(text))).toBe(false)
+  expect(pc.runs.some(run => /^tasklist/i.test(run.argv[0] ?? ''))).toBe(true)
   await list.unmount()
 })

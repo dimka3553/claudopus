@@ -8,7 +8,8 @@ let isPacing = false
 let paceFile = ''
 const pacePathOf = async ($: EngineInterface) => {
   if (paceFile) return paceFile
-  const tmp = ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
+  // (on Windows the person's own temporary folder, TEMP, in their profile)
+  const tmp = slashed((isWindows ? await $.env.get('TEMP') : await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
   paceFile = `${tmp || (await homeFolder($)) || ''}/claudopus-pace.json`
   return paceFile
 }
@@ -23,8 +24,9 @@ const pacedOf = (text: string): { at: number; held: number; others?: number } =>
 }
 
 // A look when one is due: the processes and their threads, then the background mode put on or taken off only where it changes
+// (only on a Mac, whose taskpolicy puts a process in the background mode: Linux and Windows have none to put it in)
 const paceWork = async ($: EngineInterface) => {
-  if (isLinux || isPacing) return
+  if (isLinux || isWindows || isPacing) return
   const now = await $.clock.now()
   if (now >= pacedAt && now - pacedAt < PACE_EVERY - 500) return
   const path = await pacePathOf($)

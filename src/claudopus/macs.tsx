@@ -7,12 +7,16 @@ const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-
 // One connection to each Mac is kept open a minute after its last use and shared by every chat here, so a trip costs a fraction
 // of a second rather than a new login each time, and a name pressed on that Mac opens here within moments. A connection gone dead,
 // as after sleep, is dropped within ten seconds and the next call logs in afresh
-const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
+// On Windows each trip logs in by itself: Git's ssh would keep a shared connection on MSYS's stand-in for a Unix socket, not known to
+// work there, and a master left running could hold the engine's pipes open
+const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', ...(isWindows ? [] : ['-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60']), '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
 // This Mac's own name, as its Sharing settings give it, read once: what it is called on the Macs it hands its chats to
 let localName = ''
 const knowLocalName = async ($: EngineInterface) => {
   if (localName) return localName
-  const r = await runOn($, isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+  // (on Windows its computer name, as Windows keeps it for every program)
+  const named = isWindows ? ((await $.env.get('COMPUTERNAME').catch(() => undefined)) ?? '').trim() : ''
+  const r = named ? { exitCode: 0, stdout: named } : await runOn($, isLinux || isWindows ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
   localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
   return localName
 }

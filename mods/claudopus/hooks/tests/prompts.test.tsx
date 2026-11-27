@@ -811,6 +811,39 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
+// The memory folder on the Windows PC of world(on, { windows: true })
+const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
+// A Windows PC's own programs, as a test gives them, for world(windowsPC(on, answer).on, { windows: true }). Each command the mod
+// runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
+// handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
+// no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
+type WindowsRun = { argv: string[]; env: Record<string, string> }
+const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
+  const runs: WindowsRun[] = []
+  const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const wrapped = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => unknown]
+      if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => {
+        const argv = [...e.argv]
+        const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
+        const tool = String(inBash ? argv[3] : argv[0])
+        if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
+        if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
+        if (!inBash) {
+          const one = { argv, env: { ...(e.init?.env ?? {}) } }
+          runs.push(one)
+          const out = answer(one)
+          if (out !== undefined) return said(out)
+        }
+        return handle(c, e)
+      }
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: wrapped, runs }
+}
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
@@ -1574,5 +1607,26 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   await clock.advance(35_000)
   expect(await until(async () => (stops() === 2 ? true : undefined))).toBe(true)
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('npm run slow') && one.includes('was stopped at its limit of 1 min')))).toBeDefined()
+  await list.unmount()
+})
+
+// On Windows no Terminal opens: the command that lets a connector's action through is one for Git Bash, which the person copies
+test("on a Windows PC a connector's tool Claude Code refuses a task is asked with the command for Git Bash to copy, Try again and Don't allow, and nothing to open", async ($, on) => {
+  const { files, clock } = world(on, { windows: true, agents: { a1: 'running' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the leaderboard', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Make the leaderboard', prompt: 'make the leaderboard' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const TOOL = 'mcp__5a3e9d85-c502-4788-adea-8783a1c00ccc__confirm_cost'
+  files.set('auto-refuse', TOOL)
+  await $.tool.call({ tool: TOOL, agentId: 'a1', tool_use_id: 'c1', amount: 10 } as never)
+  files.delete('auto-refuse')
+  await clock.advance(1000)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code blocked this action. Let your tasks do it?' }))).toBeDefined()
+  const said = (await list.findAll({ type: 'Markdown' } as never)).map(one => String(one.props.text ?? '')).join('\n')
+  expect(said).toContain(`Copy the command, paste it in Git Bash and press Return: it adds ${TOOL} to your Claude Code settings`)
+  const labels = (await list.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith('ask-a1')).map(b => String(b.props.label))
+  expect(labels.filter(one => ['Try again', "Don't allow", 'Copy', 'Open in Terminal'].includes(one)).sort()).toEqual(['Copy', "Don't allow", 'Try again'])
+  expect([...(await textsOf(list)), said].join('\n')).toContain(`bash '${PLUGIN}/bin/allow-tool' ${TOOL}`)
   await list.unmount()
 })

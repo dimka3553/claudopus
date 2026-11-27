@@ -5,8 +5,43 @@
 # The app is copied to one fixed place first, so macOS knows one Claudopus whichever version of the mod is installed, and a
 # click finds it again after the mod updates.
 # Exit codes: 0 shown, 5 macOS is asking the person to allow Claudopus (this one is shown once they do), 2 Claudopus
-# notifications are turned off, anything else failed.
+# notifications are turned off, 3 none can be shown here (Linux with no desktop, Windows with no toast), anything else failed.
 set -eu
+# Windows, in Git for Windows' bash: a notification of Windows' own, by Windows PowerShell's toast (shown as from Windows PowerShell,
+# the app Windows already knows), silent, as the mod plays its own chime; a click opens the chat's link. The words reach PowerShell
+# in environment values and its script whole, so nothing of them passes through Windows' quoting of a command line. 3 when Windows
+# shows none (no toast there, as on a server)
+case "$(uname -s 2>/dev/null)" in
+MINGW* | MSYS* | CYGWIN*)
+  title='' text='' open=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --title) title=$2; shift 2 ;;
+      --text) text=$2; shift 2 ;;
+      --open) open=$2; shift 2 ;;
+      --activate | --key | --sound) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [ "$title" = '' ] && [ "$text" = '' ] && { echo on; exit 0; }
+  ps1='$ErrorActionPreference = "Stop"
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$e = { param($t) [Security.SecurityElement]::Escape([string]$t) }
+$open = $env:CLAUDOPUS_NOTIFY_OPEN
+$launch = if ($open) { " activationType=""protocol"" launch=""" + (& $e $open) + """" } else { "" }
+$xml = "<toast" + $launch + "><visual><binding template=""ToastGeneric""><text>" + (& $e $env:CLAUDOPUS_NOTIFY_TITLE) + "</text><text>" + (& $e $env:CLAUDOPUS_NOTIFY_TEXT) + "</text></binding></visual><audio silent=""true""/></toast>"
+$doc = New-Object Windows.Data.Xml.Dom.XmlDocument
+$doc.LoadXml($xml)
+$app = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($doc))'
+  # (as UTF-16 in base64, PowerShell's own way to take a script whole)
+  encoded=$(printf '%s' "$ps1" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\r\n')
+  CLAUDOPUS_NOTIFY_TITLE=$title CLAUDOPUS_NOTIFY_TEXT=$text CLAUDOPUS_NOTIFY_OPEN=$open MSYS2_ARG_CONV_EXCL='*' \
+    powershell.exe -NoProfile -NonInteractive -EncodedCommand "$encoded" >/dev/null 2>&1 || exit 3
+  exit 0
+  ;;
+esac
 # Linux: the desktop's own notification, by notify-send, where a desktop session is seen; 3 where there is none (as in a terminal
 # over SSH, where the terminal's own notification and the panel are what the person sees), so the mod says so in its log
 if [ "$(uname -s)" != Darwin ]; then

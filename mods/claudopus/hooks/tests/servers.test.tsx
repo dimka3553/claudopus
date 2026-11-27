@@ -811,6 +811,39 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
+// The memory folder on the Windows PC of world(on, { windows: true })
+const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
+// A Windows PC's own programs, as a test gives them, for world(windowsPC(on, answer).on, { windows: true }). Each command the mod
+// runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
+// handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
+// no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
+type WindowsRun = { argv: string[]; env: Record<string, string> }
+const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
+  const runs: WindowsRun[] = []
+  const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const wrapped = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => unknown]
+      if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => {
+        const argv = [...e.argv]
+        const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
+        const tool = String(inBash ? argv[3] : argv[0])
+        if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
+        if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
+        if (!inBash) {
+          const one = { argv, env: { ...(e.init?.env ?? {}) } }
+          runs.push(one)
+          const out = answer(one)
+          if (out !== undefined) return said(out)
+        }
+        return handle(c, e)
+      }
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: wrapped, runs }
+}
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
@@ -974,5 +1007,53 @@ test('the servers panel opens when asked, lists the servers running from my fold
   expect(killed).toEqual(['700'])
   expect(await pane.find({ type: 'Link' })).toBeUndefined()
   expect((await pane.find({ type: 'Text' }))?.text).toBe('No servers are running from your folders.')
+  await pane.unmount()
+})
+
+// On Windows: what listens is netstat's, who runs it and from where PowerShell's, and a Stop ends it with what it started
+test('on a Windows PC the servers panel lists the servers a chat started or that run from my folders, from netstat and PowerShell, and Stop ends one with what it started', async ($, on) => {
+  let isGone = false
+  const pc = windowsPC(on, run => {
+    const words = run.argv.join(' ')
+    if (/^netstat/i.test(run.argv[0] ?? ''))
+      return [
+        '',
+        'Active Connections',
+        '',
+        '  Proto  Local Address          Foreign Address        State           PID',
+        '  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1100',
+        ...(isGone ? [] : ['  TCP    0.0.0.0:3100           0.0.0.0:0              LISTENING       7000', '  TCP    [::]:3100              [::]:0                 LISTENING       7000']),
+        '  TCP    127.0.0.1:4070         0.0.0.0:0              ABHÖREN         8800',
+        '  TCP    127.0.0.1:52000        127.0.0.1:3100         ESTABLISHED     9100',
+        '',
+      ].join('\r\n')
+    if (words.includes('Win32_Process') && words.includes('CommandLine'))
+      return [
+        '1100\t700\tC:\\Windows\\System32\\svchost.exe\tsvchost.exe\tC:\\Windows\\system32\\svchost.exe -k RPCSS',
+        '5000\t4000\tC:\\Users\\sam\\AppData\\Roaming\\Claude\\claude-code\\2.1.330\\4262a1273231\\claude.exe\tclaude.exe\tclaude.exe --output-format stream-json',
+        '6000\t5000\tC:\\Program Files\\Git\\usr\\bin\\bash.exe\tbash.exe\tbash -c npm run dev',
+        '7000\t6000\tC:\\Program Files\\nodejs\\node.exe\tnode.exe\t"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\sam\\Documents\\GitHub\\3d-sandbox\\node_modules\\next\\dist\\bin\\next dev -p 3100',
+        '8800\t1\tC:\\Users\\sam\\AppData\\Roaming\\Spotify\\Spotify.exe\tSpotify.exe\t"C:\\Users\\sam\\AppData\\Roaming\\Spotify\\Spotify.exe"',
+        '',
+      ].join('\r\n')
+    if (/^taskkill/i.test(run.argv[0] ?? '')) return ((isGone = true), '')
+    return undefined
+  })
+  const { files, clock } = world(pc.on, { windows: true, panes: ['servers'] })
+  files.set('C:/Users/sam/.claude/sessions/5000.json', '{"pid":5000,"sessionId":"s-1","name":"Photo to 3D","cwd":"C:\\\\Users\\\\sam\\\\x"}')
+  await $.session.start(start)
+  await $.command.run({ command: 'servers', args: '' } as never)
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' } as never)
+  const link = await until(() => pane.find({ type: 'Link' }))
+  expect(link?.props.href).toBe('http://localhost:3100')
+  expect((await pane.find({ type: 'Text', text: /Photo to 3D/ }))?.text).toBe('3d-sandbox · Photo to 3D')
+  // Windows' own listener and an app in the person's AppData are not theirs
+  expect(await pane.find({ type: 'Text', text: /135|4070/ })).toBeUndefined()
+  expect((await pane.findAll({ type: 'Link' })).length).toBe(1)
+  const press = pane.press({ key: 'kill-7000' })
+  await clock.advance(1000)
+  await press
+  expect(pc.runs.filter(run => /^taskkill/i.test(run.argv[0] ?? '')).map(run => run.argv)).toEqual([['taskkill', '/PID', '7000', '/T', '/F']])
+  expect((await until(() => pane.find({ type: 'Text', text: 'No servers are running from your folders.' })))?.text).toBe('No servers are running from your folders.')
   await pane.unmount()
 })

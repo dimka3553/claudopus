@@ -11,17 +11,20 @@ let usageFile = ''
 // The shared file, in the person's own temporary folder (on Linux, their cache folder: /tmp is everyone's)
 const usagePathOf = async ($: EngineInterface) => {
   if (usageFile) return usageFile
-  const tmp = isLinux ? '' : ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
+  // (on Windows the person's own temporary folder, TEMP, in their profile)
+  const tmp = isLinux ? '' : slashed((isWindows ? await $.env.get('TEMP') : await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
   const home = (await homeFolder($)) ?? ''
   usageFile = tmp ? `${tmp}/claudopus-usage.json` : `${home}/.cache/claudopus-usage.json`
   return usageFile
 }
 
+// How often this computer is looked at: on Windows a third as often, as its look is a PowerShell, which costs far more than ps
+const usageEvery = () => (isWindows ? USAGE_EVERY * 3 : USAGE_EVERY)
 // One look when the last is due: a fresh one another chat left is taken as it is, and a chat that is looking says so first in a
 // small file beside it, so chats that fall due together look once
 const lookUsage = async ($: EngineInterface) => {
   const now = await $.clock.now()
-  const isFresh = (at: number) => now >= at && now - at < USAGE_EVERY - 500
+  const isFresh = (at: number) => now >= at && now - at < usageEvery() - 500
   if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
   usageBusy = true
   usageTriedAt = now
@@ -30,15 +33,15 @@ const lookUsage = async ($: EngineInterface) => {
     const shared = keptOf(await $.fs.read(path).catch(() => ''))
     if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
     const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
-    if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
+    if (taking && now >= taking && now - taking < usageEvery() / 2) return
     await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
     const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
     // top, the costly part, at most once a minute, answered or not
     const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
-    const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+    const isTop = !isLinux && !isWindows && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
     if (isTop) usageTopTriedAt = now
-    const r = await runOn($, ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
-    const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
+    const r = await runOn($, isWindows ? [...POWERSHELL, USAGE_WINDOWS] : ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: isWindows ? 15_000 : 5000 }).catch(() => undefined)
+    const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop, isWindows) : undefined
     if (!kept) return
     await keepUsage($, kept)
     await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
@@ -53,10 +56,12 @@ const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
   if (isNew) await update($, figuresAt, () => kept.at)
 }
 // The figures to show, when a look has been had lately
-const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
+const usageNow = (now: number) => (usageKept && now - usageKept.at < usageEvery() * 6 ? usageKept.figures : undefined)
 // The looks of the last minutes for the cards' charts, ending at the newest look, so a drawing between looks draws the same charts
 const usageHistory = () => ({ points: usageKept?.history ?? [], at: usageKept?.at ?? 0 })
 
+// What this computer is called in a line about it: the Mac, the PC, the machine
+const machineWord = () => thisMac().replace(/^this /, '')
 // Claude's own part of each figure, named the same in every place: Claude and every command it started
 const CLAUDE_ALL = 'Claude and what it started'
 // What each figure says in words, for a reader that cannot see the drawings
@@ -143,7 +148,7 @@ const usageCards = (f: UsageFigures, history: { points: UsagePoint[]; at: number
     battery: !b ? undefined : {
       title: 'Battery',
       value: `${batteryShown(b).pct}%`,
-      note: isDraining ? 'Charging, but the battery drains · the Mac uses more than the charger gives' : upperFirst(batteryNote(b)),
+      note: isDraining ? `Charging, but the battery drains · the ${machineWord()} uses more than the charger gives` : upperFirst(batteryNote(b)),
       // What the Mac draws over time, Claude's part purple; the charge where the Mac tells no power
       chart: isPowerShown ? chart('Power use', p => p.watts, n => `${wattText(n)} W`, 10) : chart('Charge', p => (p.batt !== undefined ? [p.batt / 100, 0] : undefined), pct),
       // The strain on it: what the whole Mac draws, the processors and the graphics processor each, and Claude's part of each. The
@@ -152,7 +157,7 @@ const usageCards = (f: UsageFigures, history: { points: UsagePoint[]; at: number
       rows: [
         ...charge,
         ...charger,
-        ...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`] as [string, string]] : []),
+        ...(f.watts !== undefined ? [[`Power use, whole ${machineWord()}`, `${wattText(f.watts)} W`] as [string, string]] : []),
         ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
         ...(f.wattsClaude !== undefined ? [['Claude, processors', `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
         ...(f.wattsGpu !== undefined ? [['Power use, graphics', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),

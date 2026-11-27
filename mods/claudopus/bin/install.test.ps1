@@ -46,10 +46,13 @@ function Install($h, [string]$shell = 'powershell') {
   $saved = @{}
   $set = @{ USERPROFILE = $h.Home; HOME = $h.Home; APPDATA = (Join-Path $h.Home 'AppData\Roaming'); LOCALAPPDATA = (Join-Path $h.Home 'AppData\Local'); Path = $h.Path; CLAUDOPUS_SOURCE = $repo; CLAUDE_CONFIG_DIR = $null }
   foreach ($k in $set.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $set[$k]) }
+  # What the installer writes to its error stream is part of what it says, never an error of this test's own
+  $was = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
   try {
-    $out = & $shell -NoProfile -NonInteractive -Command "Get-Content -Raw -LiteralPath '$script' | iex" 2>&1 | Out-String
+    $out = & $shell -NoProfile -NonInteractive -Command "Get-Content -Raw -LiteralPath '$script' | iex" 2>&1 | ForEach-Object { "$_" } | Out-String
     $rc = $LASTEXITCODE
-  } finally { foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) } }
+  } finally { $ErrorActionPreference = $was; foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) } }
   [IO.File]::WriteAllText("$($h.Home).out", $out)
   @{ Out = $out; Rc = $rc }
 }

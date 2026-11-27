@@ -6,7 +6,7 @@ import type { Round } from './flows'
 import { boardDelta, boardFrom, boardRange, boardView, CACHE_V, DAY, dayCells, dayNo, GAP, held, memoryHeld, monthFrom, monthName, monthNo, monthsKept, NAME_RULE, parsed, partOf, piecesIn, piecesKept, rangeFrom, RANGES, READ_EVERY, reading, rowPiece, statsFrom, statsView, SUM_JQ, sumKept, svgFits, timelineOf, view as statsShown } from './stats'
 import type { BoardRow, BoardSent, BoardShown, Cache, TokenSums, DayEntry, DayRows, FileSum, Held, Kept, Loaded, Meta, MemoryPart, MonthKept, Part, Piece, Range, Scope, What } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, interruptedSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, interruptedSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, APP_LOG_LOOK_IN, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
 import { ALERTS, clearModel, configMore, configView, editing, fillModels, heavyModeOf, leanOf, modelsIn, modelsOf, modelsShort, parse, ROLES, SAME, TEXTS } from './config'
 import type { Config, ConfigShown, HeavyMode, Lean, LeanKey, Models, Role } from './config'
@@ -23,7 +23,7 @@ import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, namingPrompt } from './naming'
 import type { Naming, NamingAsk } from './naming'
-import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, USAGE_WINDOWS, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
@@ -2764,21 +2764,62 @@ redraw($)
 
 
 const rows = (text: string) => text.split('\n').filter(Boolean)
-const isEngine = (path: string) => path.endsWith('/MacOS/claude')
+const isEngine = (path: string) => path.endsWith('/MacOS/claude') || /[\\/]claude\.exe$/.test(path)
 const short = (args: string) =>
-args
+isWindows
+? [...args.matchAll(/"([^"]*)"|(\S+)/g)]
+.map(m => m[1] ?? m[2] ?? '')
+.map(part => (isAbsPath(part) ? (part.split(/[\\/]/).pop() ?? part).replace(/\.exe$/i, '') : part))
+.join(' ')
+.slice(0, 50)
+: args
 .split(' ')
 .map(part => (part.startsWith('/') ? (part.split('/').pop() ?? part) : part))
 .join(' ')
 .slice(0, 50)
+
+const WINDOWS_PROCS = "Get-CimInstance Win32_Process | ForEach-Object { '' + $_.ProcessId + [char]9 + $_.ParentProcessId + [char]9 + $_.ExecutablePath + [char]9 + $_.Name + [char]9 + $_.CommandLine }"
+const windowsPortsOf = (text: string) => {
+const ports = new Map<number, string[]>()
+for (const line of text.split(/\r?\n/)) {
+const m = /^\s*TCP\s+(\S+):(\d+)\s+(?:0\.0\.0\.0|\[::\]):0\s+\S+\s+(\d+)\s*$/i.exec(line)
+const pid = Number(m?.[3] ?? 0)
+if (m && pid > 4 && !ports.get(pid)?.includes(m[2] ?? '')) ports.set(pid, [...(ports.get(pid) ?? []), m[2] ?? ''])
+}
+return ports
+}
+const windowsProcsOf = (text: string) => {
+const table = new Map<number, { parent: number; path: string; args: string }>()
+for (const line of text.split(/\r?\n/)) {
+const [pid = '', parent = '', path = '', name = '', ...args] = line.split('\t')
+if (/^\d+$/.test(pid)) table.set(Number(pid), { parent: Number(parent) || 0, path: slashed(path || name), args: args.join('\t').trim() })
+}
+return table
+}
+const windowsFolderOf = (args: string, home: string, scratch: string) => {
+const lower = (one: string) => one.toLowerCase()
+for (const m of args.matchAll(/"([^"]*)"|(\S+)/g)) {
+const word = slashed(m[1] ?? m[2] ?? '')
+if (!/^[A-Za-z]:\//.test(word)) continue
+const inHome = home && lower(word).startsWith(`${lower(home)}/`) && !lower(word).startsWith(`${lower(home)}/appdata/`)
+const inScratch = scratch && lower(word).startsWith(`${lower(scratch)}/`)
+if (!inHome && !inScratch) continue
+const whole = inHome ? `${home}${word.slice(home.length)}` : `${scratch}${word.slice(scratch.length)}`
+const [before] = whole.split('/node_modules/')
+return before !== whole ? (before ?? whole) : whole.replace(/\/[^/]*$/, '')
+}
+return ''
+}
 
 const scanServers = async ($: EngineInterface) => {
 scannedAt = Date.now()
 const home = (await homeFolder($)) ?? ''
 const run = async (argv: string[]) => (await runOn($, argv).catch(() => undefined))?.stdout ?? ''
 
-const ports = new Map<number, string[]>()
+let ports = new Map<number, string[]>()
 let pid = 0
+if (isWindows) ports = windowsPortsOf(await run(['netstat', '-ano']))
+else
 for (const row of rows(await run(['lsof', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn']))) {
 if (row.startsWith('p')) pid = Number(row.slice(1))
 const port = row.startsWith('n') ? row.slice(row.lastIndexOf(':') + 1) : ''
@@ -2788,19 +2829,30 @@ if (!ports.size) return update($, servers, () => [])
 const pids = [...ports.keys()].join(',')
 
 const folders = new Map<number, string>()
+const commands = new Map<number, string>()
+let table = new Map<number, { parent: number; path: string }>()
+const scratchRoot = isWindows ? slashed((await $.env.get('CLAUDE_CODE_TMPDIR').catch(() => undefined)) ?? '').replace(/\/+$/, '') || 'C:/tmp' : ''
+if (isWindows) {
+const procs = windowsProcsOf(await run([...POWERSHELL, WINDOWS_PROCS]))
+table = procs
+for (const [id, one] of procs) {
+if (!ports.has(id)) continue
+commands.set(id, one.args || one.path)
+folders.set(id, windowsFolderOf(one.args, home, scratchRoot))
+}
+} else {
 for (const row of rows(await run(['lsof', '-a', '-d', 'cwd', '-Fpn', '-p', pids]))) {
 if (row.startsWith('p')) pid = Number(row.slice(1))
 else if (row.startsWith('n')) folders.set(pid, row.slice(1))
 }
-const commands = new Map<number, string>()
 for (const row of rows(await run(['ps', '-o', 'pid=,args=', '-p', pids]))) {
 const m = /^\s*(\d+)\s+(.*)$/.exec(row)
 if (m) commands.set(Number(m[1]), m[2] ?? '')
 }
-const table = new Map<number, { parent: number; path: string }>()
 for (const row of rows(await run(['ps', '-A', '-o', 'pid=,ppid=,comm=']))) {
 const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row)
 if (m) table.set(Number(m[1]), { parent: Number(m[2]), path: m[3] ?? '' })
+}
 }
 const above = (from: number, test: (path: string) => boolean) => {
 let at = table.get(from)?.parent ?? 0
@@ -2827,8 +2879,9 @@ const kept: Record<string, string> = {}
 const found: Server[] = []
 for (const [id, list] of ports) {
 const folder = folders.get(id) ?? ''
-const isScratch = folder.startsWith('/private/tmp/') || folder.startsWith('/tmp/')
-if (!(folder.startsWith(`${home}/`) || isScratch) || folder.startsWith(`${home}/Library`) || isEngine(table.get(id)?.path ?? '')) continue
+const isScratch = folder.startsWith('/private/tmp/') || folder.startsWith('/tmp/') || Boolean(scratchRoot && folder.toLowerCase().startsWith(`${scratchRoot.toLowerCase()}/`))
+const isChats = isWindows && Boolean(above(id, isEngine))
+if (!(folder.startsWith(`${home}/`) || isScratch || isChats) || folder.startsWith(`${home}/Library`) || isEngine(table.get(id)?.path ?? '')) continue
 const port = list[0] ?? ''
 const chat = chats.get(String(above(id, isEngine))) ?? chats.get(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/.exec(folder)?.[0] ?? '') ?? seen[`${id}:${port}`]
 if (chat) kept[`${id}:${port}`] = chat
@@ -2855,7 +2908,7 @@ await update($, servers, list => [...list])
 }
 
 const stopServer = async ($: EngineInterface, pid: number) => {
-await runOn($, ['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
+await runOn($, isWindows ? ['taskkill', '/PID', String(pid), '/T', '/F'] : ['kill', String(pid)]).catch(err => log($, `server ${pid} not stopped: ${String(err)}`))
 await $.clock.sleep(700)
 await scanServers($)
 }
@@ -3861,7 +3914,7 @@ return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
 const MEMORY_PANE = 'memory-'
 const MEMORY_PANES = 3
 const memoryPathIn = () => new RegExp(`(?:${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|~/\\.claude/claudopus)/[^\\s\`()\\[\\]<>"'*|~]+`, 'g')
-const memoryHref = (path: string) => `file://${encodeURI(path.replace(/^~\/\.claude\/claudopus/, dir))}`
+const memoryHref = (path: string) => `file://${/^[A-Za-z]:\//.test(dir) ? '/' : ''}${encodeURI(path.replace(/^~\/\.claude\/claudopus/, dir))}`
 const memoryLinked = (text: string) => {
 const hrefs: string[] = []
 const at = (path: string) => {
@@ -3888,7 +3941,7 @@ return `${lead}[${clean}](${at(clean)})${tail}`
 return { text: linked, hrefs }
 }
 const memoryPressed = (href: string) => {
-let path = href.replace(/^file:\/\//, '')
+let path = href.replace(/^file:\/\//, '').replace(/^\/(?=[A-Za-z]:\/)/, '')
 try {
 path = decodeURI(path)
 } catch {}
@@ -3932,10 +3985,13 @@ if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stde
 
 const CATCH_UP_AFTER = 60_000
 const CATCH_UP_EVERY = 10 * 60_000
-const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+const CATCH_UP_LOG = 'd=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; '
+const CATCH_UP_START = `${CATCH_UP_LOG}nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+const CATCH_UP_WINDOWS = `${CATCH_UP_LOG}exec nice -n 10 "$@" >> "$l" 2>&1 < /dev/null`
 const startCatchUp = async ($: EngineInterface) => {
 if (!dir) return
-const r = await runOn($, ['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${pluginRoot($)}/bin/catch-up`, dir, `${await configDir($)}/projects`])
+const words = [dir, `${pluginRoot($)}/bin/catch-up`, dir, `${await configDir($)}/projects`]
+const r = isWindows ? await startOnWindows($, CATCH_UP_WINDOWS, words) : await runOn($, ['/bin/sh', '-c', CATCH_UP_START, 'sh', ...words])
 if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
 }
 
@@ -6501,7 +6557,7 @@ const text = items.length === 1 && first ? first.what : items.map(one => `${one.
 await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
-const nowhere = (panel: string) => `Claudopus can't show the ${panel} panel on this screen. Open it in the Claude app on the Mac this chat runs on.`
+const nowhere = (panel: string) => `Claudopus can't show the ${panel} panel on this screen. Open it in the Claude app on the ${machineWord()} this chat runs on.`
 
 
 const DESKTOP_SESSION = /^local_[A-Za-z0-9-]{1,64}$/
@@ -6524,7 +6580,7 @@ const run = (lead: string[]) => runOn($, [`${pluginRoot($)}/bin/notify`, ...lead
 const amber = asks ? await run(['--asks', ...(asks.chime ? ['--chime'] : [])]) : undefined
 if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
 void log($, `${what}: ${title} — app said ${sent.reason}; ${amber.exitCode === 0 ? 'notified through Claudopus Asks' : 'macOS asked to allow Claudopus Asks'}`)
-return amber.exitCode === 0 && asks?.chime === true && !isLinux
+return amber.exitCode === 0 && asks?.chime === true && !isLinux && !isWindows
 }
 const own = await run([])
 const tried = amber ? `Claudopus Asks said ${amber.exitCode}; ` : ''
@@ -6534,6 +6590,10 @@ return false
 }
 if (isLinux) {
 void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}${own.exitCode === 3 ? 'no desktop notification on this machine' : `notify-send said ${own.exitCode}`}`)
+return false
+}
+if (isWindows) {
+void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}${own.exitCode === 3 ? 'no Windows notification on this PC' : `Windows notification said ${own.exitCode}`}`)
 return false
 }
 const mac = await $.process
@@ -8711,11 +8771,12 @@ await log($, `${all.length === 1 ? 'an answer' : `${all.length} answers`} left i
 
 let macs: string[] = []
 const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`
-const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
+const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', ...(isWindows ? [] : ['-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60']), '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
 let localName = ''
 const knowLocalName = async ($: EngineInterface) => {
 if (localName) return localName
-const r = await runOn($, isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+const named = isWindows ? ((await $.env.get('COMPUTERNAME').catch(() => undefined)) ?? '').trim() : ''
+const r = named ? { exitCode: 0, stdout: named } : await runOn($, isLinux || isWindows ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
 localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
 return localName
 }
@@ -8918,8 +8979,8 @@ const lookAfar = async ($: EngineInterface, now: number) => {
 if (now - afarAt < AFAR_EVERY) return false
 afarAt = now
 const failed = { exitCode: -1, stdout: '' }
-const here = await runOn($, ['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
-const app = await runOn($, ['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+const here = isWindows ? failed : await runOn($, ['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+const app = await runOn($, isWindows ? ['sh', '-c', APP_LOG_LOOK_IN, 'sh', ...(await appLogFolders($))] : ['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
 const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : []
 for (const mac of macs) {
 const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
@@ -8932,14 +8993,19 @@ offChats = found
 stuckAt = stuck
 return isChanged
 }
+const appLogFolders = async ($: EngineInterface) => {
+const roaming = slashed((await $.env.get('APPDATA').catch(() => undefined)) ?? '')
+const local = slashed((await $.env.get('LOCALAPPDATA').catch(() => undefined)) ?? '')
+return [...(roaming ? [`${roaming}/Claude/logs`] : []), ...(local ? [`${local}/Claude-Data/logs`, `${local}/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/logs`] : [])]
+}
 const offName = (one: Off) => one.title || appTitles.get(one.chat) || (one.chat === 'new' ? 'A chat just started' : 'A chat')
 
 const afarPart = (ui: Ui) => {
 if (!stuckAt && !offChats.length) return null
 const there = macs.length === 1 ? macName(macs[0] ?? '') : 'the Mac it runs chats on over SSH'
 const lines = [
-...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} this Mac's Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
-...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
+...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} ${thisMac()}'s Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
+...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ` on ${thisMac()}`} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
 ]
 return (
 <ui.Box key="afar" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -10165,6 +10231,7 @@ const head = (String((input as { command?: unknown } | undefined)?.command ?? ''
 return head.trim().length >= 4 ? head.slice(0, 80) : ''
 }
 const running = async ($: EngineInterface) => {
+if (isWindows) return undefined
 const r = await runOn($, ['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
 return r.exitCode === 0 ? r.stdout.split('\n') : undefined
 }
@@ -10386,16 +10453,16 @@ const rule = connectorRuleOf(tool)
 const name = rule.split('__').slice(2).join('__').replace(/_/g, ' ')
 const input = connectorInput(call)
 const home = dir.replace(/\/\.claude\/claudopus$/, '')
-const command = `${zshQuoted(`${pluginRoot($)}/bin/allow-tool`)} ${rule}`
+const command = `${isWindows ? 'bash ' : ''}${zshQuoted(`${pluginRoot($)}/bin/allow-tool`)} ${rule}`
 const details = [
 `It wanted to ${name}${input ? `: ${input}` : '.'}`,
 `${reason ? `Blocked as “${reason}”. ` : ''}Claude Code never counts a yes on this card or in the chat as yours for this: only your own Claude Code settings let it through.`,
-`Open in Terminal and press Return: it adds ${rule} to your Claude Code settings, so your tasks may do this from now on, and nothing else. Then press ${TRY_AGAIN}.`,
+`${isWindows ? 'Copy the command, paste it in Git Bash and press Return' : 'Open in Terminal and press Return'}: it adds ${rule} to your Claude Code settings, so your tasks may do this from now on, and nothing else. Then press ${TRY_AGAIN}.`,
 own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '',
 ].filter(Boolean).join('\n\n')
 const at = await $.clock.now()
 let isPut = false
-await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
+await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, ...(isWindows ? {} : { isCommand: true }), cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
 if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same action waits on it already`))
 await log($, `refusal of ${tool} for ${agent} put to the person on its card, with the rule that lets it through`)
 const card = (await read($, todos)).find(one => one.id === top)
@@ -12170,9 +12237,14 @@ return `${kind} · ${job.label}`
 const findTasks = async ($: EngineInterface) => {
 const sid = await $.session.id().catch(() => '')
 if (!sid) return ''
-const r = await $.process
-.run(['sh', '-c', 'for d in /private/tmp/claude-*/*/"$1"/tasks /tmp/claude-*/*/"$1"/tasks "${TMPDIR%/}"/claude-*/*/"$1"/tasks; do [ -d "$d" ] && { echo "$d"; exit 0; }; done; exit 1', 'sh', sid], { timeoutMs: 5000 })
-.catch(() => undefined)
+const own = isWindows ? slashed((await $.env.get('CLAUDE_CODE_TMPDIR').catch(() => undefined)) ?? '').replace(/\/+$/, '') : ''
+const r = await runOn(
+$,
+isWindows
+? ['sh', '-c', 'for d in "$2"/claude-*/*/"$1"/tasks; do [ -d "$d" ] && { echo "$d"; exit 0; }; done; exit 1', 'sh', sid, own || 'C:/tmp']
+: ['sh', '-c', 'for d in /private/tmp/claude-*/*/"$1"/tasks /tmp/claude-*/*/"$1"/tasks "${TMPDIR%/}"/claude-*/*/"$1"/tasks; do [ -d "$d" ] && { echo "$d"; exit 0; }; done; exit 1', 'sh', sid],
+{ timeoutMs: 5000 },
+).catch(() => undefined)
 return r?.exitCode === 0 ? r.stdout.trim().split('\n')[0] ?? '' : ''
 }
 
@@ -12243,7 +12315,7 @@ if (!b || b.isWatch || !seen) return false
 return now - (seen.wroteAt && !seen.isEmpty ? seen.wroteAt : b.at) >= SILENT_WARN
 })
 for (const o of asked) if (!quiet.includes(o) && jobLog.get(o.id)?.live) (jobLog.set(o.id, { ...(jobLog.get(o.id) as Seen), live: undefined }), (isChanged = true))
-if (quiet.length && now - liveLookedAt >= LIVE_LOOK) {
+if (quiet.length && !isWindows && now - liveLookedAt >= LIVE_LOOK) {
 liveLookedAt = now
 const r = await runOn($, ['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
 for (const m of (r?.stdout ?? '').matchAll(/^@@LIVE@@ (\d+) (.*)$/gm)) {
@@ -12371,7 +12443,7 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
 const file = written ?? jobFiles.get(job.id)
 presses += 1
 drawAgain($)
-if (!file || !canOpenFile(file) || isLinux) return
+if (!file || !canOpenFile(file) || isLinux || isWindows) return
 const at = await $.clock.now()
 const base = `${dir}/terminal`
 const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
@@ -12437,7 +12509,7 @@ return (
 <Box flexDirection="row" gap={2} flexShrink={0}>
 {job && canStopJob(job) ? <Button key={`log-stop-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain onPress={() => void stopJob($, one.id, job).catch(err => log($, `run not stopped: ${String(err)}`))} /> : null}
 <Button key={`log-details-${presses}`} label="Details" plain onPress={() => openWork($, one.id)} />
-{file && canOpenFile(file) && !isLinux ? <Button key={`log-terminal-${presses}`} label="Open in Terminal" plain onPress={() => void openJobOutput($, { id: job?.id ?? run?.id ?? '', label }, file).catch(err => log($, `output not opened: ${String(err)}`))} /> : null}
+{file && canOpenFile(file) && !isLinux && !isWindows ? <Button key={`log-terminal-${presses}`} label="Open in Terminal" plain onPress={() => void openJobOutput($, { id: job?.id ?? run?.id ?? '', label }, file).catch(err => log($, `output not opened: ${String(err)}`))} /> : null}
 </Box>
 </Box>
 <Box key="log-lines" flexDirection="column" backgroundColor={OUTPUT_FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -12447,7 +12519,7 @@ lines.map((line, n) => (
 <Text key={`log-line-${n}`} wrap="wrap">{line || ' '}</Text>
 ))
 ) : (
-<Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? (kind === 'remote' ? 'Nothing has come back from the cloud machine yet. The command that started the job still waits for it, and its task has been told to bring the job\'s own output here as it runs.' : 'No output yet. It shows here as soon as the command writes something.') : 'It wrote nothing.'}</Text>
+<Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? `This log isn't on ${thisMac()}.` : job ? (kind === 'remote' ? 'Nothing has come back from the cloud machine yet. The command that started the job still waits for it, and its task has been told to bring the job\'s own output here as it runs.' : 'No output yet. It shows here as soon as the command writes something.') : 'It wrote nothing.'}</Text>
 )}
 </Box>
 </Box>
@@ -12577,7 +12649,7 @@ return running < Math.max(2, Math.round((f?.loadCores ?? 8) / 4)) || now - heavy
 const busyWords = (f: UsageFigures | undefined) =>
 !f ? 'busy' : [f.load !== undefined && f.loadCores ? `load ${Math.round(f.load)} on ${f.loadCores} cores` : '', f.memTotal ? `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB memory in use` : ''].filter(Boolean).join(', ')
 const HEAVY_HELD = (what: string, f: UsageFigures | undefined, running: string[], open: number) =>
-`Not run: the Mac is busy (${busyWords(f)}), and "${what}" is a heavy command, so it waits for ${[...running.map(one => `"${one}"`), ...(open ? [open === 1 ? 'a heavy command now running' : `${open} heavy commands now running`] : [])].join(', ') || 'the Mac to have room'} to end. Do what does not need it, and send the same command again once one of those has ended, or the Mac has room.`
+`Not run: the ${machineWord()} is busy (${busyWords(f)}), and "${what}" is a heavy command, so it waits for ${[...running.map(one => `"${one}"`), ...(open ? [open === 1 ? 'a heavy command now running' : `${open} heavy commands now running`] : [])].join(', ') || `the ${machineWord()} to have room`} to end. Do what does not need it, and send the same command again once one of those has ended, or the Mac has room.`
 
 const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: string; deny?: string }> => {
 const input = e as { command?: unknown; description?: unknown; tool_use_id?: unknown }
@@ -12593,7 +12665,7 @@ heavySeen.add(keptCmd(command))
 await lookUsage($).catch(() => undefined)
 const now = await $.clock.now()
 if (heavyRoom(list, usageNow(now), mode, now)) return (heavyOpen.set(id, agent), (heavyLetAt = now), { id })
-await log($, `work ${agent}'s heavy command refused while the Mac is busy (${busyWords(usageNow(now))})`)
+await log($, `work ${agent}'s heavy command refused while the ${machineWord()} is busy (${busyWords(usageNow(now))})`)
 return { deny: HEAVY_HELD(cut(oneLine(String(input.description ?? '')) || labelOf('', command), 120), usageNow(now), heavyRuns(list), heavyOpen.size) }
 }
 
@@ -12613,7 +12685,7 @@ let tidyLast: { at: number; freed: number } | undefined
 
 const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
 const startTidy = async ($: EngineInterface, flags: string[] = []) => {
-if (!dir || isOff) return
+if (!dir || isOff || isWindows) return
 const r = await runOn($, ['/bin/sh', '-c', TIDY_START, 'sh', dir, `${pluginRoot($)}/bin/tidy`, ...flags, dir])
 if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
 }
@@ -12656,7 +12728,7 @@ diskToldAt = now
 const told = dir ? Number(await $.fs.read(`${dir}/tidy/told`).catch(() => '0')) || 0 : 0
 if (now >= told && now - told < DISK_TOLD_EVERY) return
 if (dir) await $.fs.write(`${dir}/tidy/told`, String(now)).catch(() => undefined)
-await alertPerson($, 'disk', 'Your Mac is almost out of disk space', `${gbText(d.free)} GB left. Free up space from the Claudopus panel.`, 'disk-low')
+await alertPerson($, 'disk', `Your ${machineWord()} is almost out of disk space`, isWindows ? `${gbText(d.free)} GB left.` : `${gbText(d.free)} GB left. Free up space from the Claudopus panel.`, 'disk-low')
 }
 
 const freeSpace = async ($: EngineInterface) => {
@@ -12679,12 +12751,14 @@ return [
 id: 'disk-low',
 kind: 'disk',
 at: diskLowSince || d.at,
-text: `Your Mac has ${gbText(d.free)} GB of disk space left. Free up space?`,
+text: `Your ${machineWord()} has ${gbText(d.free)} GB of disk space left.${isWindows ? '' : ' Free up space?'}`,
 details: [
 isDiskFull(d) ? `Tasks' downloads, installs, builds, renders and browser commands wait until more than ${stop} GB is free.` : `Below ${stop} GB, tasks' downloads, installs, builds, renders and browser commands wait.`,
-'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
+isWindows
+? "Free up space isn't on Windows yet. Remove what tasks left behind yourself: their scratch folders, browser profiles and code copies whose work is merged."
+: 'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
 ].join('\n\n'),
-buttons: isFreeing ? [] : [{ key: `disk-free-${tidyPressedAt}-${presses}`, label: 'Free up space', onPress: () => void freeSpace($).catch(err => log($, `space not freed: ${String(err)}`)) }],
+buttons: isFreeing || isWindows ? [] : [{ key: `disk-free-${tidyPressedAt}-${presses}`, label: 'Free up space', onPress: () => void freeSpace($).catch(err => log($, `space not freed: ${String(err)}`)) }],
 ...(isFreeing ? { line: 'Freeing up space' } : isDone && tidyLast ? { line: `Freed ${gbText(tidyLast.freed)} GB` } : {}),
 },
 ]
@@ -12694,7 +12768,7 @@ const CHROME_APP = /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome(?![\w ]
 const CHROME_IN_SCRIPT = /executablePath\s*[:=]\s*[^\n]*\/Google Chrome\.app\b|\bchannel\s*[:=]\s*['"]chrome(?:-beta|-dev|-canary)?['"]/
 const CHROME_COPIED = `Not run: this starts your own Google Chrome app without a window. Each start makes a copy of the whole app on the disk, and a start that is stopped leaves it there. Use Playwright's own Chromium instead (chromium.launch() with no channel or executablePath, after npx playwright install chromium), start it once for every page the script needs, and close it in a finally block.`
 const DISK_FULL = (what: string, d: DiskKept) =>
-named(`Not run: the Mac has ${gbText(d.free)} GB of disk space left, and "${what}" can fill it. Remove what you made that is no longer needed (your scratch folder, temporary files), run heavy work in the cloud, and send the same command again once more than ${gbText(DISK_STOP)} GB is free. {Name} can free up space from the Claudopus panel.`)
+named(`Not run: the ${machineWord()} has ${gbText(d.free)} GB of disk space left, and "${what}" can fill it. Remove what you made that is no longer needed (your scratch folder, temporary files), run heavy work in the cloud, and send the same command again once more than ${gbText(DISK_STOP)} GB is free.${isWindows ? '' : ' {Name} can free up space from the Claudopus panel.'}`)
 const turnLeftovers = async ($: EngineInterface, e: ToolCallInput) => {
 const input = e as { command?: unknown; description?: unknown }
 const command = String(input.command ?? '')
@@ -12833,7 +12907,21 @@ const ids = new Set(tops.map(one => one.id))
 return [...tops, ...list.filter(one => !one.chat && one.parentId && one.status === 'working' && ids.has(topOf(list, one.id)))]
 }
 let enginePid = ''
-const pidOfEngine = async ($: EngineInterface) => ((await runOn($, ['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
+const pidOfEngine = async ($: EngineInterface) =>
+((await runOn($, isWindows ? [...POWERSHELL, "(Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID)).ParentProcessId"] : ['/bin/sh', '-c', 'echo $PPID'], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? '').trim()
+
+const POWERSHELL = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command']
+const windowsAlive = async ($: EngineInterface) => {
+const r = await runOn($, ['tasklist.exe', '/FO', 'CSV', '/NH'], { timeoutMs: 15_000 }).catch(() => undefined)
+if (!r || r.exitCode !== 0) return undefined
+return new Set(r.stdout.split(/\r?\n/).flatMap(line => /^"[^"]*","(\d+)"/.exec(line)?.[1] ?? []))
+}
+const startOnWindows = async ($: EngineInterface, script: string, words: string[]) => {
+if (!gitBash) return { exitCode: 1, stderr: "Git for Windows' bash was not found" }
+const line = `unset IFS; set +f; set -- ${words.map(zshQuoted).join(' ')}; ${script}`
+const start = "Start-Process -WindowStyle Hidden -FilePath $env:CLAUDOPUS_BASH -ArgumentList ('-c ' + [char]34 + 'set -f; IFS=; eval $CLAUDOPUS_RUN' + [char]34)"
+return runOn($, [...POWERSHELL, start], { timeoutMs: 30_000, env: { CLAUDOPUS_BASH: gitBash, CLAUDOPUS_RUN: line } }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+}
 let isLedgerRead = false
 let ledgerSign = ''
 let ledgerMade = ''
@@ -13032,8 +13120,9 @@ if (cards.length) found.push({ ledger, cards })
 if (!found.length) return []
 const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort()
 if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
-const r = pids.length ? await runOn($, ['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
-pidsSeen.alive = new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)))
+const alive = isWindows && pids.length ? await windowsAlive($) : undefined
+const r = pids.length && !isWindows ? await runOn($, ['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
+pidsSeen.alive = isWindows ? new Set(pids.filter(pid => !alive || alive.has(pid))) : new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)))
 pidsSeen.at = now
 pidsSeen.asked = pids.join(',')
 }
@@ -13054,7 +13143,7 @@ cards: cards.map(one => (isInterrupted(one) ? one : cutOff(one, Math.min(now, Nu
 
 const BEAT_EVERY = 3000
 const beatFile = (id: string) => `${dir}/keep/${id}.beat`
-const configDir = async ($: EngineInterface) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeFolder($)) ?? ''}/.claude`
+const configDir = async ($: EngineInterface) => slashed((await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeFolder($)) ?? ''}/.claude`)
 const ownKey = async ($: EngineInterface, configDir: string) => {
 const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec(pluginRoot($))?.[1]
 if (market && /^[\w.-]+$/.test(market)) return `claudopus@${market}`
@@ -13097,7 +13186,9 @@ beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n${thisLoad}\n
 await beat($, id)
 everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
 const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" >/dev/null 2>&1 </dev/null &`
-const r = await runOn($, ['/bin/sh', '-c', script, 'sh', `${pluginRoot($)}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+const r = isWindows
+? await startOnWindows($, 'exec "$1" "$2" >/dev/null 2>&1 </dev/null', [`${pluginRoot($)}/bin/revive`, dir])
+: await runOn($, ['/bin/sh', '-c', script, 'sh', `${pluginRoot($)}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
 if (r.exitCode !== 0) await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`)
 }
 const endBeat = async ($: EngineInterface, id: string) => {
@@ -14607,15 +14698,16 @@ let usageTopTriedAt = 0
 let usageFile = ''
 const usagePathOf = async ($: EngineInterface) => {
 if (usageFile) return usageFile
-const tmp = isLinux ? '' : ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
+const tmp = isLinux ? '' : slashed((isWindows ? await $.env.get('TEMP') : await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
 const home = (await homeFolder($)) ?? ''
 usageFile = tmp ? `${tmp}/claudopus-usage.json` : `${home}/.cache/claudopus-usage.json`
 return usageFile
 }
 
+const usageEvery = () => (isWindows ? USAGE_EVERY * 3 : USAGE_EVERY)
 const lookUsage = async ($: EngineInterface) => {
 const now = await $.clock.now()
-const isFresh = (at: number) => now >= at && now - at < USAGE_EVERY - 500
+const isFresh = (at: number) => now >= at && now - at < usageEvery() - 500
 if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
 usageBusy = true
 usageTriedAt = now
@@ -14624,14 +14716,14 @@ const path = await usagePathOf($)
 const shared = keptOf(await $.fs.read(path).catch(() => ''))
 if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
 const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
-if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
+if (taking && now >= taking && now - taking < usageEvery() / 2) return
 await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
 const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
 const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
-const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+const isTop = !isLinux && !isWindows && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
 if (isTop) usageTopTriedAt = now
-const r = await runOn($, ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
-const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
+const r = await runOn($, isWindows ? [...POWERSHELL, USAGE_WINDOWS] : ['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: isWindows ? 15_000 : 5000 }).catch(() => undefined)
+const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop, isWindows) : undefined
 if (!kept) return
 await keepUsage($, kept)
 await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
@@ -14644,9 +14736,10 @@ const isNew = kept.at !== usageKept?.at
 usageKept = kept
 if (isNew) await update($, figuresAt, () => kept.at)
 }
-const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
+const usageNow = (now: number) => (usageKept && now - usageKept.at < usageEvery() * 6 ? usageKept.figures : undefined)
 const usageHistory = () => ({ points: usageKept?.history ?? [], at: usageKept?.at ?? 0 })
 
+const machineWord = () => thisMac().replace(/^this /, '')
 const CLAUDE_ALL = 'Claude and what it started'
 const usageWords = (f: UsageFigures) => ({
 memory: `Memory: ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use, ${gbText(f.memClaude)} GB by ${CLAUDE_ALL}`,
@@ -14718,12 +14811,12 @@ most: most(f.gpuTop?.map(([name, n]): [string, number] => [name === 'WindowServe
 battery: !b ? undefined : {
 title: 'Battery',
 value: `${batteryShown(b).pct}%`,
-note: isDraining ? 'Charging, but the battery drains · the Mac uses more than the charger gives' : upperFirst(batteryNote(b)),
+note: isDraining ? `Charging, but the battery drains · the ${machineWord()} uses more than the charger gives` : upperFirst(batteryNote(b)),
 chart: isPowerShown ? chart('Power use', p => p.watts, n => `${wattText(n)} W`, 10) : chart('Charge', p => (p.batt !== undefined ? [p.batt / 100, 0] : undefined), pct),
 rows: [
 ...charge,
 ...charger,
-...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`] as [string, string]] : []),
+...(f.watts !== undefined ? [[`Power use, whole ${machineWord()}`, `${wattText(f.watts)} W`] as [string, string]] : []),
 ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
 ...(f.wattsClaude !== undefined ? [['Claude, processors', `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
 ...(f.wattsGpu !== undefined ? [['Power use, graphics', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
@@ -14891,7 +14984,7 @@ let isPacing = false
 let paceFile = ''
 const pacePathOf = async ($: EngineInterface) => {
 if (paceFile) return paceFile
-const tmp = ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
+const tmp = slashed((isWindows ? await $.env.get('TEMP') : await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
 paceFile = `${tmp || (await homeFolder($)) || ''}/claudopus-pace.json`
 return paceFile
 }
@@ -14905,7 +14998,7 @@ return { at: 0, held: 0 }
 }
 
 const paceWork = async ($: EngineInterface) => {
-if (isLinux || isPacing) return
+if (isLinux || isWindows || isPacing) return
 const now = await $.clock.now()
 if (now >= pacedAt && now - pacedAt < PACE_EVERY - 500) return
 const path = await pacePathOf($)

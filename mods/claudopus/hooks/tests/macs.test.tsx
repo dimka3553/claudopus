@@ -811,6 +811,39 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
+// The memory folder on the Windows PC of world(on, { windows: true })
+const WINDOWS_MEMORY = 'C:/Users/sam/.claude/claudopus'
+// A Windows PC's own programs, as a test gives them, for world(windowsPC(on, answer).on, { windows: true }). Each command the mod
+// runs by itself there, not in Git's bash (PowerShell, tasklist, taskkill, netstat), is kept in `runs` with the environment it was
+// handed, and answers what `answer` gives (its output; undefined for the world's own answer). In Git's bash ps, lsof and pgrep see
+// no Windows program and say nothing, and a shell's $PPID is 1, as MSYS gives a process Windows started
+type WindowsRun = { argv: string[]; env: Record<string, string> }
+const windowsPC = (on: On, answer: (run: WindowsRun) => string | undefined = () => undefined) => {
+  const runs: WindowsRun[] = []
+  const said = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const wrapped = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => unknown]
+      if (name !== 'process.run' || typeof handle !== 'function') return Reflect.apply(to as never, self, args)
+      const run = (c: unknown, e: { argv: readonly string[]; init?: { env?: Record<string, string> } }) => {
+        const argv = [...e.argv]
+        const inBash = argv[0] === GIT_BASH && argv[1] === '-c' && argv[2] === 'exec "$0" "$@"'
+        const tool = String(inBash ? argv[3] : argv[0])
+        if (inBash && /^(?:ps|lsof|pgrep|pkill)$/.test(tool)) return said('', 1)
+        if (inBash && tool === '/bin/sh' && argv[5] === 'echo $PPID') return said('1\n')
+        if (!inBash) {
+          const one = { argv, env: { ...(e.init?.env ?? {}) } }
+          runs.push(one)
+          const out = answer(one)
+          if (out !== undefined) return said(out)
+        }
+        return handle(c, e)
+      }
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: wrapped, runs }
+}
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
@@ -1449,4 +1482,25 @@ test("in a chat over ssh the panel's text stays the same from second to second w
   await clock.advance(41_000)
   expect(await texts()).toContain('1m')
   await pane.unmount()
+})
+
+// On Windows: this PC is named by its computer name, each ssh trip logs in by itself (Git's ssh shares no connection there), no
+// chat of this PC is looked for in Git's ps, which sees none, and the app's log is read in its data folder
+test("on a Windows PC the other Mac is reached by ssh with no shared connection, this PC named by its computer name, and the app's decision read from its own log folder", async ($, on) => {
+  const { files, clock, sshed, windowsRuns } = world(on, { windows: true, env: { COMPUTERNAME: 'SAM-PC', APPDATA: 'C:\\Users\\sam\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\sam\\AppData\\Local' } })
+  files.set(`${WINDOWS_MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  files.set('ssh:fetch', `${NOW / 1000}\n`)
+  files.set('sh:applog', "2026-11-12 13:57:59 [warn] [CCD] SSH local_x: 1 plugin(s) left to the host's own install did not load there; their copies are handed over from the next start on\n")
+  await $.session.start(start)
+  await clock.advance(40_000)
+  const first = await until(async () => sshed.find(([command]) => command?.startsWith("sh -c 'L=")))
+  expect(JSON.parse((first?.[1] ?? '').split('\n')[0] ?? '{}')).toEqual({ from: 'sam-pc', you: 'm4' })
+  const trips = windowsRuns.filter(argv => argv[3] === 'ssh')
+  expect(trips.length).toBeGreaterThan(0)
+  expect(trips.filter(argv => argv.some(word => word.startsWith('Control')))).toEqual([])
+  expect(windowsRuns.filter(argv => argv[3] === 'sh' && String(argv[5]).includes('--plugin-dir'))).toEqual([])
+  expect(windowsRuns.find(argv => argv[3] === 'sh' && String(argv[5]).includes('Starting app'))?.slice(7)).toEqual(['C:/Users/sam/AppData/Roaming/Claude/logs', 'C:/Users/sam/AppData/Local/Claude-Data/logs', 'C:/Users/sam/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/logs'])
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. At 2026-11-12 13:57 this PC's Claude app decided/ }))).toBeDefined()
+  await list.unmount()
 })

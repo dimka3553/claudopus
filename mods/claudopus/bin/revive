@@ -19,9 +19,11 @@
 # SLOW_QUIET (a switched-off copy never beats again, so it reaches that), and then has its tries as any other: a slow process is
 # just when the engine switches an add-on off. So one chat that stalls on and off costs a reload only per stall of SLOW_QUIET
 set -u
+# (revive --change <settings file> <key> <time>: only the change below, as the tests try it)
+if [ "${1:-}" = --change ]; then CHANGE_ONLY=1; else CHANGE_ONLY=; fi
 mem=${1:?memory folder}
 dir="$mem/keep"
-mkdir -p "$dir" || exit 1
+[ -n "$CHANGE_ONLY" ] || mkdir -p "$dir" || exit 1
 # How often to look, how quiet a beat may be (longer just after the Mac woke), how long between two changes, how many tries a chat
 # gets before it is left
 STEP=${CLAUDOPUS_REVIVE_STEP:-3}
@@ -39,29 +41,45 @@ now() { date +%s; }
 # (GNU stat first: its -f reads the file system and succeeds, so the BSD form would give nonsense on Linux)
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 me="$0"
+# Windows, in Git for Windows' bash: a chat's process is a Windows process, which kill and ps never see, so tasklist says which run;
+# the watchers are Git's own processes, whose command lines are in /proc
+win=; case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN*) win=1 ;; esac
+argsOf() { if [ -n "$win" ]; then tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null; else ps -o args= -p "$1" 2>/dev/null; fi; }
+# (once a look: the numbers of every Windows process; none at all when tasklist does not answer, and then every chat is taken to run)
+running=
+windowsLook() { running=$(tasklist //FO CSV //NH 2>/dev/null | cut -d, -f2 | tr -d '"\r'); [ -n "$running" ] || running=all; }
+chatRuns() {
+  if [ -z "$win" ]; then kill -0 "${1:-0}" 2>/dev/null; return; fi
+  case "${1:-}" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$running" = all ] || printf '%s\n' "$running" | grep -qx "$1"
+}
 
 # One at a time, the newest copy's: one already running from this same file, unchanged since it started, is left to run; one from
 # another copy (an older version), or from this file before an update rewrote it (a copy loaded from a folder keeps one path for
 # every version), is ended, and this one takes over. revive.pid holds the watcher's process and its file's time
-was=$(head -n 1 "$dir/revive.pid" 2>/dev/null)
-wasfile=$(sed -n 2p "$dir/revive.pid" 2>/dev/null)
-file=$(mtime "$me")
-if [ -n "$was" ] && [ "$was" != "$$" ] && kill -0 "$was" 2>/dev/null; then
-  args=$(ps -o args= -p "$was" 2>/dev/null)
-  case "$args" in
-    *"$me $mem"*) [ -n "$file" ] && [ "$wasfile" = "$file" ] && exit 0; kill "$was" 2>/dev/null ;;
-    *bin/revive*) kill "$was" 2>/dev/null ;;
-  esac
+if [ -z "$CHANGE_ONLY" ]; then
+  was=$(head -n 1 "$dir/revive.pid" 2>/dev/null)
+  wasfile=$(sed -n 2p "$dir/revive.pid" 2>/dev/null)
+  file=$(mtime "$me")
+  if [ -n "$was" ] && [ "$was" != "$$" ] && kill -0 "$was" 2>/dev/null; then
+    args=$(argsOf "$was")
+    case "$args" in
+      *"$me $mem"*) [ -n "$file" ] && [ "$wasfile" = "$file" ] && exit 0; kill "$was" 2>/dev/null ;;
+      *bin/revive*) kill "$was" 2>/dev/null ;;
+    esac
+  fi
+  printf '%s\n%s\n' "$$" "$file" > "$dir/revive.pid"
 fi
-printf '%s\n%s\n' "$$" "$file" > "$dir/revive.pid"
 mine() { [ "$(head -n 1 "$dir/revive.pid" 2>/dev/null)" = "$$" ]; }
 
-# One key's "revived" option set in one settings file with the system's own JSON (JavaScript on macOS, Python on Linux), every other
-# key as it was. A key of an installed copy is changed only while enabledPlugins turns it on; one loaded from a folder
-# (claudopus@inline) has no entry there. Prints "set", or "off"; fails when the file cannot be read as JSON or holds a number
-# JavaScript cannot carry whole, which it leaves as it is
+# One key's "revived" option set in one settings file with the system's own JSON (JavaScript on macOS, Python on Linux, Git's Perl
+# on Windows, where python3 is often missing or the Store's stand-in), every other key as it was. A key of an installed copy is
+# changed only while enabledPlugins turns it on; one loaded from a folder (claudopus@inline) has no entry there. Prints "set", or
+# "off"; fails when the file cannot be read as JSON or holds a number JavaScript cannot carry whole, which it leaves as it is
 change() { # <settings file> <key> <time>
-  if [ -x /usr/bin/osascript ]; then
+  if [ -n "$win" ] || [ "${CLAUDOPUS_REVIVE_PERL:-}" = 1 ]; then
+    changePerl "$@"
+  elif [ -x /usr/bin/osascript ]; then
     /usr/bin/osascript -l JavaScript - "$1" "$2" "$3" <<'JS' 2>/dev/null
 ObjC.import('Foundation')
 function run(argv) {
@@ -104,6 +122,53 @@ PY
   fi
 }
 
+# Perl's own JSON reads a file into hashes, which lose its keys' order, so the file is read here as it is written: each object a
+# list of its keys and values in order, each string and number kept as its own text, written back as JavaScript's JSON.stringify
+# with two spaces would write it. A file held open elsewhere a moment is tried again
+changePerl() {
+  /usr/bin/perl - "$1" "$2" "$3" <<'PL' 2>/dev/null
+use strict; use warnings;
+my ($path, $key, $at) = @ARGV;
+open my $in, '<:raw', $path or exit 1; local $/; my $text = <$in>; close $in;
+exit 1 if !defined $text || $text =~ /[-:\[,\s]\d{16,}|\d\.\d{16,}/;
+my $s = $text;
+sub ws { $s =~ /\G[ \t\r\n]*/gc }
+sub value {
+  ws();
+  if ($s =~ /\G\{/gc) { my @kv; ws(); return ['o', \@kv] if $s =~ /\G\}/gc;
+    while (1) { ws(); $s =~ /\G("(?:[^"\\]|\\.)*")/gc or die; my $k = $1; ws(); $s =~ /\G:/gc or die; push @kv, [$k, value()]; ws(); next if $s =~ /\G,/gc; $s =~ /\G\}/gc or die; return ['o', \@kv] } }
+  if ($s =~ /\G\[/gc) { my @a; ws(); return ['a', \@a] if $s =~ /\G\]/gc;
+    while (1) { push @a, value(); ws(); next if $s =~ /\G,/gc; $s =~ /\G\]/gc or die; return ['a', \@a] } }
+  return ['v', $1] if $s =~ /\G("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|true|false|null)/gc;
+  die;
+}
+my $d = eval { my $v = value(); ws(); die if pos($s) != length $s; $v } or exit 1;
+exit 1 unless $d->[0] eq 'o';
+sub quoted { my $t = shift; $t =~ s/(["\\])/\\$1/g; $t =~ s/\n/\\n/g; $t =~ s/\t/\\t/g; $t =~ s/\r/\\r/g; return qq("$t") }
+sub get { my ($o, $k) = @_; for (@{ $o->[1] }) { return $_ if $_->[0] eq $k } return undef }
+sub put { my ($o, $k, $v) = @_; my $e = get($o, $k); if ($e) { $e->[1] = $v } else { push @{ $o->[1] }, [$k, $v] } return $v }
+my $qk = quoted($key);
+if ($key ne 'claudopus@inline') {
+  my $en = get($d, '"enabledPlugins"'); my $on = $en && $en->[1][0] eq 'o' ? get($en->[1], $qk) : undef;
+  unless ($on && $on->[1][0] eq 'v' && $on->[1][1] eq 'true') { print "off\n"; exit 0 }
+}
+my $obj = sub { my ($o, $k) = @_; my $e = get($o, $k); return $e && $e->[1][0] eq 'o' ? $e->[1] : put($o, $k, ['o', []]) };
+my $one = $obj->($obj->($obj->($d, '"pluginConfigs"'), $qk), '"options"');
+put($one, '"revived"', ['v', quoted($at)]);
+sub out { my ($v, $in) = @_; my $n = "$in  ";
+  return $v->[1] if $v->[0] eq 'v';
+  return $v->[0] eq 'o' ? '{}' : '[]' unless @{ $v->[1] };
+  return "{\n" . join(",\n", map { "$n$_->[0]: " . out($_->[1], $n) } @{ $v->[1] }) . "\n$in}" if $v->[0] eq 'o';
+  return "[\n" . join(",\n", map { $n . out($_, $n) } @{ $v->[1] }) . "\n$in]";
+}
+my $tmp = "$path.revive-$$";
+open my $out, '>:raw', $tmp or exit 1; print $out out($d, '') . "\n"; close $out or exit 1;
+for (1 .. 10) { if (rename $tmp, $path) { print "set\n"; exit 0 } select(undef, undef, undef, 0.2) }
+unlink $tmp; exit 1;
+PL
+}
+
+[ -n "$CHANGE_ONLY" ] && { change "$2" "$3" "$4"; exit; }
 log "watching the chats' beats (pid $$)"
 # The last change, kept on disk: a watcher that takes over keeps to GAP after its predecessor's change
 changed=$(cat "$dir/revive.lastchange" 2>/dev/null); case "$changed" in ''|*[!0-9]*) changed=0 ;; esac
@@ -115,6 +180,7 @@ while mine; do
   [ $((t - last)) -gt $((STEP * 3 + 5)) ] && woke=$t
   last=$t
   any=0
+  if [ -n "$win" ]; then for b in "$dir"/*.beat; do [ -f "$b" ] && { windowsLook; break; }; done; fi
   for beat in "$dir"/*.beat; do
     [ -f "$beat" ] || continue
     sid=$(basename "$beat" .beat)
@@ -123,7 +189,7 @@ while mine; do
     load=''
     { IFS=$'\t' read -r pid key settings; read -r load; } < "$beat" 2>/dev/null
     # A chat whose process has ended has no Claudopus to bring back
-    if ! kill -0 "${pid:-0}" 2>/dev/null; then rm -f "$beat" "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed" "$dir/$sid.slow"; continue; fi
+    if ! chatRuns "${pid:-}"; then rm -f "$beat" "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed" "$dir/$sid.slow"; continue; fi
     any=1
     m=$(mtime "$beat") || continue
     quiet=$((t - m))
