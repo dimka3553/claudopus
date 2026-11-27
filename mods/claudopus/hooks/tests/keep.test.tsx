@@ -1166,6 +1166,53 @@ test("a chat the app's rewind starts again under a new id has every card of the 
   for (const part of ['Solve the cameras with the new rig: all 158 frames placed.', `${HOME}/.claude/projects/-repo/chat-old/subagents/agent-a1.jsonl`]) expect(carry).toContain(part)
 })
 
+test("a task no run is behind and Claude Code can't start again, as a rewind kept its card in the same process, ends Interrupted and says it can't be reached, never Working for good: one at work after nothing moved for 12 minutes, with Carry on; a delivered one at once when a message to it can't reach it, under Finished with its result, the message marked as not reached and given to the chat", SLOW, async ($, on) => {
+  // (Claude Code has no loop for either and no record of them in this chat's folder)
+  const { files, clock, appended } = world(on, { ended: new Set(['a1', 'a2']), unresumable: new Set(['a1', 'a2']) })
+  files.set('session:id', 'chat-old')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'solve the cameras', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Solve the cameras', prompt: 'Solve the cameras with the new rig.' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the totals', prompt: 'check' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a2', message: 'March adds up, and the report is written with every number.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(21_000)
+  type Kept = { pid?: string; tasks?: { id: string; state: string }[] }
+  const kept = (chat: string) => JSON.parse(files.get(`${MEMORY}/ledger/${chat}.json`) ?? '{}') as Kept
+  expect(await until(async () => (kept('chat-old').tasks?.some(one => one.id === 'a2' && one.state === 'delivered') ? true : undefined))).toBe(true)
+  // The rewind, its copy in the same process (4242): what was at work there is kept at work, as nothing says its run ended
+  files.set('session:id', 'engine-id')
+  files.set(`${HOME}/.claude/projects/-repo/engine-id.jsonl`, `${JSON.stringify({ type: 'derived-from', v: 1, sessionId: 'engine-id', sessions: [{ type: 'claude_code_session', id: 'chat-old', via: 'fork' }] })}\n`)
+  await $.session.start(start)
+  const texts = async (request = '') => {
+    const pane = await $.ui.mount({ ...LIST, ...(request ? { requestId: request } : {}), surface: 'desktop' } as never)
+    const all = (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+    await pane.unmount()
+    return all
+  }
+  expect(await until(async () => (kept('engine-id').tasks?.find(one => one.id === 'a1')?.state === 'working' ? true : undefined))).toBe(true)
+  // A message to the delivered one can't reach it: its card ends so at once, under Finished with its result, and the chat has the words
+  const view = await $.ui.mount({ ...LIST, requestId: 'work-a2', surface: 'desktop' } as never)
+  const box = await until(async () => (await view.findAll({ type: 'Input' } as never)).find(one => /^details-a2-reply-change-/.test(one.key ?? '')))
+  await view.input({ key: box?.key ?? '', text: 'Add April too' })
+  await view.unmount()
+  const after = await until(async () => ((await texts('work-a2')).some(text => text.includes("Interrupted · Can't be reached any more")) ? await texts('work-a2') : undefined))
+  expect(after).toEqual(expect.arrayContaining(['Add April too', "Didn't reach the task · the chat has it", "This task can't be reached any more, so the chat has your messages. Carry on starts a fresh task in its place."]))
+  expect(after?.join('\n')).not.toMatch(/not read yet/i)
+  expect(after?.some(text => /^You · sent \d\d:\d\d · didn't reach the task$/.test(text))).toBe(true)
+  type Ended = { id: string; status: string; answer: string }
+  await clock.advance(21_000)
+  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/finished/engine-id.json`) ?? '[]') as Ended[]).find(one => one.id === 'a2')?.answer)).toContain('March adds up')
+  expect(appended).toContainEqual(expect.stringContaining(`wrote to the task "Check the totals" on its card: “Add April too”. That task can't be reached any more`))
+  expect(await until(async () => (kept('engine-id').tasks?.some(one => one.id === 'a2') ? undefined : true))).toBe(true)
+  // The one at work, with nothing moving under it, ends so once 12 minutes have passed with nothing new, never before
+  await clock.advance(10 * 60_000)
+  expect((await texts()).some(text => text.startsWith('⏸ Interrupted'))).toBe(false)
+  await clock.advance(3 * 60_000)
+  expect(await until(async () => ((await texts()).includes("⏸ Interrupted · Can't be reached any more") ? true : undefined))).toBe(true)
+  expect(kept('engine-id').tasks?.find(one => one.id === 'a1')?.state).toBe('interrupted')
+})
+
 test("a copy of a chat that still runs in its own process is a chat of its own: it takes none of that chat's cards", SLOW, async ($, on) => {
   const { files, clock } = world(on)
   const card = { id: 'b1', parentId: '', isFork: false, tokens: 0, title: 'Send the invoices', words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW, endedAt: 0, status: 'working' }

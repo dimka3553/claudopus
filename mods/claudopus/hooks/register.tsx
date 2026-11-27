@@ -968,6 +968,9 @@ const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = fal
 isYou
 ? `Your answer “${said}” to “${title}” (${asked}) couldn't reach its task. It goes with your next message here.`
 : `{Name} answered, on its card, the question asked in "${title}" (${asked}): ${said}. The answer could not reach that task, so it waits here for {name}'s next message.`
+const LOST_FOR_CHAT = (title: string, said: string[]) =>
+`{Name} wrote to the task "${title}" on its card: ${said.map(text => `“${cut(text, 400)}”`).join(', ')}. That task can't be reached any more, as its run is gone, so its card now says so, with Carry on, and none of these words reached it. Take them up here as {name}'s own, with {name}'s next message, alongside whatever that message asks.`
+const LOST_FOR_YOU = (title: string) => `“${title}” can't be reached any more, so the chat has your message instead. Carry on, on its card, starts a fresh task in its place.`
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, continue that task with this answer, as you would with their own words, alongside whatever that message asks.`
 const ASK_CLEARED = (title: string, asked = '') => `Claude took back its question in "${title}"${asked ? ` (${cut(asked, 160)})` : ''}. You don't need to answer it.`
 const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false, isWhole = true) =>
@@ -1960,11 +1963,16 @@ if (!dir || isOff) return
 const list = await read($, todos)
 const statusOf = (one: Todo) => live.find(agent => agent.id === one.id)?.status
 const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at
+const isGone = (one: Todo) =>
+one.status === 'working' && !one.chat && !one.parentId && statusOf(one) === undefined && !runningKids(list, one.id).length && !one.bg?.length && !holdsCard(one.id) && !one.retry?.at && !waiting.some(p => p.agent === one.id) &&
+now - movedAt(list, one) >= STUCK_AFTER && (Boolean(one.chatWas) || one.entries.some(entry => entry.kind === 'steer' && entry.isUnread && now - entry.at >= STUCK_AFTER))
+const gone = new Set(list.filter(isGone).map(one => one.id))
+for (const id of gone) await cutUnreachable($, id)
 for (const id of [...overSince.keys()]) if (!list.some(one => one.id === id && isOver(one))) overSince.delete(id)
 const folder = chat ? await agentsFolder($, chat) : ''
 const depth = (one: Todo) => (one.parentId ? 1 : 0)
 const endedNow: string[] = []
-for (const one of list.filter(isOver).sort((a, b) => depth(b) - depth(a))) {
+for (const one of list.filter(one => isOver(one) && !gone.has(one.id)).sort((a, b) => depth(b) - depth(a))) {
 const isListed = statusOf(one) !== undefined
 if (one.id !== heard) {
 const since = overSince.get(one.id) ?? now
@@ -2371,9 +2379,11 @@ return at >= moment.pressedAt && (moment.shownAt ? at - moment.shownAt < LINGER 
 const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' }
 const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error', interrupted: CUT })[stage]
-const stageLine = (stage: Stage, why = '', hasNote = false) => (stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? (hasNote ? '⏸ Interrupted' : `⏸ Interrupted · ${WHY_APP_CLOSED}`) : 'Stopped')
+const stageLine = (stage: Stage, why = '', hasNote = false) =>
+stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? (why === WHY_UNREACHABLE ? `⏸ Interrupted · ${WHY_UNREACHABLE}` : hasNote ? '⏸ Interrupted' : `⏸ Interrupted · ${WHY_APP_CLOSED}`) : 'Stopped'
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'
+const WHY_UNREACHABLE = "Can't be reached any more"
 const WHY_ERROR = 'Ended with an error'
 const WHY_FLAGGED = 'Ended by a safety check'
 
@@ -2422,6 +2432,7 @@ at?: number
 name?: string
 covers?: string
 sentAt?: number
+isLost?: boolean
 readAt?: number
 pictures?: string[]
 seen?: string[]
@@ -2526,7 +2537,7 @@ let from = 1
 entries.forEach((entry, i) => {
 if (entry.kind !== 'steer') return
 const text = oneLine(entry.text.replace(/<\/?pasted_content[^>]*>/g, ' '))
-const when = isFollowed(entry) ? { sentAt: entry.at, ...(entry.readAt ? { readAt: entry.readAt } : {}) } : {}
+const when = isFollowed(entry) ? { sentAt: entry.at, ...(entry.readAt ? { readAt: entry.readAt } : {}), ...(entry.isLost ? { isLost: true } : {}) } : {}
 const head = flat(text).slice(0, 40)
 const sent = all.findIndex((line, n) => n > 0 && flat(line.covers ?? (line.kind === 'told' ? line.text : '')).includes(head))
 if (sent >= 0) {
@@ -7795,7 +7806,7 @@ const isPaneBoxHeld = (paneId: string, at: number) => paneBoxIn === paneId && pa
 const paneBoxHeld = new Map<string, { id: string; shape: string; drawing: unknown }>()
 const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attachShape(id), presses, boxPresses])
 const MESSAGES_SHOWN = 5
-const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.readAt !== undefined)
+const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.isLost || entry.readAt !== undefined)
 const sentList = (ui: Ui, one: Todo, now: number) => {
 const all = one.entries.filter(isFollowed)
 if (!all.length) return null
@@ -7803,7 +7814,9 @@ const from = Math.max(0, all.length - MESSAGES_SHOWN)
 const unread = all.filter(entry => entry.isUnread).length
 const step = one.running ? `${one.running.label ? `“${cut(one.running.label, 80)}”` : one.running.what}, has run ${took(now - one.running.at)}` : ''
 const meanwhile = !unread
-? ''
+? all.some(entry => entry.isLost) && isInterrupted(one)
+? "This task can't be reached any more, so the chat has your messages. Carry on starts a fresh task in its place."
+: ''
 : one.status !== 'working'
 ? `The task starts again with ${unread === 1 ? 'your message' : 'your messages'}.`
 : needsPerson(one)
@@ -7815,7 +7828,7 @@ return (
 {all.slice(from).map((entry, i) => {
 const n = from + i + 1
 const same = all.slice(0, n - 1).findIndex(other => plainWords(other.text) === plainWords(entry.text))
-const state = [entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
+const state = [entry.isLost ? "Didn't reach the task · the chat has it" : entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
 return (
 <ui.Box key={`sent-${one.id}-${entry.at}`} flexDirection="row" alignItems="flex-start" gap={1} width="100%">
 <ui.Box flexShrink={0} width={String(all.length).length + 7}>
@@ -8137,11 +8150,19 @@ const wakeCard = async ($: EngineInterface, target: string) => {
 const now = await $.clock.now()
 await changeTodos($, list => list.map(card => (card.id !== target || card.status === 'working' ? card : resumed(card, now))))
 }
+const UNRESUMABLE = /could not be resumed|no transcript found|no such agent/i
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
 if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
 await log($, `work ${target} not started again with an answer: ${reason}`)
 const ids = new Set(answers.map(({ one }) => one.id))
 await changeTodos($, list => list.map(card => (ids.has(card.id) ? mapAsks(card, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)) : card)))
+const list = await read($, todos)
+const top = list.find(card => card.id === topOf(list, target))
+const isGone = UNRESUMABLE.test(reason) && top && !top.chat && Boolean(top.chatWas) && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
+if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
+for (const { one, sent } of answers) sentReplies.set(one.id, { ...sent, to: 'chat' })
+return redraw($)
+}
 for (const { one, sent } of answers) {
 sentReplies.set(one.id, { ...sent, to: 'chat' })
 const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
@@ -12802,7 +12823,40 @@ return { pid, savedAt, cards: titles.map(([id, title]) => started(id, '', title,
 }
 const QUIT_WINDOW = 60_000
 const cutOff = (one: Todo, now: number): Todo => ({ ...ended(one, 'failed', now), why: WHY_APP_CLOSED, running: undefined })
-const isInterrupted = (one: Pick<Todo, 'status' | 'why'>) => one.status === 'failed' && one.why === WHY_APP_CLOSED
+const isInterrupted = (one: Pick<Todo, 'status' | 'why'>) => one.status === 'failed' && (one.why === WHY_APP_CLOSED || one.why === WHY_UNREACHABLE)
+const lostEntry = (entry: Entry): Entry => {
+const { isUnread: _, ...rest } = entry
+return { ...rest, isLost: true }
+}
+const unreachable = (one: Todo, now: number): Todo => ({
+...ended(one, 'failed', now),
+why: WHY_UNREACHABLE,
+running: undefined,
+...(one.reportGiven || hasReport(one) || one.reportForChat ? { closedAt: now } : {}),
+entries: one.entries.map(entry => (entry.kind === 'steer' && entry.isUnread ? lostEntry(entry) : entry)),
+})
+const cutUnreachable = async ($: EngineInterface, id: string, said: string[] = []) => {
+const now = await $.clock.now()
+let lost: string[] = []
+let title = ''
+await changeTodos($, list =>
+((lost = []), (title = ''), list).map(one => {
+if (one.id !== id || one.chat || one.parentId || isInterrupted(one)) return one
+lost = one.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
+title = titleOf(one)
+return unreachable(one, now)
+}),
+)
+if (!title) return false
+await log($, `task ${id} can't be reached any more: no run of this chat's is behind it, and it can't be started again`)
+const words = [...new Set([...lost, ...said].map(text => text.trim()).filter(Boolean))]
+if (words.length) {
+$.ui.log(LOST_FOR_YOU(title))
+await tellChat($, named(LOST_FOR_CHAT(title, words)))
+}
+redraw($)
+return true
+}
 const noteClosed = async ($: EngineInterface, id: string) => {
 ledgerSign = ''
 if (!dir) return void (isLedgerRead = true)
@@ -12977,7 +13031,7 @@ await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${chat}`])
 await $.fs.write(path, await carryText($, one, answer))
 const model = modelName(one.model ?? '')
 await log($, `carry on ${one.id}: the chat is asked to start a fresh task from ${path}`)
-await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Carry on" on "${titleOf(one)}" (${one.id}), which stopped when the Claude app closed${answer ? `, and answered what it asked` : ''}. Its run is gone, so start a fresh task for it now: the Agent tool with subagent_type "${one.kind === 'claudopus:quick' ? 'claudopus:quick' : 'claudopus:task'}"${model ? `, the model it ran on (${model})` : ''}, description "${titleOf(one)}", and as its prompt exactly: ${CARRY_PROMPT(path)}`)
+await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Carry on" on "${titleOf(one)}" (${one.id}), which ${one.why === WHY_UNREACHABLE ? "was cut off and can't be reached any more" : 'stopped when the Claude app closed'}${answer ? `, and answered what it asked` : ''}. Its run is gone, so start a fresh task for it now: the Agent tool with subagent_type "${one.kind === 'claudopus:quick' ? 'claudopus:quick' : 'claudopus:task'}"${model ? `, the model it ran on (${model})` : ''}, description "${titleOf(one)}", and as its prompt exactly: ${CARRY_PROMPT(path)}`)
 }
 const carriedFrom = (prompt: string) => /\/ledger\/[A-Za-z0-9-]+\/([\w-]+)\.carry\.md/.exec(prompt)?.[1] ?? ''
 
@@ -16621,7 +16675,7 @@ return (
 )
 return (
 <Box key={`talk-${i}`} flexDirection="column" alignItems="flex-start" backgroundColor={FILL} paddingX={2} paddingY={1}>
-{first?.kind === 'steer' ? <Text dimColor>{first.sentAt ? `You · sent ${clockAt(first.sentAt)} · ${first.readAt ? `read ${clockAt(first.readAt)}` : 'not read yet'}` : 'You'}</Text> : null}
+{first?.kind === 'steer' ? <Text dimColor>{first.sentAt ? `You · sent ${clockAt(first.sentAt)} · ${first.readAt ? `read ${clockAt(first.readAt)}` : first.isLost ? "didn't reach the task" : 'not read yet'}` : 'You'}</Text> : null}
 <Markdown text={isLong && !isOpen ? cut(text, TOLD_CHARS) : text} />
 {isLong ? <Button key={`told-${at}-${presses}`} label={isOpen ? '▾ Show less' : '▸ Show all'} plain dimColor onPress={() => fold(-at - 1)} /> : null}
 </Box>
@@ -16795,7 +16849,7 @@ return (
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
 {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
 {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId, at)) : null}
-{!(canChange(one) && 'Input' in table) && one.entries.some(entry => entry.isUnread) && !one.chat ? part('part-sent', 'Your messages', '', sentList(table, one, at) ?? <Box />) : null}
+{!(canChange(one) && 'Input' in table) && one.entries.some(entry => entry.isUnread || entry.isLost) && !one.chat ? part('part-sent', 'Your messages', '', sentList(table, one, at) ?? <Box />) : null}
 </Box>
 )
 }

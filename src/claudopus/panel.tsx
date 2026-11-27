@@ -1556,7 +1556,7 @@ const panelHooks = (on: On) => {
               )
             return (
               <Box key={`talk-${i}`} flexDirection="column" alignItems="flex-start" backgroundColor={FILL} paddingX={2} paddingY={1}>
-                {first?.kind === 'steer' ? <Text dimColor>{first.sentAt ? `You · sent ${clockAt(first.sentAt)} · ${first.readAt ? `read ${clockAt(first.readAt)}` : 'not read yet'}` : 'You'}</Text> : null}
+                {first?.kind === 'steer' ? <Text dimColor>{first.sentAt ? `You · sent ${clockAt(first.sentAt)} · ${first.readAt ? `read ${clockAt(first.readAt)}` : first.isLost ? "didn't reach the task" : 'not read yet'}` : 'You'}</Text> : null}
                 <Markdown text={isLong && !isOpen ? cut(text, TOLD_CHARS) : text} />
                 {isLong ? <Button key={`told-${at}-${presses}`} label={isOpen ? '▾ Show less' : '▸ Show all'} plain dimColor onPress={() => fold(-at - 1)} /> : null}
               </Box>
@@ -1742,7 +1742,7 @@ const panelHooks = (on: On) => {
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
           {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
           {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId, at)) : null}
-          {!(canChange(one) && 'Input' in table) && one.entries.some(entry => entry.isUnread) && !one.chat ? part('part-sent', 'Your messages', '', sentList(table, one, at) ?? <Box />) : null}
+          {!(canChange(one) && 'Input' in table) && one.entries.some(entry => entry.isUnread || entry.isLost) && !one.chat ? part('part-sent', 'Your messages', '', sentList(table, one, at) ?? <Box />) : null}
         </Box>
       )
     }
