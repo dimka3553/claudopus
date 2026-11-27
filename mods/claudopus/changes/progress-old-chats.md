@@ -1,3 +1,0 @@
-- Progress now also sorts your chats from before Claudopus came in, read from their saved words, each as one piece of work in its area. It starts by itself after the update and only places that work: it adds or ticks no next steps.
-- The Progress chart runs back up to half a year: by week once it covers more than five weeks, with a dashed line where Claudopus came in. On a very busy chart one square stands for a few tasks, and the key under it says how many.
-- Someone who never says their goals outright gets them worked out from what their messages keep aiming at, in words close to theirs.

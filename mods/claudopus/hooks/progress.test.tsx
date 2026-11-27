@@ -35,6 +35,12 @@ test("a task's start gives it its area at once, and its result takes that entry'
   expect(entries.get('nose')?.length).toBe(1)
   expect(entries.get('site')).toEqual([])
   expect(done.areas[0]?.next.map(n => n.state)).toEqual(['done', 'open'])
+  // (the task's next result is an entry of its own beside the first; one read in again only to be counted ticks no step)
+  const again = apply(event({ kind: 'result', task: 'a1', report: 'r2', isEntryOnly: true }), { entry: { title: 'Nose checked on ten more faces', kind: 'milestone' }, next: { done: ['n2'] } }, entries, done.areas)
+  expect(entries.get('nose')?.map(e => e.report).sort()).toEqual(['r1', 'r2'])
+  expect(again.areas[0]?.next.map(n => n.state)).toEqual(['done', 'open'])
+  apply(event({ kind: 'result', task: 'a1', report: 'r2' }), { areas: ['nose'], entry: { title: 'Nose checked on ten more faces', kind: 'milestone' } }, entries, again.areas)
+  expect(entries.get('nose')?.length).toBe(2)
   expect(progressThumb(REPORTS, `${REPORTS}/r1/shots/a.png`)).toBe(`${REPORTS}/r1/thumbs/shots--a.png.jpg`)
 })
 

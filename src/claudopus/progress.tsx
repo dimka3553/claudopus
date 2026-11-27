@@ -196,6 +196,7 @@ const drainProgress = async ($: EngineInterface) => {
   try {
     await refreshPicture($).catch(err => indexLog($, `picture not written: ${String(err)}`))
     await tidyIndex($).catch(err => indexLog($, `topics not tidied: ${String(err)}`))
+    await recountResults($).catch(err => indexLog($, `results not queued to be counted: ${String(err)}`))
     await backfillProgress($).catch(err => indexLog($, `history not queued: ${String(err)}`))
     await backfillChats($).catch(err => indexLog($, `old chats not queued: ${String(err)}`))
     while (!isLate) {
@@ -249,7 +250,7 @@ const drainProgress = async ($: EngineInterface) => {
 const readSorting = async ($: EngineInterface) => {
   const left = (await $.fs.list(queueDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json')).length
   const countIn = async (name: string) => Number((await readOr($, `${progressDir()}/${name}`)).split('\n')[1] ?? 0) || 0
-  const total = (await countIn('backfilled')) + (await countIn('chats-backfilled'))
+  const total = (await countIn('backfilled')) + (await countIn('chats-backfilled')) + (await countIn('recounted'))
   return { left, total }
 }
 
@@ -268,6 +269,27 @@ const backfillChats = async ($: EngineInterface) => {
   }
   await $.fs.write(`${progressDir()}/chats-backfilled`, `${new Date(now).toISOString()}\n${n}\n`)
   await indexLog($, `old chats queued: ${n}`)
+}
+
+// Results sorted while a task counted once however often it reported: every kept result with no entry of its own is read in again,
+// once, only to be counted (isEntryOnly: it makes its entry and changes nothing else). Nothing to do where the history is yet to be read
+const recountResults = async ($: EngineInterface) => {
+  if (await $.fs.exists(`${progressDir()}/recounted`)) return
+  const now = await $.clock.now()
+  const { areas, entries } = await readProgress($)
+  const isFresh = (await $.fs.exists(`${progressDir()}/backfill`)) || !((await $.fs.exists(`${progressDir()}/backfilled`)) || areas.length)
+  const counted = new Set([...entries.values()].flat().map(e => e.report))
+  const missing = isFresh ? [] : (await loadReports($)).filter(r => !counted.has(r.id) && !isScratchTopic(r.folder ?? '')).sort((a, b) => a.at - b.at)
+  let n = 0
+  for (const r of missing) {
+    const text = (await readOr($, `${reportPath(r)}/report.md`)).trim()
+    if (!text) continue
+    const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', task: r.agent ?? '', report: r.id, title: r.title, topic: r.subject, files: r.files.filter(file => PICTURE.test(file)), text: hideKeys(clip(text, EVENT_CHARS.result / 2)), isBackfill: true, isEntryOnly: true }
+    await $.fs.write(`${queueDir()}/${queueName(r.at)}`, `${JSON.stringify(one)}\n`)
+    n += 1
+  }
+  await $.fs.write(`${progressDir()}/recounted`, `${new Date(now).toISOString()}\n${n}\n`)
+  await indexLog($, `results queued to be counted: ${n}`)
 }
 
 // The history read in: every result of the past BACKFILL_DAYS, oldest first, when progress/ has no areas yet or progress/backfill

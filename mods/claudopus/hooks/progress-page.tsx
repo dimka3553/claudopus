@@ -166,7 +166,7 @@ export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[],
     const all = row.done + row.next
     parts.push(all ? `<text x="${n1(width - right + 10)}" y="${n1(mid)}" ${P_FONT} font-size="${nameSize}" font-weight="600" fill="${P_GREEN}">${row.done}<tspan fill="${P_DIM}" font-weight="400">/${all}</tspan></text>` : `<text x="${n1(width - right + 10)}" y="${n1(mid)}" ${P_FONT} font-size="${nameSize}" fill="${P_DIM}">–</text>`)
     const tasks = row.counts.reduce((s, n) => s + n, 0)
-    said.push(`${row.goal.name}: ${tasks === 1 ? '1 task' : `${tasks} tasks`}, ${row.done} of ${all} steps done${row.live ? ', working now' : ''}.`)
+    said.push(`${row.goal.name}: ${tasks === 1 ? '1 result' : `${tasks} results`}, ${row.done} of ${all} steps done${row.live ? ', working now' : ''}.`)
     y = base + (isWide ? 14 : 12)
   }
   // Where Claudopus came in: a line across the rows, named above them
@@ -187,9 +187,9 @@ export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[],
   })
   for (const one of labels) parts.push(`<text x="${n1(cellX(one.i))}" y="${H - 5 - keyH}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="${P_DIM}">${one.text}</text>`)
   parts.push(`<text x="${n1(Math.min(cellX(cells.length - 1), width - right))}" y="${H - 5 - keyH}" text-anchor="middle" ${P_FONT} font-size="10.5" fill="currentColor">${isWeeks ? 'this week' : 'today'}</text>`)
-  if (unit > 1) parts.push(`<rect x="${left}" y="${H - 11}" width="${sq + 1}" height="${sq + 1}" fill="${P_DIM}"/><text x="${left + sq + 6}" y="${H - 5}" ${P_FONT} font-size="10.5" fill="${P_DIM}">${unit} tasks</text>`)
-  const span = isWeeks ? `Tasks a week, the last ${cells.length} weeks.` : `Tasks a day, the last ${cells.length} days.`
-  const alt = cutTo([quoted, span, unit > 1 ? `Each square is ${unit} tasks.` : '', sinceX ? `Claudopus came in on ${dayOf(since, now)}.` : '', ...said, ...areas.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
+  if (unit > 1) parts.push(`<rect x="${left}" y="${H - 11}" width="${sq + 1}" height="${sq + 1}" fill="${P_DIM}"/><text x="${left + sq + 6}" y="${H - 5}" ${P_FONT} font-size="10.5" fill="${P_DIM}">${unit} results</text>`)
+  const span = isWeeks ? `Results a week, the last ${cells.length} weeks.` : `Results a day, the last ${cells.length} days.`
+  const alt = cutTo([quoted, span, unit > 1 ? `Each square is ${unit} results.` : '', sinceX ? `Claudopus came in on ${dayOf(since, now)}.` : '', ...said, ...areas.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
   return { source: svgDoc(width, H, parts.join('')), width, height: H, alt }
 }
 

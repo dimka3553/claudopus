@@ -38,6 +38,8 @@ export type ProgressEvent = {
   text: string
   tries?: number
   isBackfill?: boolean
+  // A result read in again only to be counted: it makes its entry and changes nothing else
+  isEntryOnly?: boolean
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string'
@@ -149,7 +151,7 @@ No code, file names or ids in the words. Nothing their messages do not bear out:
 // How much of each event the model reads
 export const EVENT_CHARS: Record<ProgressEvent['kind'], number> = { start: 4000, result: 8000, said: 3000, answer: 2000, aside: 2000, chat: 6000 }
 // The most each area keeps, and the most open steps it has
-export const ENTRIES_MOST = 400
+export const ENTRIES_MOST = 3000
 const NEXT_OPEN_MOST = 5
 
 const dayOf = (at: number) => new Date(at).toISOString().slice(0, 10)
@@ -275,11 +277,15 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
     }
   }
   // The entry of a task's start, result or set-aside press, in each area it belongs to
-  const isOfEvent = (e: ProgressEntry) => (event.task ? e.task === event.task : Boolean(event.report) && e.report === event.report)
+  // Every result is an entry of its own: it takes the place of its task's start and of itself sorted before, never of the task's
+  // other results, so a task that reports many times counts each time
+  const isOfTask = (e: ProgressEntry) => Boolean(event.task) && e.task === event.task
+  const isOfEvent = (e: ProgressEntry) => (event.kind === 'result' && event.report ? e.report === event.report || (isOfTask(e) && !e.report) : event.task ? isOfTask(e) : Boolean(event.report) && e.report === event.report)
   const before = [...entries].flatMap(([id, list]) => list.filter(isOfEvent).map(e => ({ id, e })))
-  const wasAside = before.find(one => one.e.kind === 'aside')?.e
+  const ofTask = [...entries].flatMap(([id, list]) => list.filter(e => isOfTask(e) || isOfEvent(e)).map(e => ({ id, e })))
+  const wasAside = ofTask.find(one => one.e.kind === 'aside')?.e
   const answered = (answer.entry ?? {}) as { title?: unknown; kind?: unknown; outcome?: unknown; live?: unknown; pictures?: unknown }
-  const places = picked.length ? picked : [...new Set(before.map(one => one.id))].filter(id => known.has(id))
+  const places = picked.length ? picked : [...new Set(ofTask.map(one => one.id))].filter(id => known.has(id))
   const title = plainLine(answered.title, 8, 60) || plainLine(event.title, 8, 60) || 'A task'
   const put = (id: string, entry: ProgressEntry) => {
     entries.set(id, [entry, ...(entries.get(id) ?? []).filter(e => !isOfEvent(e))].sort(byNewest))
@@ -317,7 +323,7 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
     areas = areas.map(area => (area.next.some(n => wanted.has(n.id) && n.state !== state) ? (touched.add(area.id), { ...area, next: area.next.map(n => (wanted.has(n.id) ? { ...n, state, at } : n)) }) : area))
   }
   // (a start or an old chat only places work)
-  const isPlacing = event.kind === 'start' || event.kind === 'chat'
+  const isPlacing = event.kind === 'start' || event.kind === 'chat' || event.isEntryOnly === true
   if (!isPlacing) set(idsIn(next.done), 'done')
   if (isPersons) set(idsIn(next.aside), 'aside')
   for (const one of !isPlacing && Array.isArray(next.reword) ? next.reword : []) {
@@ -336,7 +342,7 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
       touched.add(into.id)
     }
   }
-  if (event.kind === 'result' && event.topic) {
+  if (event.kind === 'result' && event.topic && !event.isEntryOnly) {
     const topic = event.topic
     areas = areas.map(area => (places.includes(area.id) && area.topics?.[0] !== topic ? (touched.add(area.id), { ...area, topics: [topic, ...(area.topics ?? []).filter(one => one !== topic)].slice(0, 5) }) : area))
   }
