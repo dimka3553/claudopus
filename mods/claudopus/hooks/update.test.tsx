@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { copyOf, download, DOWNLOAD_REF, fetchProgress, folderMarketplace, folderReady, install, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, lookEveryOf, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, scopeOf, sizeText, stampOf, STEP_STALE, stepsOf, UPDATE_EVERY, updatedArt, updatedFrom, updatedLook, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, versionOnPage } from './update'
+import { copyOf, download, DOWNLOAD_REF, TREE_OF_FOLDER, windowsEngine, fetchProgress, folderMarketplace, folderReady, install, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, lookEveryOf, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, scopeOf, sizeText, stampOf, STEP_STALE, stepsOf, UPDATE_EVERY, updatedArt, updatedFrom, updatedLook, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, versionOnPage } from './update'
 import type { LookIo } from './update'
 
 test('only a copy installed from a marketplace is updated, read off its cache folder', async () => {
@@ -349,4 +349,47 @@ test('Install takes only the commit the download ref holds and the release\'s ta
   const kept = repo({ held: C, dirty: true })
   expect(await install(kept.io, { ...FOLDER, runs: 'copy', record: { plugins: '/p', marketplace: 'm', plugin: 'claudopus', scope: 'user' } }, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'kept-copy', detail: '' })
   expect(kept.ran.filter(one => one.startsWith('plugin '))).toEqual([])
+})
+
+// A Windows checkout or copy keeps no mark of which files run, so git counts each as one that does not: the page names the release's
+// runnable files (`exec`), and the copy Claude Code installed there is checked with those marked so. A page from before them leaves
+// the release commit's own; a Mac or Linux marks none
+test('on Windows the copy installed is checked with the runnable files the page names, else those of the release commit; elsewhere with none', async () => {
+  expect(publishedOf(JSON.stringify({ ...PAGE, exec: ['bin/admin', 'notifier/Claudopus.app/Contents/MacOS/Claudopus', '/etc/passwd', '../x', 'bin/../../x', 'a\nb', 7] }))?.exec).toEqual(['bin/admin', 'notifier/Claudopus.app/Contents/MacOS/Claudopus'])
+  expect(publishedOf(JSON.stringify(PAGE))?.exec).toBeUndefined()
+  const checked = (page: typeof PAGE & { exec?: string[] }, hasNoModes?: boolean) => {
+    const one = repo({ held: C })
+    const trees: string[][] = []
+    const io: LookIo = {
+      ...one.io,
+      run: async (argv, ms) => {
+        if (argv[0] === 'sh' && argv[2] === TREE_OF_FOLDER) trees.push(argv.slice(4))
+        if (argv.includes('ls-tree')) return { exitCode: 0, stdout: `100755 blob ${T}\tbin/run-it\n100644 blob ${T}\tREADME.md\n`, stderr: '' }
+        return one.io.run(argv, ms)
+      },
+    }
+    return install(io, CLONE, page, C, 'claude', hasNoModes).then(got => ({ got, trees }))
+  }
+  expect(await checked({ ...PAGE, exec: ['bin/admin', 'bin/sips'] }, true)).toEqual({ got: { ok: true, version: '0.2.121', dirty: false }, trees: [['/p/cache/m/claudopus/0.2.121', 'bin/admin\nbin/sips']] })
+  expect((await checked(PAGE, true)).trees).toEqual([['/p/cache/m/claudopus/0.2.121', 'bin/run-it']])
+  expect((await checked({ ...PAGE, exec: ['bin/admin'] })).trees).toEqual([['/p/cache/m/claudopus/0.2.121']])
+})
+
+// Claude Code's own program on Windows, for Claudopus's update: claude.exe or npm's claude.cmd on the PATH (its folders parted by ;),
+// then Claude Code's installer's %USERPROFILE%\.local\bin, then the newest engine the Claude app keeps in its data folder
+test('on Windows the engine for an update is found on the PATH, then in the profile, then as the newest the Claude app keeps', async () => {
+  const disk = (paths: string[]) => ({
+    exists: async (path: string) => paths.some(one => one === path || one.startsWith(`${path}/`)),
+    list: async (path: string) => [...new Set(paths.filter(one => one.startsWith(`${path}/`)).map(one => one.slice(path.length + 1)))].map(rest => ({ name: rest.split('/')[0] ?? rest, kind: rest.includes('/') ? 'dir' : 'file' })).filter((one, n, all) => all.findIndex(other => other.name === one.name) === n),
+  })
+  const places = { path: 'C:\\Windows\\system32;"C:\\Program Files\\nodejs\\";C:\\Users\\sam\\AppData\\Roaming\\npm', profile: 'C:/Users/sam', appData: 'C:\\Users\\sam\\AppData\\Roaming', localAppData: 'C:\\Users\\sam\\AppData\\Local' }
+  const app = (data: string, version: string, hash = 'abc123def456') => `${data}/claude-code/${version}/${hash}/claude.exe`
+  const ROAMING = 'C:/Users/sam/AppData/Roaming/Claude'
+  const STORE = 'C:/Users/sam/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude'
+  expect(await windowsEngine(disk(['C:/Users/sam/AppData/Roaming/npm/claude.cmd', 'C:/Users/sam/.local/bin/claude.exe']), places)).toBe('C:/Users/sam/AppData/Roaming/npm/claude.cmd')
+  expect(await windowsEngine(disk(['C:/Program Files/nodejs/claude.exe']), places)).toBe('C:/Program Files/nodejs/claude.exe')
+  expect(await windowsEngine(disk(['C:/Users/sam/.local/bin/claude.exe', app(ROAMING, '2.1.330')]), places)).toBe('C:/Users/sam/.local/bin/claude.exe')
+  expect(await windowsEngine(disk([app(ROAMING, '2.1.99'), app(STORE, '2.1.330'), app(ROAMING, '2.1.4'), `${ROAMING}/claude-code/2.1.400/abc/readme.txt`]), places)).toBe(app(STORE, '2.1.330'))
+  expect(await windowsEngine(disk([app('C:/Users/sam/AppData/Local/Claude-Data', '2.1.5')]), places)).toBe(app('C:/Users/sam/AppData/Local/Claude-Data', '2.1.5'))
+  expect(await windowsEngine(disk([]), places)).toBe('')
 })

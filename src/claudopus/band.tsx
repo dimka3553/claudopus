@@ -78,7 +78,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
     const sendWords = (value: string) => {
       if (!one) return
       const files = takeAttached(open.id)
-      const shown = [value.trim(), ...files.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+      const shown = [value.trim(), ...files.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join(' ')
       if (!shown) return
       ;((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($))
       void wordsOnGate($, one.id, open.id, shown, filesNote(files))

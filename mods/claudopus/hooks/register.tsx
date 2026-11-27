@@ -11,7 +11,7 @@ import type { Answer, Off } from './shared'
 import { ALERTS, clearModel, configMore, configView, editing, fillModels, heavyModeOf, leanOf, modelsIn, modelsOf, modelsShort, parse, ROLES, SAME, TEXTS } from './config'
 import type { Config, ConfigShown, HeavyMode, Lean, LeanKey, Models, Role } from './config'
 import type { Fail, LookIo, Notice, Published, Source, Steps } from './update'
-import { copyOf, download, FAILS, folderMarketplace, folderReady, install, installedFrom, isNewer, isUpdateDue, isVersion, lookEveryOf, LOOK_EVERY_HOURS, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, sizeText, stampOf, stepsOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { copyOf, download, windowsAppData, windowsEngine as windowsEngineOf, FAILS, folderMarketplace, folderReady, install, installedFrom, isNewer, isUpdateDue, isVersion, lookEveryOf, LOOK_EVERY_HOURS, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, sizeText, stampOf, stepsOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
@@ -1374,7 +1374,10 @@ const PAGE_CHARS = 8_000
 const PAGE_READ = 400_000
 const pageOf = (name: string) => `${dir}/streams/${slug(name)}.md`
 const historyOf = (name: string) => `${dir}/streams/${slug(name)}.log.md`
-const isScratchTopic = (repo: string) => /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
+const isScratchTopic = (given: string) => {
+const repo = slashed(given)
+return /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || /^[A-Za-z]:\/(?:tmp|Users\/[^/]+\/AppData\/Local\/Temp)\//i.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
+}
 const historyEntry = (at: number, by: string, text: string) => `## ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} ${oneLine(by) || 'A task'}\n\n${hideKeys(text.trim())}\n\n`
 const addHistory = ($: EngineInterface, name: string, entry: string) =>
 withTopics($, async () => {
@@ -1977,7 +1980,27 @@ await lookEnds($)
 await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 }
 
-const agentsFolder = async ($: EngineInterface, chat: string) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`
+const PROJECT_NAME_MOST = 200
+const projectFound = new Map<string, string>()
+const projectDirOf = async ($: EngineInterface, folder: string, chat: string) => {
+const root = `${await configDir($)}/projects`
+const name = folder.replace(/[^a-zA-Z0-9]/g, '-')
+if (name.length <= PROJECT_NAME_MOST || !chat) return `${root}/${name}`
+const key = `${root}/${chat}`
+const known = projectFound.get(key)
+if (known) return known
+for (const entry of await $.fs.list(root).catch(() => [])) {
+if (entry.kind !== 'dir' || !entry.name.startsWith(`${name.slice(0, PROJECT_NAME_MOST)}-`)) continue
+const one = `${root}/${entry.name}`
+if ((await $.fs.exists(`${one}/${chat}.jsonl`).catch(() => false)) || (await $.fs.exists(`${one}/${chat}`).catch(() => false))) {
+if (projectFound.size > 50) projectFound.clear()
+projectFound.set(key, one)
+return one
+}
+}
+return `${root}/${name.slice(0, PROJECT_NAME_MOST)}`
+}
+const agentsFolder = async ($: EngineInterface, chat: string) => `${await projectDirOf($, cwd, chat)}/${chat}/subagents`
 const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, now: number) => {
 const path = `${folder}/agent-${agent}.jsonl`
 const stat = await $.fs.stat(path).catch(() => undefined)
@@ -2269,7 +2292,7 @@ const { id } = await read($, me)
 const list = await read($, todos)
 if (!id) return
 const live = await $.agent.list().catch(() => [])
-const folder = `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
+const folder = await agentsFolder($, id)
 type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
 const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(Boolean)
 const metas = await Promise.all(
@@ -2474,7 +2497,7 @@ const picturesOf = (use: ToolUseSummary) => {
 const input = use.input ?? {}
 const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')
 if (use.isError) return { pictures: [], seen: [] }
-const same = (path: string) => path.replace(/^\/private(?=\/(tmp|var)\/)/, '')
+const same = (path: string) => slashed(path).replace(/^\/private(?=\/(tmp|var)\/)/, '')
 const sent = use.tool === 'SendUserFile' && Array.isArray(input.files) ? input.files.filter((one): one is string => typeof one === 'string') : []
 const written = ['Write', 'Edit'].includes(use.tool) ? [given('file_path')] : []
 const named = use.tool === 'Bash' ? namedPaths(`${given('command')}\n${use.text ?? ''}`) : use.tool === 'Read' ? [given('file_path')] : []
@@ -2483,7 +2506,7 @@ return { pictures: [...new Set([...written, ...sent].filter(one => IMAGE.test(on
 }
 
 const toolName = (tool: string) => (tool.startsWith('mcp__') ? (tool.split('__').pop() ?? tool).replaceAll('_', ' ') : tool)
-const fileName = (path: string) => path.split('/').pop() ?? path
+const fileName = (path: string) => (isWindows ? path.split(/[\\/]/) : path.split('/')).pop() ?? path
 const aim = (input: Record<string, unknown>) => {
 const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')
 const path = given('file_path') || given('path') || given('notebook_path')
@@ -2869,7 +2892,7 @@ return (
 
 const REPORTS_TOLD = 8
 const PICTURE = /\.(png|jpe?g|gif|webp|svg|pdf|html?)$/i
-const TEMP = /^\/(private\/)?(tmp|var\/folders)\//
+const TEMP = /^\/(private\/)?(tmp|var\/folders)\/|^[A-Za-z]:\/(?:tmp|Users\/[^/]+\/AppData\/Local\/Temp)\//i
 const COPIES_KEPT = 40
 const REPORT_CHARS = 40_000
 const REPORT_LEAST = 500
@@ -2900,7 +2923,13 @@ const waitsOf = (r: Report): { text: string }[] => r.waiting ?? (r.question ? [{
 
 const gists = new Map<string, string>()
 const isInside = (file: unknown): file is string =>
-typeof file === 'string' && Boolean(file) && !file.startsWith('/') && !file.startsWith('~') && !file.includes('\0') && file.split('/').every(part => part !== '..' && part !== '')
+typeof file === 'string' &&
+Boolean(file) &&
+!isAbsPath(file) &&
+!file.startsWith('~') &&
+!file.includes('\0') &&
+!(isWindows && (file.includes('\\') || /^[A-Za-z]:/.test(file))) &&
+file.split('/').every(part => part !== '..' && part !== '')
 const loadReports = async ($: EngineInterface) => {
 const found: Report[] = []
 for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
@@ -2922,17 +2951,32 @@ const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
 const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g
 const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g
 const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm
-const namedPaths = (text: string) => {
-const found = [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN].flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), path: one[1] ?? one[0] })))
-found.sort((a, b) => a.at - b.at || b.path.length - a.path.length)
-return [...new Set(found.map(one => one.path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))]
+const DRIVE_ROOT = String.raw`(?:[A-Za-z]:[\\/]|\/[A-Za-z]\/)`
+const DRIVE_PART = String.raw`[^\s\\/\x60'"()<>[\]{}|,;*]+`
+const DRIVE_PLAIN = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}[^\s\x60'"()<>[\]{}|,;*]+`, 'g')
+const DRIVE_SPACED = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}(?:${DRIVE_PART}(?: ${DRIVE_PART})*[\\/])+${DRIVE_PART}`, 'g')
+const DRIVE_TICKED = new RegExp(String.raw`\x60(${DRIVE_ROOT}[^\x60\n]+)\x60`, 'g')
+const DRIVE_LINE = new RegExp(String.raw`^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(${DRIVE_ROOT}[^\n\x60'"<>|*]+?)(?:\*\*)?[ \t]*$`, 'gm')
+const keptPath = (path: string) => {
+const one = slashed(path)
+return isWindows && /^\/[A-Za-z]\//.test(one) ? `${one[1]?.toUpperCase()}:${one.slice(2)}` : one
 }
+const pathsWritten = (text: string) => {
+const all = isWindows ? [PATH_LINE, DRIVE_LINE, PATH_TICKED, DRIVE_TICKED, PATH_SPACED, DRIVE_SPACED, PATH_PLAIN, DRIVE_PLAIN] : [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN]
+const found = all.flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), written: (one[1] ?? one[0]).replace(/[.:!?]+$/, '').replace(/[\\/]$/, '') })))
+found.sort((a, b) => a.at - b.at || b.written.length - a.written.length)
+const seen = new Set<string>()
+return found
+.filter(one => !(isWindows && /[A-Za-z]:$/.test(text.slice(Math.max(0, one.at - 2), one.at))))
+.filter(one => !seen.has(one.written) && (seen.add(one.written), true)).map(one => ({ written: one.written, path: keptPath(one.written) }))
+}
+const namedPaths = (text: string) => [...new Set(pathsWritten(text).map(one => one.path))]
 const gistOf = (text: string, title = '') => {
 const lead = /^(here is|here are|here's|as it came)\b|\b(is|are) back\b[^.]{0,30}\.?$/i
 const paragraphs = text.split(/\n\s*\n/).map(part =>
 part
 .split('\n')
-.filter(line => !/^\s*(#|```|\|)/.test(line) && !/^\s*\/\S+$/.test(line.trim()) && !/^\s*(?:[-*]|\d+\.)\s/.test(line))
+.filter(line => !/^\s*(#|```|\|)/.test(line) && !/^\s*(?:\/|[A-Za-z]:[\\/])\S+$/.test(line.trim()) && !/^\s*(?:[-*]|\d+\.)\s/.test(line))
 .map(line => oneLine(line.replace(/[*_`>]/g, '')))
 .filter(line => line.length > 20 && slug(line) !== slug(title))
 .flatMap(line => line.split(/(?<=[.!?:])\s+(?=[A-Z0-9“"])/))
@@ -2993,7 +3037,7 @@ subject: oneLine(one.subject || title),
 at,
 chat: chat.title,
 chatId: chat.id,
-folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => repo.startsWith('/')) ?? cwd,
+folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => isAbsPath(repo)) ?? cwd,
 gist: gistOf(text, title),
 files,
 ...(await listMade($, one, text)
@@ -3076,14 +3120,19 @@ await $.prompt.submit({ text }).catch(err => log($, `message from a report not s
 
 const OPENABLE = '.claudopus-files'
 const OPENABLE_MOST = 20
-const isMadeHere = (path: string, home: string) => /^\/(?:Users|private|tmp|var)\//.test(path) || (home.startsWith('/') && path.startsWith(`${home}/`))
-const openablesDir = () => (cwd.startsWith('/') && cwd !== '/' ? `${cwd.replace(/\/+$/, '')}/${OPENABLE}` : '')
-const isWithin = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`)
+const isMadeHere = (path: string, home: string) =>
+/^\/(?:Users|private|tmp|var)\//.test(path) || (isAbsPath(home) && isWithin(path, home)) || (isWindows && /^[A-Za-z]:\//.test(path) && path.slice(0, 2).toLowerCase() === cwd.slice(0, 2).toLowerCase())
+const openablesDir = () => (isAbsPath(cwd) && cwd !== '/' ? `${cwd.replace(/\/+$/, '')}/${OPENABLE}` : '')
+const isWithin = (path: string, folder: string) => {
+const [one, top] = isWindows ? [path.toLowerCase(), folder.toLowerCase()] : [path, folder]
+return one === top || one.startsWith(`${top}/`)
+}
 const homeOf = async ($: EngineInterface) => (await homeFolder($).catch(() => undefined)) ?? ''
-const openableOf = (path: string, home: string) => `${openablesDir()}/${home.startsWith('/') && path.startsWith(`${home}/`) ? path.slice(home.length + 1) : path.replace(/^\/+/, '')}`
+const openableOf = (path: string, home: string) => `${openablesDir()}/${isAbsPath(home) && isWithin(path, home) && path !== home ? path.slice(home.length + 1) : path.replace(/^([A-Za-z]):\//, '$1/').replace(/^\/+/, '')}`
 const originalOf = async ($: EngineInterface, copy: string, home: string) => {
 const rel = copy.slice(openablesDir().length + 1)
-for (const one of [home.startsWith('/') ? `${home}/${rel}` : '', `/${rel}`].filter(Boolean)) if ((await $.fs.stat(one).catch(() => undefined))?.kind === 'file') return one
+const fromTop = isWindows && /^[A-Za-z]\//.test(rel) ? `${rel[0]}:/${rel.slice(2)}` : `/${rel}`
+for (const one of [isAbsPath(home) ? `${home}/${rel}` : '', fromTop].filter(Boolean)) if ((await $.fs.stat(one).catch(() => undefined))?.kind === 'file') return one
 return ''
 }
 const copyOpenable = async ($: EngineInterface, from: string, to: string) => {
@@ -3094,7 +3143,7 @@ await runOn($, ['rm', '-f', to]).catch(() => undefined)
 return (await runOn($, ['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await runOn($, ['cp', '-p', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0
 }
 const openable = async ($: EngineInterface, path: string, home: string) => {
-if (!openablesDir() || !path.startsWith('/') || isWithin(path, cwd) || !isMadeHere(path, home)) return ''
+if (!openablesDir() || !isAbsPath(path) || isWithin(path, cwd) || !isMadeHere(path, home)) return ''
 if ((await $.fs.stat(path).catch(() => undefined))?.kind !== 'file') return ''
 const to = openableOf(path, home)
 return (await copyOpenable($, path, to)) ? to : ''
@@ -3106,33 +3155,34 @@ const sent = Array.isArray(e.files) ? e.files.filter((one): one is string => typ
 if (!into || !sent.length) return ''
 const home = await homeOf($)
 const made: [string, string][] = []
-for (const path of sent) {
+for (const given of sent) {
+const path = slashed(given)
 if (isWithin(path, into)) {
 const from = await originalOf($, path, home)
 if (from) await copyOpenable($, from, path)
 continue
 }
 const to = await openable($, path, home)
-if (to) made.push([path, to])
+if (to) made.push([given, to])
 }
 if (made.length) await log($, `copied ${made.length} sent file${made.length === 1 ? '' : 's'} into the chat's folder to open`)
 return made.length ? named(SENT_OPENABLE(made)) : ''
 }
 
 const withOpenables = async ($: EngineInterface, text: string) => {
-if (!openablesDir() || !text.includes('/')) return text
+if (!openablesDir() || !(text.includes('/') || (isWindows && text.includes('\\')))) return text
 const home = await homeOf($)
 const lines = text.split('\n').map(line => line.trim().replace(/^(?:[-*]\s+)?`?/, '').replace(/`$/, '').replace(/[.:]$/, ''))
-const named = [...new Set([...lines.filter(line => line.startsWith('/') && !line.includes('`')), ...namedPaths(text)])].filter(path => isMadeHere(path, home))
+const named = [...new Map([...lines.filter(line => isAbsPath(line) && !line.includes('`')).map(line => ({ written: line, path: keptPath(line) })), ...pathsWritten(text)].map(one => [one.written, one.path])).entries()].filter(([, path]) => isMadeHere(path, home))
 const copies = new Map<string, string>()
-for (const path of named.sort((a, b) => b.length - a.length)) {
+for (const [written, path] of named.sort((a, b) => b[0].length - a[0].length)) {
 if (copies.size >= OPENABLE_MOST) break
 const to = await openable($, path, home)
-if (to) copies.set(path, to)
+if (to) copies.set(written, isWindows && written.includes('\\') ? to.replace(/\//g, '\\') : to)
 }
 if (!copies.size) return text
 const quoted = [...copies.keys()].map(path => path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-return text.replace(new RegExp(`(${quoted.join('|')})(?![\\w/-]|\\.\\w)`, 'g'), path => copies.get(path) ?? path)
+return text.replace(new RegExp(`(${quoted.join('|')})(?![\\w/${isWindows ? '\\\\' : ''}-]|\\.\\w)`, 'g'), path => copies.get(path) ?? path)
 }
 
 
@@ -3164,8 +3214,10 @@ await redraw($)
 const indexAsk = (root: string) =>
 [
 'Bring in my old chats (pressed in the Claudopus panel).',
-`Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it writes digests of your past chats, one or more per project, into ${dir}/onboard (Claudopus saves each chat's words under ${dir}/words itself).`,
-'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
+`Run ${isWindows ? 'python' : 'python3'} "${root}/onboard/extract.py" "${dir}/onboard"${isWindows ? ' (or py -3 in its place)' : ''}: it writes digests of your past chats, one or more per project, into ${dir}/onboard (Claudopus saves each chat's words under ${dir}/words itself).`,
+isWindows
+? 'If neither python nor py runs (or python only says to get it from the Microsoft Store), say so with the command winget install Python.Python.3.12 and stop.'
+: 'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
 `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
 'Last, record each stream found as a topic with the `update` tool (its name, folder, state and summary, and its section as `brief`), and list the topics you found in a few lines.',
 ].join(' ')
@@ -3745,7 +3797,7 @@ redraw($)
 )
 }
 
-const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
+const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind === 'This Mac' ? `T${thisMac().slice(1)}` : link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
 
 const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {
 if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
@@ -3955,14 +4007,31 @@ if (to) openMemory($, to)
 
 
 let jqPath = ''
+const jqPlaces = async ($: EngineInterface) => {
+if (!isWindows) return ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']
+const local = slashed(((await $.env.get('LOCALAPPDATA').catch(() => undefined)) ?? '').trim())
+return ['jq', ...(local ? [`${local}/Microsoft/WinGet/Links/jq.exe`] : [])]
+}
+let jqProgram = ''
+const jqProgramArgs = async ($: EngineInterface) => {
+if (!isWindows) return [SUM_JQ]
+const file = `${dir}/stats/sum.jq`
+if (jqProgram !== file || (await readOr($, file)) !== SUM_JQ) {
+await runOn($, ['mkdir', '-p', `${dir}/stats`]).catch(() => undefined)
+await $.fs.write(file, SUM_JQ)
+jqProgram = file
+}
+return ['-f', file]
+}
 const jqLine: (() => void)[] = []
 let jqBusy = 0
 async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
 if (jqBusy >= 6) await new Promise<void>(go => jqLine.push(go))
 else jqBusy += 1
 try {
-for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
-const r = await runOn($, [jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
+const program = await jqProgramArgs($)
+for (const jq of jqPath ? [jqPath] : await jqPlaces($)) {
+const r = await runOn($, [jq, '-cnR', '--argjson', 'gap', String(GAP), ...program, path]).catch(() => undefined)
 if (!r || r.exitCode !== 0) continue
 jqPath = jq
 return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
@@ -4338,7 +4407,7 @@ memoryHeld.now = { parts, bytes }
 
 const STATS_PANE = 'stats'
 const STATS_TITLE = 'Stats'
-const statsHint = async ($: EngineInterface) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`
+const statsHint = async ($: EngineInterface) => projectDirOf($, cwd, (await read($, me)).id)
 const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
 const { id } = await read($, me)
 await loadStats($, scope, dir, id, await statsHint($), await $.clock.now())
@@ -4367,9 +4436,10 @@ boardNow.file = file
 await $.fs.write(boardPath(), JSON.stringify(file))
 }
 const boardCall = async ($: EngineInterface, fn: string, args: Record<string, unknown>) => {
-const r = await $.process
-.run(['curl', '-q', '-sS', '-m', '20', '-X', 'POST', '-H', `apikey: ${BOARD_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@-', '-w', '\n%{http_code}', `${BOARD_API}/${fn}`], { stdin: JSON.stringify(args), timeoutMs: 25_000 })
-.catch(() => ({ exitCode: 1, stdout: '' }))
+const r = await runOn($, ['curl', '-q', '-sS', '-m', '20', '-X', 'POST', '-H', `apikey: ${BOARD_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@-', '-w', '\n%{http_code}', `${BOARD_API}/${fn}`], {
+stdin: JSON.stringify(args),
+timeoutMs: 25_000,
+}).catch(() => ({ exitCode: 1, stdout: '' }))
 const text = r.stdout ?? ''
 const cut = text.lastIndexOf('\n')
 const status = Number(text.slice(cut + 1)) || 0
@@ -4397,7 +4467,7 @@ got.kept.months.set(older, monthPieces(await monthRead($, dir, got.all, older)))
 const installedAt = async ($: EngineInterface) => {
 const kept = parsed<{ at?: number }>(await readOr($, `${dir}/installed.json`), {}).at
 if (typeof kept === 'number' && kept > 0) return kept
-const born = await runOn($, isLinux ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined)
+const born = await runOn($, isLinux || isWindows ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined)
 const seconds = Number(born?.stdout.trim())
 const at = seconds > 0 ? seconds * 1000 : await $.clock.now()
 await $.fs.write(`${dir}/installed.json`, JSON.stringify({ at })).catch(() => undefined)
@@ -4892,7 +4962,7 @@ let termFrom = ''
 let termHere = ''
 let termPort = ''
 const pictureSaid = new Map<string, { text: string; copy?: string }>()
-const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']
+const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale', 'C:/Program Files/Tailscale/tailscale.exe']
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
 const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($))
@@ -4908,10 +4978,10 @@ if (sent.exitCode === 0) return say(`✓ Claudopus sent it to ${name} with Tails
 await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
 break
 }
-const user = (await $.env.get('USER')) ?? ''
+const user = (isWindows ? await $.env.get('USERNAME') : await $.env.get('USER')) ?? ''
 const port = termPort && termPort !== '22' ? `-P ${termPort} ` : ''
 const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
-say('Run this on your Mac to open it there:', command)
+say(`Run this on ${isWindows ? 'your device' : 'your Mac'} to open it there:`, command)
 }
 const pictureSaidRow = ($: EngineInterface, ui: Ui, key: string, path: string) => {
 const said = pictureSaid.get(path)
@@ -5081,7 +5151,7 @@ const PICS_HELD = 60
 let isThumbsCleared = false
 const shots = new Map<string, { key: string; shots: Map<number, Pic[]> }>()
 const picOf = async ($: EngineInterface, given: string, one: Todo, isSeen: boolean, kept: Report[], isDrawn: boolean): Promise<Pic | null> => {
-const asked = given.startsWith('/') ? given : `${cwd}/${given}`
+const asked = isAbsPath(given) ? slashed(given) : `${cwd}/${given}`
 const stat = await $.fs.stat(asked).catch(() => undefined)
 const copy = kept.filter(r => r.agent === one.id).flatMap(r => r.files.filter(file => fileName(file) === fileName(asked)).map(file => `${reportPath(r)}/${file}`))[0]
 if (!stat || stat.kind !== 'file') return copy && !isSeen ? picOf($, copy, one, false, [], isDrawn) : isSeen ? null : { name: fileName(asked), path: '', thumb: null, isGone: true }
@@ -5228,8 +5298,7 @@ const projects = `${claudeDir || (await configDir($))}/projects`
 const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-')
 const name = `${c.id}/subagents/agent-${c.agent}.jsonl`
 during("read another chat's task")
-const r = await $.process
-.run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
+const r = await runOn($, ['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
 .catch(() => undefined)
 const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
 talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
@@ -5436,7 +5505,7 @@ const FACE_H = 126
 
 const wroteBy = (e: { tool: string }) => {
 const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
-if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return [String(input.file_path ?? input.notebook_path ?? '')].filter(path => path.startsWith('/'))
+if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return [slashed(String(input.file_path ?? input.notebook_path ?? ''))].filter(isAbsPath)
 if (e.tool === 'Bash') return namedPaths(String(input.command ?? '')).filter(path => madeKind(path).kind !== 'file' && !TEXT_DOC.test(path))
 return []
 }
@@ -5449,7 +5518,7 @@ const repoOf = new Map<string, string>()
 const repoTop = async ($: EngineInterface, folder: string) => {
 if (repoOf.has(folder)) return repoOf.get(folder) ?? ''
 const r = await runOn($, ['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
-const top = r?.exitCode === 0 ? r.stdout.trim() : ''
+const top = r?.exitCode === 0 ? slashed(r.stdout.trim()) : ''
 if (repoOf.size > 200) repoOf.clear()
 repoOf.set(folder, top)
 return top
@@ -5642,7 +5711,7 @@ let from = one.path
 let scratch = ''
 if (TEXT_DOC.test(one.path) && !/\.html?$/i.test(one.path)) return null
 if (one.kind !== 'picture' && one.kind !== 'pdf') {
-if (isLinux) return null
+if (isLinux || isWindows) return null
 scratch = `${dir}/thumbs/ql-${Math.round(await $.clock.now())}-${(qlMade += 1)}`
 await runOn($, ['mkdir', '-p', scratch])
 await runOn($, ['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
@@ -5655,9 +5724,11 @@ const isTall = width > 0 && height / width > FACE_H / FACE_W
 const mid = `${to}.png`
 if (isTall) await runOn($, [sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
 for (const quality of ['50', '35', '20']) {
-await $.process
-.run(isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 })
-.catch(() => undefined)
+await runOn(
+$,
+isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to],
+{ timeoutMs: 15_000 },
+).catch(() => undefined)
 if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= TILE_THUMB_BYTES) break
 }
 await runOn($, ['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)
@@ -6605,11 +6676,32 @@ wait: ms => new Promise<void>(done => void $.clock.after(ms, done)),
 })
 const engineOf = async ($: EngineInterface) => {
 const named = await $.env.get('CLAUDE_CODE_EXECPATH')
-if (named) return named
+if (named) return slashed(named)
+if (isWindows) return (await windowsEngine($)) || 'claude'
 const onPath = ((await $.env.get('PATH')) ?? '').split(':').filter(one => one.startsWith('/')).map(one => `${one.replace(/\/+$/, '')}/claude`)
 for (const one of [...onPath, `${(await homeFolder($)) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
 if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
 return 'claude'
+}
+const folderIo = ($: EngineInterface) => ({ exists: (path: string) => $.fs.exists(path).catch(() => false), list: (path: string) => $.fs.list(path) })
+const windowsPlaces = async ($: EngineInterface) => {
+const read = (value: string | undefined) => (value ?? '').trim()
+return {
+path: read(await $.env.get('PATH').catch(() => undefined)) || read(await $.env.get('Path').catch(() => undefined)),
+profile: await homeFolder($),
+appData: read(await $.env.get('APPDATA').catch(() => undefined)),
+localAppData: read(await $.env.get('LOCALAPPDATA').catch(() => undefined)),
+}
+}
+const appDataFolders = async ($: EngineInterface) => (isWindows ? windowsAppData(folderIo($), await windowsPlaces($)) : [`${await homeFolder($)}/Library/Application Support/Claude`])
+const windowsEngine = async ($: EngineInterface) => windowsEngineOf(folderIo($), await windowsPlaces($))
+const recordRead = (text: string) => {
+if (!isWindows || !text.includes('\\')) return text
+try {
+return JSON.stringify(JSON.parse(text, (_, value: unknown) => (typeof value === 'string' ? slashed(value) : value)))
+} catch {
+return text
+}
 }
 
 
@@ -6689,7 +6781,7 @@ const root = pluginRoot($).replace(/\/+$/, '')
 const from = installedFrom(root)
 const io = lookIo($)
 const plugins = from?.plugins ?? dir.replace(/\/claudopus$/, '/plugins')
-const known = await readOr($, `${plugins}/known_marketplaces.json`)
+const known = recordRead(await readOr($, `${plugins}/known_marketplaces.json`))
 const entryOf = (name: string) => {
 try {
 return (JSON.parse(known) as Record<string, { source?: { source?: string; path?: string; repo?: string }; installLocation?: string }>)?.[name]
@@ -6697,7 +6789,7 @@ return (JSON.parse(known) as Record<string, { source?: { source?: string; path?:
 return undefined
 }
 }
-const installed = await readOr($, `${plugins}/installed_plugins.json`)
+const installed = recordRead(await readOr($, `${plugins}/installed_plugins.json`))
 const done = (one: NonNullable<typeof sourceKnown>) => (sourceKnown = one)
 if (from) {
 const entry = entryOf(from.marketplace)
@@ -6709,7 +6801,7 @@ const ready = await folderReady(io, repo)
 return done({
 src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
 cannot: ready.ok ? undefined : { what: `Claude Code's copy is made from ${ready.what}`, why: ready.why },
-where: ready.ok ? "Claude Code's copy of the released code on this Mac" : `Claude Code's copy of ${ready.what}`,
+where: ready.ok ? `Claude Code's copy of the released code on ${thisMac()}` : `Claude Code's copy of ${ready.what}`,
 })
 }
 const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -6727,7 +6819,7 @@ const path = isGit ? await subOf() : ''
 if (isGit && path) return done({ src: { kind: 'clone', repo: location, sub: path, ...record }, where: "Claude Code's installed copy" })
 return done({ src: { kind: 'none', why: 'its marketplace is not one Claudopus can check a download in' }, cannot: { what: 'This chat runs a copy of Claudopus installed another way', why: 'update it with /plugin in Claude Code' }, where: "Claude Code's installed copy" })
 }
-const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim()
+const top = slashed((await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim())
 const ready = top ? await folderReady(io, top) : ({ ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" } as const)
 const marketplace = folderMarketplace(known, root)
 const scopes = (() => {
@@ -6738,11 +6830,12 @@ return []
 }
 })()
 const scope = scopes.includes('user') ? 'user' : (scopes.find(one => typeof one === 'string' && /^(user|project|local)$/.test(one)) as string | undefined)
-const sub = top && root.startsWith(`${top}/`) ? root.slice(top.length + 1) : 'mods/claudopus'
+const isUnder = isWindows ? root.toLowerCase().startsWith(`${top.toLowerCase()}/`) : root.startsWith(`${top}/`)
+const sub = top && isUnder ? root.slice(top.length + 1) : 'mods/claudopus'
 return done({
 src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
 cannot: ready.ok ? undefined : { what: `This chat runs ${ready.what}`, why: ready.why },
-where: ready.ok ? 'the released code on this Mac' : ready.what,
+where: ready.ok ? `the released code on ${thisMac()}` : ready.what,
 })
 }
 
@@ -6844,7 +6937,7 @@ let isOn = true
 const beat = (): unknown =>
 $.clock.after(20_000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())))
 beat()
-const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false))
+const got = await install(lookIo($), src, page, commit, await engineOf($), isWindows).finally(() => (isOn = false))
 const at = await $.clock.now()
 Object.assign(stepSaid, { version, detail: '', dirty: got.ok && got.dirty })
 if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
@@ -7004,7 +7097,7 @@ const said = live?.phase === 'checking' ? 'checking the download' : [pct !== und
 return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus v${v}…`, said ? `· ${said}` : ''), track(0)], [])
 }
 if (n.kind === 'downloaded') {
-const replaces = `Install puts v${v} on this Mac in place of v${loaded}. Then type /reload-plugins to use it.`
+const replaces = `Install puts v${v} on ${thisMac()} in place of v${loaded}. Then type /reload-plugins to use it.`
 return box(
 'downloaded',
 [title(`Claudopus v${v} downloaded`), line('replaces', replaces), track(1)],
@@ -7047,7 +7140,7 @@ if (!(await readOr($, `${root}/../../.git/HEAD`)).trim()) return undefined
 const version = versionOnPage(await readOr($, `${root}/.claude-plugin/plugin.json`))
 return version ? { version, installPath: root } : undefined
 }
-const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
+const installed = recordRead(await readOr($, `${from.plugins}/installed_plugins.json`))
 const id = `${from.plugin}@${from.marketplace}`
 return copyOf(installed, id, pluginRoot($), cwd)
 }
@@ -7113,9 +7206,7 @@ config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof c
 }
 if (config.sound === false) return
 const played = `${dir}/updated/${version}`
-const made = await $.process
-.run(['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played])
-.catch(() => ({ exitCode: 1 }))
+const made = await runOn($, ['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played]).catch(() => ({ exitCode: 1 }))
 if (made.exitCode !== 0) return
 await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {
 await runOn($, ['rm', '-f', played]).catch(() => undefined)
@@ -7279,7 +7370,7 @@ $.clock.after(2000, () => void (copies === made && ((copiedKey = ''), redraw($))
 let openedKey = ''
 let opens = 0
 const zshQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`
-const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar && !isLinux
+const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar && !isLinux && !isWindows
 const terminalFiles = (folder: string, home: string) => ({
 '.zshenv': [
 '[[ -f "${_CLAUDOPUS_DOT:-$HOME}/.zshenv" ]] && source "${_CLAUDOPUS_DOT:-$HOME}/.zshenv"',
@@ -7665,13 +7756,29 @@ function run(argv) {
   return data.writeToFileAtomically(argv[0], true) ? argv[0] : ''
 }`
 const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
+const PASTE_WINDOWS = [
+"$ErrorActionPreference = 'Stop'",
+'[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+'Add-Type -AssemblyName System.Windows.Forms, System.Drawing',
+'$files = [Windows.Forms.Clipboard]::GetFileDropList()',
+'if ($files.Count) { $files | ForEach-Object { $_ }; exit 0 }',
+'$image = [Windows.Forms.Clipboard]::GetImage()',
+'if ($image) { $image.Save($env:CLAUDOPUS_PASTE_TO, [Drawing.Imaging.ImageFormat]::Png); $env:CLAUDOPUS_PASTE_TO }',
+].join('; ')
 const pastePicture = async ($: EngineInterface, id: string) => {
 if (!canAttach()) return
 await runOn($, ['mkdir', '-p', attachedDir()])
 const at = new Date(await $.clock.now())
 const to = `${attachedDir()}/pasted-${at.getDate()}-${MONTHS[at.getMonth()]}-${[at.getHours(), at.getMinutes(), at.getSeconds()].map(n => String(n).padStart(2, '0')).join('.')}.png`
-const r = await runOn($, isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
-const got = (r?.exitCode === 0 ? r.stdout : '').split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+const r = await runOn(
+$,
+isWindows ? ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-Command', PASTE_WINDOWS] : isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to],
+{ timeoutMs: 15_000, ...(isWindows ? { env: { CLAUDOPUS_PASTE_TO: to } } : {}) },
+).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
+const got = (r?.exitCode === 0 ? r.stdout : '')
+.split('\n')
+.map(line => slashed(line.trim()))
+.filter(isAbsPath)
 if (got.length) return addAttached($, id, got)
 attachSaid.set(id, NOTHING_TO_PASTE)
 ;((presses += 1), (boxPresses += 1), drawAgain($, true))
@@ -7679,11 +7786,28 @@ attachSaid.set(id, NOTHING_TO_PASTE)
 const canAttach = () => !isRunFromAfar
 const PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose file with prompt "Attach files" with multiple selections allowed', '-e', 'set out to ""', '-e', 'repeat with f in picked', '-e', 'set out to out & POSIX path of f & linefeed', '-e', 'end repeat', '-e', 'return out']
 const PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files']
+const PICK_WINDOWS = [
+'powershell',
+'-NoProfile',
+'-NonInteractive',
+'-STA',
+'-Command',
+[
+'[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+'Add-Type -AssemblyName System.Windows.Forms',
+'$owner = New-Object Windows.Forms.Form -Property @{ TopMost = $true }',
+"$box = New-Object Windows.Forms.OpenFileDialog -Property @{ Multiselect = $true; Title = 'Attach files' }",
+'if ($box.ShowDialog($owner) -eq [Windows.Forms.DialogResult]::OK) { $box.FileNames }',
+].join('; '),
+]
 const pickFiles = async ($: EngineInterface, id: string) => {
 if (!canAttach()) return
-const r = await runOn($, isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
+const r = await runOn($, isWindows ? PICK_WINDOWS : isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
 if (!r || r.exitCode !== 0) return
-const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+const picked = r.stdout
+.split('\n')
+.map(line => slashed(line.trim()))
+.filter(isAbsPath)
 if (!picked.length) return
 await addAttached($, id, picked)
 }
@@ -7863,17 +7987,21 @@ if (['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi'].includes(end)) return 'video'
 if (end === 'pdf') return 'pdf'
 return 'file'
 }
+const PATHS_SAID = /(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g
+const PATHS_SAID_WINDOWS = /(?:file:\/\/\/?)?((?<![\w:])[A-Za-z]:[\\/][^\s'"`<>]+|\/(?:\\ |[^\s'"`<>])+)|'((?:[A-Za-z]:[\\/]|\/)[^'\n]+)'|"((?:[A-Za-z]:[\\/]|\/)[^"\n]+)"/g
 const pathsIn = async ($: EngineInterface, said: string) => {
 const found = new Set<string>()
-for (const m of said.matchAll(/(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g)) {
+for (const m of said.matchAll(isWindows ? PATHS_SAID_WINDOWS : PATHS_SAID)) {
 const raw = m[1] ?? m[2] ?? m[3] ?? ''
-const path = (() => {
+const plain = /^[A-Za-z]:/.test(raw) ? raw : raw.replace(/\\ /g, ' ')
+const given = (() => {
 try {
-return decodeURIComponent(raw.replace(/\\ /g, ' ').replace(/[.,;:)]+$/, ''))
+return decodeURIComponent(plain.replace(/[.,;:)]+$/, ''))
 } catch {
-return raw.replace(/\\ /g, ' ')
+return plain
 }
 })()
+const path = isWindows ? keptPath(given.replace(/^\/(?=[A-Za-z]:)/, '')) : given
 if ((await $.fs.stat(path).catch(() => undefined))?.kind === 'file') found.add(path)
 }
 return [...found]
@@ -7887,7 +8015,7 @@ files.length
             kind === 'picture' || kind === 'pdf'
               ? 'open it with Read'
               : kind === 'picture-other'
-                ? 'turn it into a PNG in your scratch folder (sips -s format png on a Mac, convert on Linux), then open that with Read'
+                ? 'turn it into a PNG in your scratch folder (sips -s format png on a Mac, convert on Linux, magick on Windows), then open that with Read'
                 : kind === 'video'
                   ? 'take stills from it into your scratch folder with ffmpeg (one a second, or more where it moves fast), then open them with Read; ffprobe gives its length'
                   : 'read it as its kind needs'
@@ -7902,7 +8030,7 @@ const wasHeld = isHeld(card)
 if (wasHeld) await changeTodos($, list => list.map(one => (one.id === id && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
 const at = await $.clock.now()
 const files = [...new Set([...picked, ...(await pathsIn($, said))])]
-const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
+const shown = [said, ...picked.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join('\n')
 const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
 await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
 const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
@@ -7922,7 +8050,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
 if (one.chat) return
 const ask = one.ask
 const words = choice.trim()
-const said = [words, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+const said = [words, ...picked.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join(' ')
 const note = isReply ? filesNote(files) : ''
 if (!ask || !said) return
 const target = ask.from ?? one.id
@@ -8470,8 +8598,8 @@ const heldApp = (c: Shared) => (c.link?.app && appIds.has(c.link.app) ? c.link.a
 const readAppIds = async ($: EngineInterface, now: number) => {
 if (now - appIdsAt < 30_000) return false
 appIdsAt = now
-const root = `${(await homeFolder($)) ?? ''}/Library/Application Support/Claude/claude-code-sessions`
 const found = new Map<string, string>()
+for (const root of (await appDataFolders($)).map(data => `${data}/claude-code-sessions`))
 for (const account of await $.fs.list(root).catch(() => []))
 for (const org of account.kind === 'dir' ? await $.fs.list(`${root}/${account.name}`).catch(() => []) : [])
 for (const one of org.kind === 'dir' ? await $.fs.list(`${root}/${account.name}/${org.name}`).catch(() => []) : []) {
@@ -11405,7 +11533,7 @@ ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
 ART.updated = updatedArt(ART.happy, FLOW)
 await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
 await noteSeen($).catch(err => log($, `changes seen not noted: ${String(err)}`))
-cwd = e.cwd
+cwd = slashed(e.cwd)
 if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1)
 ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
 await loadSettings($)
@@ -14359,19 +14487,20 @@ return { result: named(KEY_ASK_SHOWN(pluginRoot($), keyName, Boolean(same), like
 }
 if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
 const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
-const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
+const givenCwd = typeof input.cwd === 'string' ? slashed(input.cwd.trim()) : ''
+const hasFolder = isAbsPath(givenCwd)
 if (given0 && !hasFolder && /^(?:\.{1,2}\/|[\w-][\w.-]*\/)/.test(given0)) {
 return { result: 'Not shown: the command starts with a path relative to a folder it does not name. Give `cwd`, the full path of the folder it runs in, or a full path, so it runs as it is wherever it is typed.' }
 }
-const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(String(input.cwd))} && ${given0}` : given0
+const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(givenCwd)} && ${given0}` : given0
 const given = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
 const isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given)
 const copy = command || (isProse || flat(text).includes(flat(given)) ? '' : given)
-const folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd
+const folder = hasFolder ? givenCwd : cwd
 const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].filter(one => !LEAVES_OPEN.test(plainWords(one))).slice(0, 4)
-const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : []).filter((one): one is string => typeof one === 'string').map(one => one.trim()).filter(one => IMAGE.test(one)))].slice(0, 8)
+const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : []).filter((one): one is string => typeof one === 'string').map(one => slashed(one.trim())).filter(one => IMAGE.test(one)))].slice(0, 8)
 const pictures: string[] = []
-for (const path of givenPics) if (path.startsWith('/') && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
+for (const path of givenPics) if (isAbsPath(path) && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
 const at = await $.clock.now()
 const before = await read($, todos)
 const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
@@ -14398,8 +14527,8 @@ redraw($)
 await askAloud($, own, text).catch(err => log($, `answer not told: ${String(err)}`))
 return { result: `Shown inside the permission on your card, under ${who()}'s words. It keeps Allow and Don't allow until ${who()} presses one, and that press comes back to you as a message. Don't run it again before then. With nothing else to do, end your step.` }
 }
-const releaseGiven = typeof input.release === 'string' ? input.release.trim() : ''
-const release = releaseGiven.startsWith('/') && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
+const releaseGiven = typeof input.release === 'string' ? slashed(input.release.trim()) : ''
+const release = isAbsPath(releaseGiven) && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
 const asker = e.agentId
 const isOwnAsk = (one: Todo, ask: Ask) => (ask.from ?? one.id) === asker
 let cleared: Ask[] = []
@@ -14418,8 +14547,8 @@ return { result: cleared.length > 1 ? `Cleared: your card no longer has your ${c
 if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
 if (wantsPicture && !isSameAsk && pictures[0]) await openQuestionPicture($, pictures[0])
 if (card) await askInChat($, card)
-const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : isLinux ? ` Do not open a terminal for it: on Linux the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
-const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `${choices.length ? `the buttons ${choices.join(', ')} and ` : ''}Answer in words`].filter(Boolean).join(' and ')
+const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to ${thisMac()}, and nothing opens a terminal here.` : isLinux || isWindows ? ` Do not open a terminal for it: ${isWindows ? 'on Windows' : 'on Linux'} the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
+const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar || isLinux || isWindows ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `${choices.length ? `the buttons ${choices.join(', ')} and ` : ''}Answer in words`].filter(Boolean).join(' and ')
 const lost = givenPics.length - pictures.length
 const long = text === asked ? '' : ` The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.`
 const tooLong = whole.length > ASK_DETAILS ? ` Its details were longer than ${ASK_DETAILS} letters and were cut at a word: put what matters first.` : ''
@@ -14855,7 +14984,7 @@ const one = gatePressed.has(open.id) || !(gateHeld.has(open.id) || gateParked.ha
 const sendWords = (value: string) => {
 if (!one) return
 const files = takeAttached(open.id)
-const shown = [value.trim(), ...files.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+const shown = [value.trim(), ...files.map(path => `📎 ${fileName(path)}`)].filter(Boolean).join(' ')
 if (!shown) return
 ;((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($))
 void wordsOnGate($, one.id, open.id, shown, filesNote(files))
@@ -15133,7 +15262,7 @@ type ProgressRef = ProgressPictureRef & { report: Report; thumb: string }
 const progressPictures = (data: ProgressRead, entry: ProgressEntry): ProgressRef[] =>
 entry.pictures.flatMap(path => {
 const r = data.reports.get(path.startsWith(`${reportsDir()}/`) ? (path.slice(reportsDir().length + 1).split('/')[0] ?? '') : entry.report)
-const full = !r ? '' : path.startsWith('/') ? path : `${reportPath(r)}/${path}`
+const full = !r ? '' : isAbsPath(path) ? slashed(path) : `${reportPath(r)}/${path}`
 const thumb = full && RASTER.test(full) && isInside(full.slice(reportPath(r as Report).length + 1)) ? entryThumb(full) : ''
 return r && thumb ? [{ key: full, report: r, thumb }] : []
 })
@@ -15926,7 +16055,7 @@ const head = (
 <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
 {jobLines(t, `twig-lines-${key}`, job)}
 <Box flexGrow={1} flexShrink={1} minWidth={0}>
-{/* A press shows its output whole in a Terminal window, where this Mac can open one */}
+{/* A press opens its log in a tab of the panel */}
 {isMore(job) && owner ? (
 <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
 ) : canOpenJob(job) ? (

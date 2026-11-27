@@ -27,8 +27,8 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
 
 // On Windows, where the Claude app runs the engine with no HOME and Claude Code's own commands run in Git for Windows' bash: the
 // memory folder is in the person's profile, and every Unix tool and shell the mod asks for runs in Git's bash, each word as it was
-test('on a Windows PC the welcome comes the same, its memory in the profile and each Unix command run in Git for Windows\' bash', async ($, on) => {
-  const { opened, files, windowsRuns } = world(on, { isNew: true, windows: true })
+test('on a Windows PC the welcome comes the same, its memory in the profile and each Unix command run in Git for Windows\' bash, and its old chats brought in with Windows\' own Python', async ($, on) => {
+  const { opened, files, windowsRuns, submitted } = world(on, { isNew: true, windows: true })
   await $.session.start(start)
   expect(opened[0]).toBe('claudopus')
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -41,6 +41,15 @@ test('on a Windows PC the welcome comes the same, its memory in the profile and 
   const bare = windowsRuns.filter(argv => argv[0] !== 'C:/Program Files/Git/bin/bash.exe' && !/^(?:git|where|powershell|explorer|rundll32|notepad|tasklist|taskkill|netstat)(?:\.exe)?$|\.exe$/i.test(argv[0] ?? ''))
   expect(bare).toEqual([])
   expect(windowsRuns.filter(argv => argv[0] === 'C:/Program Files/Git/bin/bash.exe').every(argv => argv[1] === '-c' && argv[2] === 'exec "$0" "$@"')).toBe(true)
+  // There python3 is often missing or only the Store's stand-in: the chat runs python, or py -3, and says how to get Python if neither runs
+  const index = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(index, 'welcome-index')
+  const asked = (await until(async () => submitted.find(text => text.startsWith('Bring in my old chats')))) ?? ''
+  expect(asked).toContain('Run python "')
+  expect(asked).toContain('/onboard/extract.py" "C:/Users/sam/.claude/claudopus/onboard" (or py -3 in its place)')
+  expect(asked).toContain('winget install Python.Python.3.12')
+  expect(asked).not.toMatch(/python3|xcode-select/)
+  await index.unmount()
 })
 
 test('the welcome is put away by Not now, and by the next session even unpressed', async ($, on) => {

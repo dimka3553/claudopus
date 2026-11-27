@@ -41,7 +41,7 @@ const FACE_H = 126
 // The paths one tool call writes or names: the file a file tool is given, and in a command the files of a kind a tile is drawn for
 const wroteBy = (e: { tool: string }) => {
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return [String(input.file_path ?? input.notebook_path ?? '')].filter(path => path.startsWith('/'))
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return [slashed(String(input.file_path ?? input.notebook_path ?? ''))].filter(isAbsPath)
   if (e.tool === 'Bash') return namedPaths(String(input.command ?? '')).filter(path => madeKind(path).kind !== 'file' && !TEXT_DOC.test(path))
   return []
 }
@@ -56,7 +56,7 @@ const repoOf = new Map<string, string>()
 const repoTop = async ($: EngineInterface, folder: string) => {
   if (repoOf.has(folder)) return repoOf.get(folder) ?? ''
   const r = await runOn($, ['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
-  const top = r?.exitCode === 0 ? r.stdout.trim() : ''
+  const top = r?.exitCode === 0 ? slashed(r.stdout.trim()) : ''
   if (repoOf.size > 200) repoOf.clear()
   repoOf.set(folder, top)
   return top
@@ -301,7 +301,7 @@ const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
     if (TEXT_DOC.test(one.path) && !/\.html?$/i.test(one.path)) return null
     if (one.kind !== 'picture' && one.kind !== 'pdf') {
       // Quick Look is the Mac's own: elsewhere the tile keeps its icon
-      if (isLinux) return null
+      if (isLinux || isWindows) return null
       scratch = `${dir}/thumbs/ql-${Math.round(await $.clock.now())}-${(qlMade += 1)}`
       await runOn($, ['mkdir', '-p', scratch])
       await runOn($, ['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
@@ -316,9 +316,11 @@ const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
     const mid = `${to}.png`
     if (isTall) await runOn($, [sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
     for (const quality of ['50', '35', '20']) {
-      await $.process
-        .run(isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 })
-        .catch(() => undefined)
+      await runOn(
+        $,
+        isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to],
+        { timeoutMs: 15_000 },
+      ).catch(() => undefined)
       if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= TILE_THUMB_BYTES) break
     }
     await runOn($, ['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)

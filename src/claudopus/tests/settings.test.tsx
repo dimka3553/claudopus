@@ -46,6 +46,23 @@ test('a person\'s own copy that keeps both lines carries both, in their words, i
   expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(MINE)
 })
 
+// On Windows Config names this computer as a PC, and its memory folder from the home folder (~) as on a Mac
+test('on a Windows PC Config says PC for this computer and names the memory folder from ~', async ($, on) => {
+  const { tabs } = world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(list, 'config-open')
+  expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  expect(await moreShown(config)).toBe(true)
+  expect(await config.find({ type: 'Text', text: 'Busy PC' })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /^When the PC is busy, / })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: 'Busy Mac' })).toBeUndefined()
+  expect((await config.find({ type: 'Text', text: /^Your changes are kept in / }))?.text).toBe('Your changes are kept in ~/.claude/claudopus, so an update never undoes them.')
+  await config.unmount()
+  await list.unmount()
+})
+
 test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', async ($, on) => {
   const { files, shown, tabs } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', other: 1 }))

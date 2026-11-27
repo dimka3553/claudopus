@@ -163,7 +163,8 @@ const quoteOf = ($: EngineInterface, ui: Ui, key: string, words: string) => {
 }
 
 // A list of links, one a line, each led by where it goes
-const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
+// (a page served on this computer is named as this computer is: This PC on Windows)
+const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind === 'This Mac' ? `T${thisMac().slice(1)}` : link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
 
 // A chat reply as drawn, with its task's box around it while colours are on and its links at its end while links are on
 const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {

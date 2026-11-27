@@ -10,7 +10,7 @@ type ProgressRef = ProgressPictureRef & { report: Report; thumb: string }
 const progressPictures = (data: ProgressRead, entry: ProgressEntry): ProgressRef[] =>
   entry.pictures.flatMap(path => {
     const r = data.reports.get(path.startsWith(`${reportsDir()}/`) ? (path.slice(reportsDir().length + 1).split('/')[0] ?? '') : entry.report)
-    const full = !r ? '' : path.startsWith('/') ? path : `${reportPath(r)}/${path}`
+    const full = !r ? '' : isAbsPath(path) ? slashed(path) : `${reportPath(r)}/${path}`
     const thumb = full && RASTER.test(full) && isInside(full.slice(reportPath(r as Report).length + 1)) ? entryThumb(full) : ''
     return r && thumb ? [{ key: full, report: r, thumb }] : []
   })

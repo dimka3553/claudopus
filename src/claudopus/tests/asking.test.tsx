@@ -1623,6 +1623,43 @@ test('F-013 · an answer another chat left in a file for ended work wakes nothin
   expect(files.get(`${MEMORY}/log.md`)).toContain('put away unread')
 })
 
+// On Windows there is no Terminal app to type a command into: the card gives it with Copy alone, from its folder with forward
+// slashes, which Git's bash and PowerShell both take. Attach and Paste go through Windows PowerShell's own Open box and clipboard, and
+// what they give, Windows paths, reaches the task with forward slashes
+test('on a Windows PC a command for the person is given to copy, with no Open in Terminal, and Attach and Paste take files from Windows\' own Open box and clipboard', async ($, on) => {
+  const ended = new Set<string>()
+  const { files, windowsRuns, resumed } = world(on, { windows: true, ended })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'sign me in', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Sign in', prompt: 'sign me in' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const told = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Sign in to GitHub.', command: 'gh auth login', cwd: 'C:\\Users\\sam\\repo\\site' } as never)
+  expect(String(told.result)).toContain("cd 'C:/Users/sam/repo/site' && gh auth login")
+  expect(String(told.result)).toContain('on Windows the card gives it with a Copy button')
+  expect(String(told.result)).not.toContain('Open in Terminal')
+  expect(await until(async () => ((await askButtons(list, 'a1')).includes('Copy') ? askButtons(list, 'a1') : undefined))).not.toContain('Open in Terminal')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: '' } as never)
+  ended.add('a1')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Which skin looks wrong?' } as never)
+  await list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(one => /^ask-a1-inbar-\d+$/.test(one.key ?? ''))))?.key ?? '' })
+  const box = await until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith('band-a1-reply-answer-')))
+  const pressBar = async (label: string) => bar.press({ key: (await bar.findAll({ type: 'Button' })).find(b => b.props.label === label)?.key ?? '' })
+  const tiles = async () => (await bar.findAll({ type: 'Svg' } as never)).map(one => String(one.props.alt)).filter(alt => /^(Picture|Video|PDF|File): /.test(alt))
+  files.set('clipboard:files', 'C:\\Users\\sam\\Desktop\\skin 2.png\n')
+  await pressBar('Paste')
+  files.set('picker:chosen', 'C:\\Users\\sam\\Desktop\\notes.zip\n')
+  await pressBar('Attach')
+  expect(await until(async () => ((await tiles()).length === 2 ? tiles() : undefined))).toEqual(['Picture: skin 2.png', 'File: notes.zip'])
+  expect(windowsRuns.filter(argv => argv[0] === 'powershell').map(argv => argv.slice(1, 5))).toEqual([['-NoProfile', '-NonInteractive', '-STA', '-Command'], ['-NoProfile', '-NonInteractive', '-STA', '-Command']])
+  await bar.input({ key: box?.key ?? '', text: 'The second one' })
+  const answer = (await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('in their own words: The second one')))) ?? ''
+  expect(answer).toContain('\n- C:/Users/sam/Desktop/skin 2.png (open it with Read)')
+  expect(answer).toContain('\n- C:/Users/sam/Desktop/notes.zip (read it as its kind needs)')
+  await bar.unmount()
+  await list.unmount()
+})
+
 test('in a chat run from another Mac a command for the person is given whole, with its folder, and nothing offers to open a terminal here', async ($, on) => {
   const { terminals, shown } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)

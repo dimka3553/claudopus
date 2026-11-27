@@ -188,6 +188,24 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
   void files
 })
 
+// On Windows a command names the memory folder from its drive, C:/Users/..., or as Git's bash does, /c/Users/...: a write into it by
+// either is no command that only reads, and is refused as on a Mac; a read still runs
+test('F-007 · on a Windows PC a command that writes into the memory folder by a Windows path or a Git bash path is refused, and a read of it runs', async ($, on) => {
+  world(on, { windows: true })
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'tidy the config', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'tidy it' } as never)
+  for (const [i, command] of [
+    'echo x > C:/Users/sam/.claude/claudopus/config.json',
+    'echo x > /c/Users/sam/.claude/claudopus/config.json',
+    'cd /c/Users/sam/.claude && echo x > claudopus/config.json',
+  ].entries()) {
+    const said = ((await $.tool.call({ tool: 'Bash', tool_use_id: `w${i}`, agentId: 'a1', command } as never)) as { deny?: string }).deny ?? ''
+    expect([command, said.includes('only with the Edit or Write tool')]).toEqual([command, true])
+  }
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'cat C:/Users/sam/.claude/claudopus/config.json' } as never)) as { result?: unknown }).result).toBe('ran')
+})
+
 test("F-007 F-008 F-014 F-021 · a command that writes the person's settings or texts by a path no reading of it finds has the change undone as it ends; Allow on the card makes it again", async ($, on) => {
   const { list, press, files, bash, holding } = await gated($, on)
   const config = `${MEMORY}/config.json`

@@ -252,7 +252,8 @@ const writeHeldOthers = async ($: EngineInterface) => {
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
-// ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_….json, each naming the engine's id for that chat
+// ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_….json (on Windows in the app's data folder,
+// appDataFolders), each naming the engine's id for that chat
 // (`cliSessionId`, the id a chat shares as `chat`). They include the chats it runs on another Mac over SSH, which a press then opens
 // by the app's own id as its sidebar does, whatever version of the mod runs there. Listed again at most every half minute; a file is
 // read once, as the id it names never changes
@@ -268,8 +269,8 @@ const heldApp = (c: Shared) => (c.link?.app && appIds.has(c.link.app) ? c.link.a
 const readAppIds = async ($: EngineInterface, now: number) => {
   if (now - appIdsAt < 30_000) return false
   appIdsAt = now
-  const root = `${(await homeFolder($)) ?? ''}/Library/Application Support/Claude/claude-code-sessions`
   const found = new Map<string, string>()
+  for (const root of (await appDataFolders($)).map(data => `${data}/claude-code-sessions`))
   for (const account of await $.fs.list(root).catch(() => []))
     for (const org of account.kind === 'dir' ? await $.fs.list(`${root}/${account.name}`).catch(() => []) : [])
       for (const one of org.kind === 'dir' ? await $.fs.list(`${root}/${account.name}/${org.name}`).catch(() => []) : []) {

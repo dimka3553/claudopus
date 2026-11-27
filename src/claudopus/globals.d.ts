@@ -223,6 +223,8 @@ declare global {
   export import Steps = M7.Steps
   export import copyOf = M7.copyOf
   export import download = M7.download
+  export import windowsAppData = M7.windowsAppData
+  export import windowsEngineOf = M7.windowsEngine
   export import FAILS = M7.FAILS
   export import folderMarketplace = M7.folderMarketplace
   export import folderReady = M7.folderReady

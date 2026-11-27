@@ -1,5 +1,28 @@
 // The Stats and About tabs, and the bar of buttons
 
+// On Windows jq is no part of Git for Windows: the one winget puts in the profile is found, and given its program in a file, which
+// Windows' own quoting of a long argument full of quotes would not bring to jq.exe whole; the chat's records are in its project
+// folder as Claude Code names it there
+test('on a Windows PC Stats reads the chat\'s records with the jq winget installed, its program given in a file', async ($, on) => {
+  const { files, windowsRuns } = world(on, { windows: true, env: { LOCALAPPDATA: 'C:\\Users\\sam\\AppData\\Local' } })
+  const now = 1_700_000_000_000
+  const chat = 'C:/Users/sam/.claude/projects/C--Users-sam-repo'
+  files.set('jq:missing', '')
+  files.set(`${chat}/engine-id.jsonl`, '{}')
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 1_800_000, now]], u: [], d: [], turns: [[now - 1_800_000, now - 1_780_000]] }))
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(pane, 'stats-open')
+  const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const JQ = 'C:/Users/sam/AppData/Local/Microsoft/WinGet/Links/jq.exe'
+  const PROGRAM = 'C:/Users/sam/.claude/claudopus/stats/sum.jq'
+  const run = await until(async () => windowsRuns.find(argv => argv[0] === JQ && argv.at(-1) === `${chat}/engine-id.jsonl`))
+  expect(run?.slice(-3)).toEqual(['-f', PROGRAM, `${chat}/engine-id.jsonl`])
+  expect(files.get(PROGRAM)).toContain('def ms:')
+  await stats.unmount()
+  await pane.unmount()
+})
+
 test('Stats opens in front from its button beside Results, and adds up this chat\'s work from its records: tokens, work, time saved, cost', async ($, on) => {
   const { files, opened, tabs, held: holding } = world(on)
   const M = 60_000

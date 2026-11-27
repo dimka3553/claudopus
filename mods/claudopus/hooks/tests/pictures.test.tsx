@@ -375,6 +375,14 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\n`))
       return ok(files.get('clipboard:files') ?? '')
     }
+    // On Windows the same through Windows PowerShell: its Open box, and its clipboard, a picture saved where CLAUDOPUS_PASTE_TO says
+    // (each line ends as Windows ends lines)
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('OpenFileDialog'))) return files.has('picker:chosen') ? ok((files.get('picker:chosen') ?? '').replace(/\n/g, '\r\n')) : ok('')
+    if (tool === 'powershell' && e.argv.some(one => String(one).includes('GetFileDropList'))) {
+      const to = String(e.init?.env?.CLAUDOPUS_PASTE_TO ?? '')
+      if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\r\n`))
+      return ok((files.get('clipboard:files') ?? '').replace(/\n/g, '\r\n'))
+    }
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -585,14 +593,16 @@ const world = (on: On, options: { windows?: boolean; tailscale?: string; reply?:
       // hold:<fn> keeps the call on its way until the test lets it go: held.get(fn)?.('')
       return files.has(`hold:${fn}`) ? (new Promise(done => held.set(fn, () => done(answer()))) as never) : answer()
     }
+    // jq:missing: none on the PATH (as on Windows, where Git for Windows has none), only one at its own full path
+    if (tool === 'jq' && files.has('jq:missing')) return ok('', 127)
     // hold:jq keeps every chat's records being read, as they are for half a minute after a reload, until the test lets them go
-    if (tool?.endsWith('jq') && files.has('hold:jq')) {
+    if (/jq(?:\.exe)?$/.test(tool ?? '') && files.has('hold:jq')) {
       const sum = files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}'
       return new Promise(done => held.set(`jq:${String(e.argv.at(-1))}`, () => done(ok(sum)))) as never
     }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
-    const stdout = tool?.endsWith('jq')
+    const stdout = /jq(?:\.exe)?$/.test(tool ?? '')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
@@ -1160,6 +1170,32 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   await term.unmount()
   // Only the ask's notice in the chat is logged: nothing failed
   expect(logged.filter(line => !line.startsWith('"Pick a design" has a question for you'))).toEqual([])
+})
+
+// On Windows, where the engine and Claude's tools name a file as Windows writes it (C:\Users\sam\repo\src\app.ts): a file a task
+// wrote in its repo is counted there and a file its command names is shown, each kept with forward slashes, and a press opens the
+// file in Explorer, by its own path with backslashes
+test('on a Windows PC what a task wrote and named, each a Windows path, is on its card: a changed file counted in its repo, a PDF shown, and a press opens it in Explorer', async ($, on) => {
+  const { files, windowsRuns } = world(on, { windows: true })
+  const NEW = '9999999999999'
+  const pdf = 'C:/Users/sam/out/vat-report.pdf'
+  for (const path of [pdf, 'C:/Users/sam/repo/src/app.ts']) (files.set(path, 'x'), files.set(`mtime:${path}`, NEW))
+  files.set('git:top', 'C:/Users/sam/repo')
+  files.set('git:numstat', '12\t3\tsrc/app.ts\n')
+  await $.session.start({ ...start, cwd: 'C:\\Users\\sam\\repo' })
+  await $.prompt.submit({ text: 'make the report', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Make the report.' } as never)
+  await $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'a1', file_path: 'C:\\Users\\sam\\repo\\src\\app.ts', content: 'x' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'render "C:\\Users\\sam\\out\\vat-report.pdf"', description: 'Run the render of the report' } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await until(async () => (await keyed(pane, 'made-a1-pdf-0-open')) || undefined)
+  const chips = (await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))
+  expect(chips).toEqual(['vat-report', '1 changed file'])
+  // (counted against its repo by its path inside it)
+  expect(windowsRuns.some(argv => argv.includes('C:/Users/sam/repo') && argv.at(-1) === 'src/app.ts')).toBe(true)
+  await pressed(pane, 'made-a1-pdf-0-open')
+  expect(await until(async () => windowsRuns.find(argv => argv[0] === 'explorer.exe'))).toEqual(['explorer.exe', 'C:\\Users\\sam\\out\\vat-report.pdf'])
+  await pane.unmount()
 })
 
 test("what a task made is on its card under its title, side by side, and as tiles under the title in its Details: a file opens on a press, three of a kind are one stack that opens out, and the files it changed in a repo are a table by kind, an icon and a bar each, each shown in the app's Files pane on a press, or where it can't, what changed in it opens in a tab of the panel", async ($, on) => {

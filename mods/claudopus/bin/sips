@@ -1,15 +1,18 @@
 #!/bin/bash
-# On Linux, the few calls of macOS's sips that the mod makes for the small copies of pictures, answered with ImageMagick:
+# On Linux and Windows, the few calls of macOS's sips that the mod makes for the small copies of pictures, answered with ImageMagick:
 #   sips -g pixelWidth -g pixelHeight [-g hasAlpha] FILE
 #   sips -Z SIZE -s format jpeg -s formatOptions QUALITY IN --out OUT
 #   sips --resampleWidth WIDTH -s format png IN --out OUT
 #   sips --padToHeightWidth HEIGHT WIDTH FILE
 #   sips -c ROWS COLUMNS --cropOffset Y X -s format FORMAT [-s formatOptions QUALITY] IN --out OUT
 # Without ImageMagick (magick, or convert and identify) it ends 127 and makes nothing: the panel then draws pictures as rows
-# without their small copies. `sudo apt install imagemagick` (or the system's own) brings them.
+# without their small copies. `sudo apt install imagemagick` (or the system's own) brings them. On Windows, where it runs in Git's
+# bash, only magick is ImageMagick's: the convert there is Windows' own tool for disks (winget install ImageMagick.ImageMagick
+# brings magick).
 set -u
+case $(uname -s 2>/dev/null) in MINGW* | MSYS* | CYGWIN*) on_windows=1 ;; *) on_windows=0 ;; esac
 if command -v magick >/dev/null 2>&1; then convert=(magick) identify=(magick identify)
-elif command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; then convert=(convert) identify=(identify)
+elif [ "$on_windows" = 0 ] && command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; then convert=(convert) identify=(identify)
 else echo "sips: ImageMagick is not installed, so no small copy of a picture is made" >&2; exit 127; fi
 
 gets=() size='' width='' pad=() crop=() offset=() format='' quality='' out='' files=()

@@ -46,7 +46,11 @@ const pageOf = (name: string) => `${dir}/streams/${slug(name)}.md`
 const historyOf = (name: string) => `${dir}/streams/${slug(name)}.log.md`
 // A topic in a temporary folder or inside the memory folder (where test runs and notes live) is a test's, not the person's work:
 // it is kept out of the index every chat is given
-const isScratchTopic = (repo: string) => /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
+// (on Windows the engine's own C:/tmp and the person's %TEMP% too, a folder named with either slash)
+const isScratchTopic = (given: string) => {
+  const repo = slashed(given)
+  return /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || /^[A-Za-z]:\/(?:tmp|Users\/[^/]+\/AppData\/Local\/Temp)\//i.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
+}
 // A history entry: dated, headed by who added it
 const historyEntry = (at: number, by: string, text: string) => `## ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} ${oneLine(by) || 'A task'}\n\n${hideKeys(text.trim())}\n\n`
 // An entry added to a topic's history; one grown past HISTORY_MOST has its older half moved to streams/<slug>.log.<n>.md, once,

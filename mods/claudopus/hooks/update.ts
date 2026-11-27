@@ -158,7 +158,10 @@ export const updateSteps = (engine: string, from: { marketplace: string; plugin:
 // The version page as the release made it (build.mjs): the version, git's fingerprint of the mod's folder as released (`tree`), its
 // size in bytes, and the newest versions with the first line of each one's changes. Read strictly: a page without a fingerprint
 // is no release a download can be checked against, and every line is plain text of a bounded length
-export type Published = { version: string; tree: string; size: number; versions: { version: string; line: string; more: number }[] }
+// `exec`: the files of the mod's folder the release has as runnable, which a disk that keeps no such mark (Windows') needs to be told
+// of before its copy's fingerprint can match `tree`; a page from before it has none
+export type Published = { version: string; tree: string; size: number; versions: { version: string; line: string; more: number }[]; exec?: string[] }
+const EXEC_PATH = /^[\w.@+-]+(?: [\w.@+-]+)*(?:\/[\w.@+-]+(?: [\w.@+-]+)*)*$/
 const VERSION_RE = /^\d{1,4}(?:\.\d{1,6}){1,3}$/
 export const isVersion = (text: unknown): text is string => typeof text === 'string' && VERSION_RE.test(text)
 export const isTree = (text: unknown): text is string => typeof text === 'string' && /^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(text)
@@ -172,14 +175,16 @@ const plainLine = (text: unknown, most = 140) =>
     : ''
 export const publishedOf = (text: string): Published | undefined => {
   try {
-    const page = JSON.parse(text) as { version?: unknown; tree?: unknown; size?: unknown; versions?: unknown }
+    const page = JSON.parse(text) as { version?: unknown; tree?: unknown; size?: unknown; versions?: unknown; exec?: unknown }
     if (!isVersion(page?.version) || !isTree(page.tree)) return undefined
     const versions = (Array.isArray(page.versions) ? page.versions : [])
       .slice(0, 60)
       .filter((one): one is { version: string; line?: unknown; more?: unknown } => isVersion((one as { version?: unknown })?.version))
       .map(one => ({ version: one.version, line: plainLine(one.line), more: Math.max(0, Math.min(99, Math.floor(Number(one.more) || 0))) }))
     const size = Number(page.size)
-    return { version: page.version, tree: page.tree, size: Number.isFinite(size) && size > 0 ? Math.floor(size) : 0, versions }
+    // (each a plain path inside the folder: never from the root, never one that climbs out)
+    const exec = Array.isArray(page.exec) ? page.exec.filter((one): one is string => typeof one === 'string' && one.length <= 300 && EXEC_PATH.test(one) && one.split('/').every(part => part !== '..' && part !== '.')).slice(0, 500) : undefined
+    return { version: page.version, tree: page.tree, size: Number.isFinite(size) && size > 0 ? Math.floor(size) : 0, versions, ...(exec ? { exec } : {}) }
   } catch {
     return undefined
   }
@@ -327,13 +332,16 @@ export const fetchProgress = (said: string): { pct: number; got: number; phase: 
 // git's fingerprint of a folder as it is on disk, every file counted, whatever ignore files in it say (a folder that ignores itself
 // would otherwise hide what it holds), but for what the engine itself makes in each copy it keeps: its `.in_use` and
 // `.orphaned_at` marks and the types it writes in `.claude-plugin/types`. So a copy Claude Code installed is compared with the
-// release's `tree` file for file
+// release's `tree` file for file. A disk that keeps no mark of which files run (Windows') has git count every file as one that does
+// not: there the files the release has as runnable (`runnable`, one path a line, in $2) are counted as such, and any other change
+// still shows
 export const TREE_OF_FOLDER =
   'd=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EXIT; git init -q --bare "$d/g" || exit 1; ' +
   'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" -c core.excludesFile=/dev/null add -A -f -- . ":(exclude).in_use" ":(exclude).orphaned_at" ":(exclude).claude-plugin/types" >/dev/null 2>&1 || exit 1; ' +
+  'if [ -n "${2:-}" ]; then printf \'%s\\n\' "$2" | GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" update-index --chmod=+x --stdin >/dev/null 2>&1 || exit 1; fi; ' +
   'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" write-tree'
-export const treeOfFolder = async (io: Pick<LookIo, 'run'>, folder: string) => {
-  const out = await io.run(['sh', '-c', TREE_OF_FOLDER, 'sh', folder], 60_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))
+export const treeOfFolder = async (io: Pick<LookIo, 'run'>, folder: string, runnable: string[] = []) => {
+  const out = await io.run(['sh', '-c', TREE_OF_FOLDER, 'sh', folder, ...(runnable.length ? [runnable.join('\n')] : [])], 60_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))
   const tree = out.exitCode === 0 ? out.stdout.trim() : ''
   return isTree(tree) ? tree : ''
 }
@@ -380,9 +388,11 @@ export const download = async (io: LookIo, src: Exclude<Source, { kind: 'none' }
 // Install: the download checked once more against the version page read now, then, for a clone, Claude Code's own two steps and the
 // copy they installed checked file for file, its record put back as it was when it is not the release; for a folder, its main moved
 // forward to the download, a fast-forward only, which git refuses before it changes anything when work in the folder would be lost.
-// `dirty` says the folder has uncommitted changes, which stay, and which a chat run from it loads on top
+// `dirty` says the folder has uncommitted changes, which stay, and which a chat run from it loads on top. `hasNoModes`: a disk that
+// keeps no mark of which files run (Windows'), where the copy is checked with the release's own runnable files (TREE_OF_FOLDER): the
+// page's `exec`, else, from a page without it, those of the release's commit itself
 export type Installed = { ok: true; version: string; dirty: boolean } | { ok: false; fail: Fail; detail: string }
-export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>, page: Published, commit: string, engine: string): Promise<Installed> => {
+export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>, page: Published, commit: string, engine: string, hasNoModes = false): Promise<Installed> => {
   const git = gitIn(io, src.repo)
   // The commit is the one this repo's download ref holds, and the release's own tag online, whatever a file said: its whole tree is
   // what a folder moves to, not only the mod's part of it
@@ -416,7 +426,15 @@ export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>
       }
     })()
     const installPath = typeof copy?.installPath === 'string' && copy.version === page.version ? copy.installPath : ''
-    const got = installPath ? await treeOfFolder(io, installPath) : ''
+    const runnable = !hasNoModes
+      ? []
+      : (page.exec ??
+        (await git(['ls-tree', '-r', `${commit}:${src.sub}`])).stdout
+          .split('\n')
+          .filter(line => line.startsWith('100755 '))
+          .map(line => line.slice(line.indexOf('\t') + 1))
+          .filter(Boolean))
+    const got = installPath ? await treeOfFolder(io, installPath, runnable) : ''
     if (got === page.tree) return undefined
     if (before) await io.write(path, before)
     await io.log(`Claudopus ${page.version}: the copy Claude Code installed (${installPath || 'none'}) is ${got || 'unreadable'}, not the release's ${page.tree}; its record was put back`)
@@ -547,4 +565,44 @@ export const stampOf = (text: string): UpdateStamp | undefined => {
   } catch {
     return undefined
   }
+}
+
+// ---- Claude Code's own program on Windows ----
+
+// What a look for it reads of the disk, and the variables Windows names the places by
+export type FolderIo = { exists: (path: string) => Promise<boolean>; list: (path: string) => Promise<readonly { name: string; kind: string }[]> }
+export type WindowsPlaces = { path: string; profile: string; appData: string; localAppData: string }
+// (a Windows path with forward slashes, as the mod keeps paths)
+const forward = (path: string) => (/^(?:[A-Za-z]:\\|\\\\)/.test(path.trim()) ? path.trim().replace(/\\/g, '/') : path.trim()).replace(/\/+$/, '')
+// The Claude app's own data folders on Windows, those that are there: %APPDATA%\Claude, %LOCALAPPDATA%\Claude-Data, or the Store
+// app's own LocalCache\Roaming\Claude
+export const windowsAppData = async (io: FolderIo, places: Pick<WindowsPlaces, 'appData' | 'localAppData'>) => {
+  const [roaming, local] = [forward(places.appData), forward(places.localAppData)]
+  const packages = local ? (await io.list(`${local}/Packages`).catch(() => [])).filter(one => one.kind === 'dir' && /claude/i.test(one.name)).map(one => `${local}/Packages/${one.name}/LocalCache/Roaming/Claude`) : []
+  const there: string[] = []
+  for (const one of [...(roaming ? [`${roaming}/Claude`] : []), ...(local ? [`${local}/Claude-Data`] : []), ...packages]) if (await io.exists(one).catch(() => false)) there.push(one)
+  return there
+}
+// claude.exe (or npm's claude.cmd) on the PATH, whose folders ; parts there, then where Claude Code's installer puts it
+// (%USERPROFILE%\.local\bin), then the newest engine the Claude app keeps in its data folder, <data>/claude-code/<version>/<hash>/
+// claude.exe; '' for none
+export const windowsEngine = async (io: FolderIo, places: WindowsPlaces) => {
+  const exists = (path: string) => io.exists(path).catch(() => false)
+  const folders = places.path
+    .split(';')
+    .map(one => forward(one.replace(/^\s*"|"\s*$/g, '')))
+    .filter(one => /^[A-Za-z]:\//.test(one))
+  const profile = forward(places.profile)
+  for (const one of [...folders.flatMap(folder => [`${folder}/claude.exe`, `${folder}/claude.cmd`]), ...(profile ? [`${profile}/.local/bin/claude.exe`] : [])]) if (await exists(one)) return one
+  const found: { version: string; path: string }[] = []
+  for (const data of await windowsAppData(io, places)) {
+    for (const version of await io.list(`${data}/claude-code`).catch(() => [])) {
+      if (version.kind !== 'dir' || !/^\d+(\.\d+){0,3}$/.test(version.name)) continue
+      for (const hash of await io.list(`${data}/claude-code/${version.name}`).catch(() => [])) {
+        const path = `${data}/claude-code/${version.name}/${hash.name}/claude.exe`
+        if (hash.kind === 'dir' && (await exists(path))) found.push({ version: version.name, path })
+      }
+    }
+  }
+  return found.reduce<{ version: string; path: string } | undefined>((best, one) => (!best || isNewer(one.version, best.version) ? one : best), undefined)?.path ?? ''
 }

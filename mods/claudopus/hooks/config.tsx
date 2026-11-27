@@ -249,6 +249,8 @@ const SEGMENT = '#80808050'
 const FILL = '#80808024'
 
 export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: Band, presses: number, memory: string) {
+  // This computer, as its memory folder tells it: a PC on Windows (C:/Users/...), else a Mac
+  const computer = /^[A-Za-z]:\//.test(memory) ? 'PC' : 'Mac'
   const { Box, Button, Input, Select, Text } = ui
   const { config } = shown
   const lean = leanOf(config)
@@ -444,7 +446,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         <Box flexDirection="column" gap={1}>
           <Box key="config-more-head" flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text dimColor wrap="wrap">{isMore ? 'Settings you rarely change.' : 'Update checks, busy Mac, admin commands, chat and task rules, turning tasks off.'}</Text>
+              <Text dimColor wrap="wrap">{isMore ? 'Settings you rarely change.' : `Update checks, busy ${computer}, admin commands, chat and task rules, turning tasks off.`}</Text>
             </Box>
             {isMore ? <Button key={`config-more-hide-${presses}`} label="Hide" plain dimColor onPress={() => acts.more(false)} /> : <Button key={`config-more-show-${presses}`} label="Show" onPress={() => acts.more(true)} />}
           </Box>
@@ -460,9 +462,9 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
               )}
               {item(
                 'config-heavy',
-                'Busy Mac',
-                "When the Mac is busy, a task's browser, build or render waits for another to end, at most 15 minutes.",
-                <Select key="config-heavy-pick" options={HEAVY_MODES.map(one => ({ value: one.value, label: one.label }))} value={heavyModeOf(config).value} onSelect={value => acts.set('heavy', value === HEAVY_MODES[0].value ? undefined : value)} />,
+                `Busy ${computer}`,
+                `When the ${computer} is busy, a task's browser, build or render waits for another to end, at most 15 minutes.`,
+                <Select key="config-heavy-pick" options={HEAVY_MODES.map(one => ({ value: one.value, label: one.label.replace('the Mac', `the ${computer}`) }))} value={heavyModeOf(config).value} onSelect={value => acts.set('heavy', value === HEAVY_MODES[0].value ? undefined : value)} />,
                 heavyModeOf(config).value !== HEAVY_MODES[0].value,
                 () => acts.set('heavy', undefined),
               )}
@@ -478,7 +480,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
                     {gate.allowed.map((one, n) => (
                       <Box key={`config-admin-allowed-${n}`} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
                         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={FILL} paddingLeft={2}>
-                          <Text dimColor wrap="wrap">{one.host === 'here' ? 'This Mac' : one.host}</Text>
+                          <Text dimColor wrap="wrap">{one.host === 'here' ? `This ${computer}` : one.host}</Text>
                           <Text mono wrap="wrap">{one.command}</Text>
                         </Box>
                         <Button key={`config-admin-remove-${n}-${presses}`} label="Remove" plain dimColor onPress={() => acts.gateRemove(one.host, one.command)} />
@@ -489,7 +491,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
               )}
               {rules.map(textItem)}
               {item('config-agents', 'Background tasks', "Each message starts a task that Claude does in the background. Off: the chat does everything itself, from the next chat on.", onOff('agents'), config.agents !== undefined, () => acts.set('agents', undefined))}
-              <Text key="config-where" dimColor wrap="wrap">{`Your changes are kept in ${memory.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, '~')}, so an update never undoes them.`}</Text>
+              <Text key="config-where" dimColor wrap="wrap">{`Your changes are kept in ${memory.replace(/^\/Users\/[^/]+|^\/home\/[^/]+|^[A-Za-z]:\/Users\/[^/]+/, '~')}, so an update never undoes them.`}</Text>
             </Box>
           ) : null}
         </Box>,
