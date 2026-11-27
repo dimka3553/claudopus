@@ -59,21 +59,24 @@ jobs:
       # brings Claudopus back in a chat where Claude switched it off, and what stands in on Linux for a Mac's own tools works. The
       # mod's tests run in Claude Code's own test kit, from its public npm package, pinned to a version that passes them all. A piece
       # of work runs them before its release with the desktop app's engine
-      # The one-line installer for Windows, in Windows PowerShell and PowerShell 7, with Claude Code from npm
+      # Claude Code's public engine from npm, pinned to a version that passes every test: the mod's tests run in its test kit, and the
+      # installers and the load check use it as a person's Claude Code
+      - name: Claude Code from npm
+        run: npm install -g --silent @anthropic-ai/claude-code@2.1.325 && claude --version
+      # The one-line installer for Windows, in Windows PowerShell and PowerShell 7
       - name: The Windows installer works
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          npm install -g --silent @anthropic-ai/claude-code@2.1.325
           powershell -NoProfile -ExecutionPolicy Bypass -File mods/claudopus/bin/install.test.ps1
           if ($LASTEXITCODE) { exit 1 }
       - name: The shell tests and the mod's tests pass
         run: |
           o=$(mktemp -d); r=0
-          for t in admin revive linux run-it pane-file catch-up tidy allow-tool install; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
-          npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus || r=1
+          for t in admin revive linux run-it pane-file catch-up tidy allow-tool install load; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
+          claude plugin test mods/claudopus || r=1
           wait
-          for t in admin revive linux run-it pane-file catch-up tidy allow-tool install; do
+          for t in admin revive linux run-it pane-file catch-up tidy allow-tool install load; do
             echo "::group::$t.test.sh"; cat "$o/$t"; echo "::endgroup::"
             [ "$(cat "$o/$t.rc")" = 0 ] || { echo "::error::$t.test.sh failed"; r=1; }
           done
