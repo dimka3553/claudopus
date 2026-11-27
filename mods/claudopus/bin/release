@@ -73,7 +73,7 @@ if [ -z "$MAIN" ]; then
   [ -n "$MAIN" ] || MAIN=main
 fi
 locks=${RELEASE_LOCKS:-$HOME/.claude/claudopus/locks}
-lock="$locks/$(printf %s "$url" | shasum | cut -c1-12).lock"
+lock="$locks/$(printf %s "$url" | { shasum 2>/dev/null || sha1sum; } | cut -c1-12).lock"
 
 if [ "${1:-}" = --status ]; then
   if [ -d "$lock" ] && kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then echo "releasing now: $(cat "$lock/who" 2>/dev/null)"; else echo "no release running for $(basename "$top")"; fi
