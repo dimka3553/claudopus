@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.314 · 28 November 2026
+- Every question on a task's card now has Skip this one, which skips only that question while the task goes on with the rest, and Set aside is now Set aside task, a quiet button that says it stops the whole task, so a press meant for one question no longer ends the task.
+
 ## 0.2.313 · 28 November 2026
 - With tasks at work the panel and the bar are asked for far less often, so buttons stay put under the pointer and a busy chat uses less of the processor: a change that shows nothing new (a task's tokens or steps) no longer draws them again.
 - Each change to the list of tasks and each look at the panel costs less in a chat with many tasks.
