@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.288 · 27 November 2026
+- Config has Task colours, off unless you turn it on: each chat reply about a task sits in a box of that task's colour, headed by its name, which opens its Details, and Reply, which opens the box to that task. Its card in the panel gets the same colour dot.
+- Each chat reply now ends with a list of the links it gave, each led by where it goes, and a task's Details lists every link the chat gave about it. Links at the end in Config turns it off.
+
 ## 0.2.287 · 27 November 2026
 - The Progress chart is now the areas themselves: each row is an area you worked on that month, with its results, and the › beside it opens that area. The separate list under the chart is gone.
 - A month shows its seven busiest areas. The rest are named on one row, Other, and a press on Other gives each of them a row of its own.

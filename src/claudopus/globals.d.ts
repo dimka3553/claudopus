@@ -17,6 +17,7 @@ import * as M14 from '../../mods/claudopus/hooks/progress-page'
 import * as M15 from '../../mods/claudopus/hooks/progress'
 import * as M16 from '../../mods/claudopus/hooks/topics'
 import * as M17 from '../../mods/claudopus/hooks/reads'
+import * as M18 from '../../mods/claudopus/hooks/colours'
 
 declare global {
   export import atom = M0.atom
@@ -391,6 +392,12 @@ declare global {
   export import withLatest = M16.withLatest
   export import withoutLatest = M16.withoutLatest
   export import readsOnly = M17.readsOnly
+  export import ColourBuilder = M18.Builder
+  export import replyLinksIn = M18.linksIn
+  export import PALETTE = M18.PALETTE
+  export import colourTextHash = M18.textHash
+  export import ColourIndex = M18.ColourIndex
+  export import TaskLink = M18.TaskLink
   export import ProgressArea = M15.ProgressArea
   export import ProgressEntry = M15.ProgressEntry
   export import ProgressEvent = M15.ProgressEvent

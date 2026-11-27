@@ -192,6 +192,8 @@ const chatHooks = (on: On) => {
     // A chat begins with no record of drawings made before it: one slow drawing of an earlier start never holds this one's (isFreshTooSoon)
     ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
     await loadSettings($)
+    // Which reply is about which task, read from the chat's transcript, for task colours and links at the end (colours.tsx)
+    void colourBuild($, true)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
