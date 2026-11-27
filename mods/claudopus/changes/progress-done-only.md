@@ -1,3 +1,3 @@
 - The Progress chart is now the areas themselves: each row is an area you worked on that month, with its results, and the › beside it opens that area. The separate list under the chart is gone.
-- A press on the "more areas" row, or on Show all areas under the chart, gives every area of the month a row of its own.
+- A month shows its seven busiest areas. The rest are named on one row, Other, and a press on Other gives each of them a row of its own.
 - Progress no longer keeps or shows next steps. An area shows what was done: how many results, how many in the last 30 days, and its timeline.

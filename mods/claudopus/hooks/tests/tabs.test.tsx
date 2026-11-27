@@ -1089,6 +1089,11 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   // No list under it, no goal's name, and nothing of what is done of how much or what is next
   for (const text of ['More gardens', 'A calm company', 'Other', '1 area', 'October books closed']) expect(await texts()).not.toContain(text)
   expect(JSON.stringify(await tab.drawn())).not.toMatch(/\bnext\b/i)
+  // Seven more areas worked on this month: the chart keeps its first seven, and the rest are Other
+  const P = `${MEMORY}/progress`
+  const extra = [1, 2, 3, 4, 5, 6, 7].map(n => ({ id: `x${n}`, name: `Extra ${n}`, goal: '', aim: '', next: [], updated: '' }))
+  files.set(`${P}/areas.json`, JSON.stringify({ areas: [...JSON.parse(files.get(`${P}/areas.json`) ?? '{}').areas, ...extra] }))
+  for (const one of extra) files.set(`${P}/areas/${one.id}.json`, JSON.stringify({ entries: [{ task: `t-${one.id}`, title: `Did ${one.name}`, at: '2023-11-10T12:00:00Z', kind: 'task', outcome: '', report: '', pictures: [], live: '', reason: '' }] }))
   // An earlier month is a press away, with its own areas: only the menu was worked on in October; and this month a press back
   expect(await texts()).toContain('November 2023')
   await pressed(tab, 'progress-month-earlier')
@@ -1099,6 +1104,15 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   expect(await keyed(tab, 'progress-area-cafe')).toBeDefined()
   await pressed(tab, 'progress-month-later')
   expect(await until(async () => ((await texts()).includes('November 2023') ? true : undefined))).toBe(true)
+  // Other names the two areas past the first seven, and only a press on it gives them their rows
+  for (const text of ['Other', 'Extra 6, Extra 7', '2 areas']) expect(await texts()).toContain(text)
+  expect(await strips()).toContain('>Extra 5</text>')
+  expect(await strips()).not.toContain('>Extra 6</text>')
+  await pressed(tab, 'progress-other-shut')
+  expect(await until(async () => ((await strips()).includes('>Extra 7</text>') ? true : undefined))).toBe(true)
+  expect(await keyed(tab, 'progress-area-x7')).toBeDefined()
+  await pressed(tab, 'progress-other-open')
+  expect(await until(async () => ((await strips()).includes('>Extra 7</text>') ? undefined : true))).toBe(true)
   // Above the chart, how far the sorting has got: the 4 past results left, the one to count again and the start of the task above
   expect(await texts()).toContain('Sorting your past results into areas: 5 of 10 done. This page fills in as it goes.')
   // Once the sorting starts, the result never counted is queued to be, once, and those with an entry are left alone

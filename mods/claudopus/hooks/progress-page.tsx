@@ -118,15 +118,15 @@ export const monthCounts = (days: number[], now: number, back: number) => {
   const counts = monthOf(now, back).cells.map(i => (i >= 0 && i < CHART_DAYS ? (days[i] ?? 0) : 0))
   return { counts, total: counts.reduce((s, n) => s + n, 0) }
 }
-// The most areas a month's chart shows at first; the rest share one row until they are asked for
+// The most areas a month's chart shows at first; the rest are Other, and get their rows when asked for
 export const CHART_ROWS_MOST = 7
 export type ChartPart = { source: string; width: number; height: number }
-// A row of the chart: an area (its id, or '' for the row the rest share), its results of the month, and its drawing
+// A row of the chart: an area, its results of the month, and its drawing
 export type ChartRow = ChartPart & { id: string; name: string; total: number; live: boolean; alt: string }
 // The chart of one month, `back` months before this one, `width` wide, as the areas themselves: its rows are the areas with a
 // result in that month, the one with the most first, so each month has its own. Each row is a drawing of its own, so the page can
 // put a press beside it: the area's name, the month's days with a day's results as squares stacked from the row's line, in its
-// goal's colour, and its results of the month at the right. Past CHART_ROWS_MOST the rest share one row, unless `all`. Above the
+// goal's colour, and its results of the month at the right. Past CHART_ROWS_MOST (`top`) the rest (`others`, their names) have a row only with `all`. Above the
 // rows `head`, the north star; under them `foot`, the days. A square is one result, or more in a busy month; `since`, when
 // Claudopus came in, is a line down the rows in its month
 export const chartOf = (star: string, areas: ChartArea[], width: number, now: number, since = 0, back = 0, all = false) => {
@@ -146,9 +146,8 @@ export const chartOf = (star: string, areas: ChartArea[], width: number, now: nu
     .map(area => ({ id: area.id, name: area.name, color: area.color, ...monthCounts(area.days, now, back), live: back === 0 && area.live }))
     .filter(row => row.total > 0)
     .sort((a, b) => b.total - a.total)
-  const rest = !all && busy.length > CHART_ROWS_MOST + 1 ? busy.slice(CHART_ROWS_MOST) : []
-  const more = { id: '', name: `${rest.length} more areas`, color: OTHER_GOAL.color, counts: cells.map((_, i) => rest.reduce((s, row) => s + (row.counts[i] ?? 0), 0)), total: rest.reduce((s, row) => s + row.total, 0), live: false }
-  const shown = rest.length ? [...busy.slice(0, CHART_ROWS_MOST), more] : busy
+  const rest = busy.length > CHART_ROWS_MOST + 1 ? busy.slice(CHART_ROWS_MOST) : []
+  const shown = all || !rest.length ? busy : busy.slice(0, CHART_ROWS_MOST)
   const left = isWide ? 160 : 8
   const right = isWide ? 56 : 44
   const colW = (width - left - right) / cells.length
@@ -179,7 +178,7 @@ export const chartOf = (star: string, areas: ChartArea[], width: number, now: nu
     const mid = base - body / 2 + 4.5
     const h = Math.ceil(base + (isWide ? 8 : 6))
     const name = xmlSafe(isWide ? cutTo(row.name, nameMost) : row.name)
-    const look = row.live ? `fill="${LIVE}" font-weight="600"` : row === more ? `fill="${P_DIM}"` : 'fill="currentColor"'
+    const look = row.live ? `fill="${LIVE}" font-weight="600"` : 'fill="currentColor"'
     const squares: string[] = []
     row.counts.forEach((count, i) => {
       const x = left + colW * i + (colW - (per * step - gap)) / 2
@@ -216,7 +215,7 @@ export const chartOf = (star: string, areas: ChartArea[], width: number, now: nu
   if (unit > 1) marks.push(`<rect x="${left}" y="${y + 6}" width="${sq + 1}" height="${sq + 1}" fill="${P_DIM}"/><text x="${left + sq + 6}" y="${y + 12}" ${P_FONT} font-size="10.5" fill="${P_DIM}">${unit} results</text>`)
   const foot = part(y + 5 + keyH, marks.join(''))
   const alt = cutTo([quoted, shown.length ? `Results a day in ${label}, the area with the most first.` : `Nothing is kept from ${label}.`, unit > 1 ? `Each square is ${unit} results.` : '', sinceX ? `Claudopus came in on ${dayOf(since, now)}.` : '', ...rows.map(row => row.alt)].filter(Boolean).join(' '), 900)
-  return { head, rows, foot, more: rest.length, alt, label }
+  return { head, rows, foot, top: rest.length ? CHART_ROWS_MOST : rows.length, others: rest.map(row => row.name), alt, label }
 }
 
 // ---- Small drawings of the rows ----
@@ -248,7 +247,7 @@ export const ringOf = (kind: 'done' | 'fold' | 'live' | 'aside' | 'none', isFirs
 // The most pictures one drawing of an area holds at first: each is a small copy of about 40,000 characters, and a drawing holds 230,000
 export const PROGRESS_PICTURES_MOST = 4
 export const progressView = { area: '', month: 0, isAllOpen: false, days: new Set<string>(), daysShown: 5, drawer: '', pictures: PROGRESS_PICTURES_MOST, drawerMost: 60 }
-// Taken out while a drawing would not fit (drawingFits): of the chart, the rows past its first; of an area's page,
+// Taken out while a drawing would not fit (drawingFits): of the chart, the rows of Other; of an area's page,
 // pictures, then rows of a drawer, then days, one at a time
 export function fewerProgress() {
   // (the chart of every area goes back to its first rows)
@@ -298,6 +297,21 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
   const GO = 28
   const chart = chartOf(data.star, chartAreas, Math.floor(look.width) - GO, look.now, data.since ?? 0, back, progressView.isAllOpen)
   const at = (key: string, one: ChartPart, alt: string) => (Svg ? <Svg key={key} source={one.source} alt={alt} width={one.width} height={one.height} /> : null)
+  const strip = (one: ChartRow) => (
+    <Box key={`progress-row-${one.id}`} flexDirection="row" alignItems="center" flexShrink={0}>
+      {Svg ? (
+        <Box flexShrink={0}>{at(`progress-strip-${one.id}`, one, one.alt)}</Box>
+      ) : (
+        <Box flexDirection="row" gap={1.5} flexGrow={1} minWidth={0}>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}><Text bold={one.live} wrap="truncate-end">{one.name}</Text></Box>
+          <Text color={P_GREEN}>{String(one.total)}</Text>
+        </Box>
+      )}
+      <Box flexShrink={0}>
+        <Button key={`progress-area-${one.id}-${look.gen}`} label="›" plain dimColor onPress={() => look.acts.open(one.id)} />
+      </Box>
+    </Box>
+  )
   return (
     <Box key="progress-overview" flexDirection="column" gap={1} flexShrink={0}>
       {sortingSaid(data.sorting) ? <Text key="progress-sorting" dimColor wrap="wrap">{sortingSaid(data.sorting)}</Text> : null}
@@ -311,34 +325,32 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
       {/* The chart is the areas themselves: each row an area of that month, opened by the press beside it */}
       <Box key={`progress-chart-${back}`} flexDirection="column" gap={0} flexShrink={0}>
         {Svg ? at('progress-chart', chart.head, chart.alt) : data.star ? <Text wrap="wrap">{`“${data.star}”`}</Text> : null}
-        {chart.rows.map(one => (
-          <Box key={`progress-row-${one.id || 'more'}`} flexDirection="row" alignItems="center" flexShrink={0}>
-            {Svg ? (
-              <Box flexShrink={0}>{at(`progress-strip-${one.id || 'more'}`, one, one.alt)}</Box>
-            ) : (
-              <Box flexDirection="row" gap={1.5} flexGrow={1} minWidth={0}>
-                <Box flexGrow={1} flexShrink={1} minWidth={0}><Text bold={one.live} wrap="truncate-end">{one.name}</Text></Box>
-                <Text color={P_GREEN}>{String(one.total)}</Text>
-              </Box>
-            )}
-            <Box flexShrink={0}>
-              {one.id ? (
-                <Button key={`progress-area-${one.id}-${look.gen}`} label="›" plain dimColor onPress={() => look.acts.open(one.id)} />
-              ) : (
-                <Button key={`progress-all-open-${look.gen}`} label="+" plain dimColor onPress={look.acts.all} />
-              )}
-            </Box>
-          </Box>
-        ))}
+        {chart.rows.slice(0, chart.top).map(strip)}
         {Svg ? at('progress-days', chart.foot, `The days of ${chart.label}`) : !chart.rows.length ? <Text dimColor>{`Nothing is kept from ${chart.label}`}</Text> : null}
       </Box>
-      {chart.more ? (
-        <Box key="progress-all" flexShrink={0}>
-          <Button key={`progress-all-show-${look.gen}`} label={`+ Show all ${chart.rows.length - 1 + chart.more} areas`} plain dimColor onPress={look.acts.all} />
-        </Box>
-      ) : progressView.isAllOpen && chart.rows.length > CHART_ROWS_MOST + 1 ? (
-        <Box key="progress-all" flexShrink={0}>
-          <Button key={`progress-all-fewer-${look.gen}`} label={`− Show the first ${CHART_ROWS_MOST}`} plain dimColor onPress={look.acts.all} />
+      {/* The areas past the first are Other: named on one row, and given their own rows only by a press on it */}
+      {chart.others.length ? (
+        <Box key="progress-other" flexDirection="column" gap={0.5} flexShrink={0}>
+          <Box flexDirection="row" backgroundColor={FILL} flexShrink={0} alignItems="center" gap={1.5} paddingX={1.5} paddingY={1}>
+            <Box flexShrink={0}>
+              <Button key={`progress-other-${progressView.isAllOpen ? 'open' : 'shut'}-${look.gen}`} plain hover={{ underline: true }} onPress={look.acts.all}>
+                <Text bold>Other</Text>
+              </Button>
+            </Box>
+            <Box flexShrink={1} minWidth={0} flexGrow={1}>
+              <Text dimColor wrap="truncate-end">{progressView.isAllOpen ? '' : chart.others.join(', ')}</Text>
+            </Box>
+            <Box flexShrink={0}><Text dimColor>{`${chart.others.length} areas`}</Text></Box>
+            <Box flexShrink={0}>
+              <Button key={`progress-other-go-${progressView.isAllOpen ? 'open' : 'shut'}-${look.gen}`} label={progressView.isAllOpen ? '⌄' : '›'} plain dimColor onPress={look.acts.all} />
+            </Box>
+          </Box>
+          {progressView.isAllOpen ? (
+            <Box key="progress-other-rows" flexDirection="column" gap={0} flexShrink={0}>
+              {chart.rows.slice(chart.top).map(strip)}
+              {Svg ? at('progress-other-days', chart.foot, `The days of ${chart.label}`) : null}
+            </Box>
+          ) : null}
         </Box>
       ) : null}
     </Box>

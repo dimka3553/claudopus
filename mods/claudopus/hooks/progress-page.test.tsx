@@ -23,15 +23,15 @@ const squaresIn = (source: string) => (source.match(/h[34]v[34]h-[34]z/g) ?? [])
 // Each goal's name and count, not the north star's lines: where it stands and what it says
 const namesOf = (source: string) => [...source.matchAll(/<text x="([\d.]+)" y="([\d.]+)"(?: text-anchor="end")? (?![^>]*font-style)[^>]*font-size="(?:12\.5|11)"[^>]*>([^<]*)<\/text>/g)].map(m => ({ x: Number(m[1]), y: Number(m[2]), name: m[3] as string }))
 
-test('the chart is one month and its rows are the areas: a square for each result, a row for each area worked on in it with the busiest first and its results of the month at the right, at most seven and the rest as one row, the area at work in purple', () => {
+test('the chart is one month and its rows are the areas: a square for each result, a row for each area worked on in it with the busiest first and its results of the month at the right, at most seven and the rest as Other, the area at work in purple', () => {
   for (const width of [728, 398]) {
     for (const n of [3, 12, 40]) {
       const areas = areasOf(n)
       const chart = chartOf('Software people trust to grow their small shop', areas, width, now)
       expect(Math.max(...[chart.head, ...chart.rows, chart.foot].map(part => part.source.length))).toBeLessThanOrEqual(131_072)
       const names = namesOf(src(chart)).filter(one => !/^\d+$/.test(one.name))
-      expect(names.map(one => one.name).at(-1)).toBe(n === 3 ? 'Area 2' : `${n - 7} more areas`)
-      expect(names.length).toBe(Math.min(n, 8))
+      expect(names.length).toBe(Math.min(n, 7))
+      expect(chart.others.length).toBe(n === 3 ? 0 : n - 7)
       // Every task a square, but a day busier than its row can hold drawn only as high as the row allows
       const tasks = areas.reduce((s, area) => s + area.days.reduce((t, d) => t + d, 0), 0)
       if (n < 4) expect(squaresIn(src(chart))).toBe(tasks)
@@ -52,11 +52,11 @@ test('the chart is one month and its rows are the areas: a square for each resul
   expect(src(chart)).toContain('>today</text>')
   expect(chart.alt).toContain('Area 0: 12 results in November 2026.')
   expect(chart.alt).toContain('Area 3: 4800 results in November 2026, working now.')
-  // Each row is an area that can be opened; the row the rest share is none, and with every area asked for each has its own
-  expect(chart.rows.map(row => row.id)).toEqual(['a3', 'a0', 'a1', 'a2', 'a4', 'a5', 'a6', ''])
-  expect(chart.more).toBe(5)
+  // Each row is an area that can be opened; past the first seven the rest are Other, named, and have rows only when asked for
+  expect(chart.rows.map(row => row.id)).toEqual(['a3', 'a0', 'a1', 'a2', 'a4', 'a5', 'a6'])
+  expect(chart.others).toEqual(['Area 7', 'Area 8', 'Area 9', 'Area 10', 'Area 11'])
   const whole = chartOf('Software people trust to grow their small shop', areasOf(12), 728, now, 0, 0, true)
-  expect([whole.rows.length, whole.more, whole.rows.some(row => !row.id)]).toEqual([12, 0, false])
+  expect([whole.rows.length, whole.top, whole.others.length]).toEqual([12, 7, 5])
 })
 
 test('an earlier month is its own chart with its own rows, back to the first month with a result: no today, a square stands for more results once a day would stand too tall, and a line shows where Claudopus came in only in its month', () => {
@@ -92,7 +92,7 @@ test('an earlier month is its own chart with its own rows, back to the first mon
   expect(chartOf('Software people trust to grow their small shop', areasOf(3), 728, now, now - 60 * 86_400_000).alt).not.toContain('Each square is')
 })
 
-test('a chart of every area too big to draw goes back to its first rows, and then has nothing more to give up', () => {
+test('a chart with Other opened too big to draw shuts it, and then has nothing more to give up', () => {
   Object.assign(progressView, { area: '', isAllOpen: true })
   expect([fewerProgress(), progressView.isAllOpen, fewerProgress()]).toEqual([true, false, false])
 })
