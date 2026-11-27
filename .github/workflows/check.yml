@@ -72,12 +72,16 @@ jobs:
           if ($LASTEXITCODE) { exit 1 }
       - name: The shell tests and the mod's tests pass
         run: |
-          o=$(mktemp -d); r=0
-          for t in admin revive linux run-it pane-file catch-up tidy allow-tool; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
+          o=$(mktemp -d); r=0 later=
+          # (on Windows one after another, after the mod's tests: every process starts slowly there, and beside the mod's tests the
+          # shell tests' few seconds of waiting for the watcher or GitHub's checks ran out)
+          for t in admin revive linux run-it pane-file catch-up tidy allow-tool; do
+            if [ "$RUNNER_OS" = Windows ]; then later="$later $t"; else { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & fi
+          done
           claude plugin test mods/claudopus || r=1
           wait
           # The installer's and the load check's own Claude Codes run after the mod's tests, whose time limits they would eat into
-          for t in install load; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc"; done
+          for t in $later install load; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc"; done
           for t in admin revive linux run-it pane-file catch-up tidy allow-tool install load; do
             echo "::group::$t.test.sh"; cat "$o/$t"; echo "::endgroup::"
             [ "$(cat "$o/$t.rc")" = 0 ] || { echo "::error::$t.test.sh failed"; r=1; }
