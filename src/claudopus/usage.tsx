@@ -18,12 +18,11 @@ const usagePathOf = async ($: EngineInterface) => {
   return usageFile
 }
 
-// How often this computer is looked at: on Windows a third as often, as its look is a PowerShell, which costs far more than ps
-const usageEvery = () => (isWindows ? USAGE_EVERY * 3 : USAGE_EVERY)
+// How often it looks: less often on battery, as the look itself costs the processor, and on Windows a third as often, as its look is
+// a PowerShell, which costs far more than ps (on battery there too, at the battery's own pace when that is slower)
+const usageEvery = () => Math.max(isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY, isWindows ? USAGE_EVERY * 3 : 0)
 // One look when the last is due: a fresh one another chat left is taken as it is, and a chat that is looking says so first in a
 // small file beside it, so chats that fall due together look once
-// How often it looks: less often on battery, as the look itself costs the processor
-const usageEvery = () => (isOnBattery ? USAGE_BATTERY_EVERY : USAGE_EVERY)
 const lookUsage = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const every = usageEvery()
