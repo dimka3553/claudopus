@@ -174,4 +174,17 @@ describe('which task a reply is about', () => {
     expect(kept.b).toBeUndefined()
     expect(kept.c).not.toBe(0)
   })
+
+  test('each reply quotes the message of the person\'s it answers: its own turn\'s, else the newest they sent its task before it', async () => {
+    const builder = new Builder()
+    builder.ingest(CHAT)
+    const { quotes, asked } = builder.index()
+    // A reply to the person's own question quotes it
+    expect(quotes.r3).toBe('Wait, before I continue labeling more of the pupils, should I upscale them?')
+    // A task's result, after the person's words were passed on to it, quotes those words, not the task's first message
+    expect(quotes.r6).toBe('Pass my page edits on, and test the hair worker for grey hair.')
+    expect(asked[GAPS]).toBe('Pass my page edits on, and test the hair worker for grey hair.')
+    // Nothing the person said to a task, nothing quoted
+    expect(quotes.r1).toBeUndefined()
+  })
 })

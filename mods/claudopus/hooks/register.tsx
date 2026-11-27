@@ -3484,7 +3484,7 @@ ui,
 
 let isColoured = true
 let isLinked = true
-const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {} }
+const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, quotes: {}, asked: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
 let colourBuilder: ColourBuilder | undefined
 let colourRunning: Promise<void> | undefined
@@ -3666,10 +3666,12 @@ return (
 )
 })}
 </Box>
-{ids.map(id => {
-const words = cards.find(one => one.id === id)?.words.trim() ?? ''
-return words ? quoteOf($, ui, `${mark(e.requestId)}-${id}`, words) : null
-})}
+{(() => {
+const hash = colourTextHash(e.props.text)
+const isIndexed = (colourIndex.replies[e.requestId] ?? colourIndex.texts[hash])?.[0] === first
+const words = ((isIndexed ? (colourIndex.quotes[e.requestId] ?? colourIndex.quotes[hash]) : undefined) ?? colourIndex.asked[first] ?? cards.find(one => one.id === first)?.words ?? '').trim()
+return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
+})()}
 {reply}
 {links}
 </Box>

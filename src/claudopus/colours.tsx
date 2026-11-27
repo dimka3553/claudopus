@@ -7,7 +7,7 @@
 // The two settings as this chat has them, read with the others (loadSettings)
 let isColoured = true
 let isLinked = true
-const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {} }
+const EMPTY_COLOURS: ColourIndex = { tasks: {}, replies: {}, texts: {}, quotes: {}, asked: {} }
 let colourIndex: ColourIndex = EMPTY_COLOURS
 let colourBuilder: ColourBuilder | undefined
 let colourRunning: Promise<void> | undefined
@@ -214,10 +214,15 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
           )
         })}
       </Box>
-      {ids.map(id => {
-        const words = cards.find(one => one.id === id)?.words.trim() ?? ''
-        return words ? quoteOf($, ui, `${mark(e.requestId)}-${id}`, words) : null
-      })}
+      {(() => {
+        // The person's message this reply answers: as the transcript tells it, else the newest they sent its task, else the one
+        // that started it
+        // (a reply found by the result it passes on, which the transcript put with another task, answers the newest message to its own)
+        const hash = colourTextHash(e.props.text)
+        const isIndexed = (colourIndex.replies[e.requestId] ?? colourIndex.texts[hash])?.[0] === first
+        const words = ((isIndexed ? (colourIndex.quotes[e.requestId] ?? colourIndex.quotes[hash]) : undefined) ?? colourIndex.asked[first] ?? cards.find(one => one.id === first)?.words ?? '').trim()
+        return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
+      })()}
       {reply}
       {links}
     </Box>

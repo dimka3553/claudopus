@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.294 · 27 November 2026
+- A coloured reply quotes the message of yours it answers: the one it replies to, or the newest you sent its task, not only the one that started the task.
+
 ## 0.2.293 · 27 November 2026
 - Each coloured reply quotes, in small letters under the task's name, what you wrote to start that task: three lines, then View more.
 

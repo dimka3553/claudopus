@@ -33,6 +33,10 @@ export type ColourIndex = {
   replies: Record<string, string[]>
   /** A short hash of a reply's text to the ids of its tasks (texts said once). */
   texts: Record<string, string[]>
+  /** A reply's row id, and the hash of its text, to the person's message it answers. */
+  quotes: Record<string, string>
+  /** Each task's newest message from the person, as the transcript has it. */
+  asked: Record<string, string>
 }
 
 /** Twelve colours that read on a light and a dark chat alike. */
@@ -233,6 +237,13 @@ const idOf = (row: SessionMessage) => {
   return typeof id === 'string' && id ? id : undefined
 }
 
+/** The person's own words in a message of theirs, without what the app or a mod put beside them. */
+export const personWords = (text: string) =>
+  text
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+    .replace(/<(command-[a-z]+|local-command-[a-z]+)>[\s\S]*?<\/\1>/g, '')
+    .trim()
+
 /** A user row that only reminds the model of something: it opens no turn. */
 const isReminder = (text: string) =>
   text.trimStart().startsWith('<system-reminder>') && !text.includes('<task-notification>')
@@ -247,7 +258,7 @@ const agentIdOf = (result: unknown, text: string | undefined) => {
 
 type Reply = { uuid?: string; text: string; stems?: Set<string>; links?: TaskLink[] }
 /** A turn's tasks: those whose notification or message opened it, and those the chat acted on in it. */
-type Turn = { opening: string; notified: string[]; acted: string[]; hasPrompt: boolean; replies: Reply[] }
+type Turn = { opening: string; notified: string[]; acted: string[]; hasPrompt: boolean; prompt: string; replies: Reply[] }
 type Known = { title: string; rank: number; status: string }
 
 /**
@@ -288,7 +299,7 @@ export class Builder {
 
   private open() {
     if (!this.turn) {
-      this.turn = { opening: '', notified: [], acted: [], hasPrompt: false, replies: [] }
+      this.turn = { opening: '', notified: [], acted: [], hasPrompt: false, prompt: '', replies: [] }
       this.turns.push(this.turn)
     }
     return this.turn
@@ -326,7 +337,12 @@ export class Builder {
       this.know(peer.id, peer.title, 1)
       this.join(turn.notified, peer.id)
     }
-    if (!notified.length && !peer) turn.hasPrompt = true
+    if (!notified.length && !peer) {
+      turn.hasPrompt = true
+      // The person's own words, the newest of the turn: what its replies answer
+      const words = personWords(text)
+      if (words) turn.prompt = words
+    }
   }
 
   private assistant(row: SessionMessage) {
@@ -421,6 +437,9 @@ export class Builder {
     const seen = new Map<string, number>()
     const colours = new Map<string, number>()
     let before: string[] = []
+    // The person's newest message to each task: one the chat acted on the task in, or asked about it in
+    const asked = new Map<string, string>()
+    const quotes: Record<string, string> = {}
 
     this.turns.forEach((turn, at) => {
       const said = turn.replies.filter(reply => reply.text.trim() !== NO_ANSWER)
@@ -441,6 +460,7 @@ export class Builder {
         if (best && best.score >= 1.5 && (!second || second.score < best.score)) guessed = [best.id]
       }
       const ids = base.length ? base : guessed
+      if (turn.prompt) for (const id of ids) asked.set(id, turn.prompt)
       for (const reply of said) {
         let mine = ids
         if (ids.length > 1) {
@@ -453,6 +473,12 @@ export class Builder {
         if (!mine.length) continue
         if (reply.uuid) replies[reply.uuid] = mine
         const hash = textHash(reply.text)
+        // What it answers: the person's message of its own turn, else the newest they sent its task before it
+        const quote = turn.prompt || (mine[0] ? asked.get(mine[0]) : undefined)
+        if (quote) {
+          if (reply.uuid) quotes[reply.uuid] = quote
+          quotes[hash] = quote
+        }
         if (!clashed.has(hash)) {
           const was = texts[hash]
           if (was && was.join() !== mine.join()) {
@@ -483,6 +509,6 @@ export class Builder {
       }
       tasks[id] = { title: one.title, colour, status: one.status, links: newest }
     }
-    return { tasks, replies, texts }
+    return { tasks, replies, texts, quotes, asked: Object.fromEntries(asked) }
   }
 }
