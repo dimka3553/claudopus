@@ -1086,8 +1086,12 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   expect(await strips()).toContain('>Bookkeeping</text>')
   expect(await strips()).not.toContain('>Cafe menu</text>')
   for (const id of ['seed-shop', 'books']) expect(await keyed(tab, `progress-area-${id}`)).toBeDefined()
-  // No list under it, no goal's name, and nothing of what is done of how much or what is next
-  for (const text of ['More gardens', 'A calm company', 'Other', '1 area', 'October books closed']) expect(await texts()).not.toContain(text)
+  // Under it a box for every area, opened by a press on its name: under its goal, with its newest result and picture, the area at
+  // work saying so, and those under no goal folded; nothing of what is next
+  for (const text of ['More gardens', 'A calm company', 'No goal', '1 area', 'Working', 'Seed photos on every page', 'October books closed']) expect(await texts()).toContain(text)
+  for (const id of ['seed-shop', 'books']) expect(await keyed(tab, `progress-boxname-${id}`)).toBeDefined()
+  expect(await keyed(tab, 'progress-boxname-cafe')).toBeUndefined()
+  expect(await until(async () => ((await tab.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Seed shop' && String(one.props.source).includes('base64,BBBB')) ? true : undefined))).toBe(true)
   expect(JSON.stringify(await tab.drawn())).not.toMatch(/\bnext\b/i)
   // Seven more areas worked on this month: the chart keeps its first seven, and the rest are Other
   const P = `${MEMORY}/progress`
@@ -1102,10 +1106,14 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   expect(await strips()).toContain('>Cafe menu</text>')
   expect(await strips()).not.toContain('>Seed shop</text>')
   expect(await keyed(tab, 'progress-area-cafe')).toBeDefined()
+  // and its own boxes: the menu with its result of that month, and no goal's name
+  for (const text of ['Menu printed']) expect(await texts()).toContain(text)
+  expect(await keyed(tab, 'progress-boxname-cafe')).toBeDefined()
+  for (const text of ['More gardens', 'Seed photos on every page']) expect(await texts()).not.toContain(text)
   await pressed(tab, 'progress-month-later')
   expect(await until(async () => ((await texts()).includes('November 2023') ? true : undefined))).toBe(true)
   // Other names the two areas past the first seven, and only a press on it gives them their rows
-  for (const text of ['Other', 'Extra 6, Extra 7', '2 areas']) expect(await texts()).toContain(text)
+  for (const text of ['Other', 'Extra 6, Extra 7', '2 areas', '8 areas']) expect(await texts()).toContain(text)
   expect(await strips()).toContain('>Extra 5</text>')
   expect(await strips()).not.toContain('>Extra 6</text>')
   await pressed(tab, 'progress-other-shut')
@@ -1113,6 +1121,11 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   expect(await keyed(tab, 'progress-area-x7')).toBeDefined()
   await pressed(tab, 'progress-other-open')
   expect(await until(async () => ((await strips()).includes('>Extra 7</text>') ? undefined : true))).toBe(true)
+  // The areas under no goal get their boxes by a press on No goal
+  expect(await texts()).not.toContain('Did Extra 7')
+  await pressed(tab, 'progress-nogoal-shut')
+  expect(await until(async () => ((await texts()).includes('Did Extra 7') ? true : undefined))).toBe(true)
+  expect(await keyed(tab, 'progress-boxname-x7')).toBeDefined()
   // Above the chart, how far the sorting has got: the 4 past results left, the one to count again and the start of the task above
   expect(await texts()).toContain('Sorting your past results into areas: 5 of 10 done. This page fills in as it goes.')
   // Once the sorting starts, the result never counted is queued to be, once, and those with an entry are left alone

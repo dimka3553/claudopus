@@ -345,9 +345,11 @@ declare global {
   export import daysOf = M14.daysOf
   export import fewerProgress = M14.fewerProgress
   export import goalsOf = M14.goalsOf
+  export import monthOf = M14.monthOf
   export import progressArea = M14.progressArea
   export import progressOverview = M14.progressOverview
   export import PROGRESS_PICTURES_MOST = M14.PROGRESS_PICTURES_MOST
+  export import PROGRESS_THUMBS_MOST = M14.PROGRESS_THUMBS_MOST
   export import progressView = M14.progressView
   export import ProgressActs = M14.ProgressActs
   export import ProgressData = M14.ProgressData

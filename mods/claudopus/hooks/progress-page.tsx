@@ -78,6 +78,12 @@ export const goalsOf = (picture: PagePicture): ProgressGoal[] => picture.goals.m
 export const goalOf = (data: ProgressData, area: PageArea) => data.goals.find(goal => goal.id && goal.id === area.goal) ?? OTHER_GOAL
 // The areas under each goal, goals in order and Other last, each goal only where it has an area
 
+// Each goal with its areas, in the picture's order, then the areas under no goal; a goal with no area is left out
+export const grouped = (data: ProgressData) => {
+  const groups = [...data.goals, OTHER_GOAL].map(goal => ({ goal, areas: data.areas.filter(area => goalOf(data, area) === goal) }))
+  return groups.filter(group => group.areas.length)
+}
+
 // ---- The chart: one month, a small square for each result, a row for each goal and a column for each day ----
 export type ChartArea = { id: string; name: string; color: string; goal: string } & AreaFigures
 export const countsSaid = (f: { done: number; aside: number }) => [`${f.done} done`, f.aside ? `${f.aside} aside` : ''].filter(Boolean).join(', ')
@@ -220,6 +226,8 @@ export const chartOf = (star: string, areas: ChartArea[], width: number, now: nu
 
 // ---- Small drawings of the rows ----
 export const dotOf = (color: string, s = 8) => svgDoc(s, 20, `<circle cx="${s / 2}" cy="10" r="${s / 2}" fill="${color}"/>`)
+export const noPictureOf = (w: number, h: number) =>
+  svgDoc(w, h, `<rect width="${w}" height="${h}" rx="5" fill="#80808030"/><circle cx="${w / 2}" cy="${h / 2}" r="${Math.min(w, h) / 5}" fill="none" stroke="${P_DIM}" stroke-width="1.6"/><path d="M${w / 2 - 3.5} ${h / 2}l2.5 2.5 5-5" fill="none" stroke="${P_DIM}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`)
 // A picture's small copy cut to w by h with round corners, a count of more in its corner, faded for what was set aside
 export const pictureOf = (key: string, href: string, w: number, h: number, more = 0, faded = false) => {
   const id = `pp-${key.replace(/[^A-Za-z0-9-]/g, '')}`
@@ -246,12 +254,18 @@ export const ringOf = (kind: 'done' | 'fold' | 'live' | 'aside' | 'none', isFirs
 // ---- What the person has opened on the page ----
 // The most pictures one drawing of an area holds at first: each is a small copy of about 40,000 characters, and a drawing holds 230,000
 export const PROGRESS_PICTURES_MOST = 4
-export const progressView = { area: '', month: 0, isAllOpen: false, days: new Set<string>(), daysShown: 5, drawer: '', pictures: PROGRESS_PICTURES_MOST, drawerMost: 60 }
+// The most boxes of the list of areas that show a picture: each is a small copy of about 4,000 characters
+export const PROGRESS_THUMBS_MOST = 30
+export const progressView = { area: '', month: 0, thumbs: PROGRESS_THUMBS_MOST, isAllOpen: false, isOtherOpen: false, days: new Set<string>(), daysShown: 5, drawer: '', pictures: PROGRESS_PICTURES_MOST, drawerMost: 60 }
 // Taken out while a drawing would not fit (drawingFits): of the chart, the rows of Other; of an area's page,
 // pictures, then rows of a drawer, then days, one at a time
 export function fewerProgress() {
-  // (the chart of every area goes back to its first rows)
-  if (!progressView.area) return progressView.isAllOpen ? ((progressView.isAllOpen = false), true) : false
+  // (the page of every area: its boxes' pictures, six at a time, then the chart's Other shut, then the areas under no goal)
+  if (!progressView.area) {
+    if (progressView.thumbs > 0) return ((progressView.thumbs = Math.max(0, progressView.thumbs - 6)), true)
+    if (progressView.isAllOpen) return ((progressView.isAllOpen = false), true)
+    return progressView.isOtherOpen ? ((progressView.isOtherOpen = false), true) : false
+  }
   if (progressView.pictures > 0) return ((progressView.pictures -= 1), true)
   if (progressView.drawerMost > 12) return ((progressView.drawerMost = Math.max(12, progressView.drawerMost - 24)), true)
   if (progressView.daysShown > 1) return ((progressView.daysShown -= 1), true)
@@ -268,6 +282,7 @@ export type ProgressActs = {
   open: (area: string) => void
   back: () => void
   all: () => void
+  other: () => void
   month: (by: number) => void
   day: (key: string) => void
   pickUp: (entry: PageEntry) => void
@@ -278,7 +293,7 @@ export type ProgressActs = {
 }
 export type ProgressLook = { width: number; now: number; gen: string; pictures: (entry: PageEntry) => ProgressPictureRef[]; hasResult: (entry: PageEntry) => boolean; small: (ref: ProgressPictureRef) => ProgressThumb; large: (ref: ProgressPictureRef) => ProgressThumb; acts: ProgressActs }
 
-// ---- The overview: the chart of one month, its rows the areas themselves ----
+// ---- The overview: the chart of one month, its rows the areas themselves, then a box for every area ----
 export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook) => {
   const { Box, Text, Button } = ui as unknown as Parts
   const Svg = (ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSXEl }).Svg
@@ -297,6 +312,69 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
   const GO = 28
   const chart = chartOf(data.star, chartAreas, Math.floor(look.width) - GO, look.now, data.since ?? 0, back, progressView.isAllOpen)
   const at = (key: string, one: ChartPart, alt: string) => (Svg ? <Svg key={key} source={one.source} alt={alt} width={one.width} height={one.height} /> : null)
+  // Under the chart, a box for every area, each opened by a press on its name: this month's under their goals, those under no
+  // goal folded; an earlier month's own, the busiest first, each with its newest result of that month
+  const isWide = look.width >= 560
+  const groups = grouped(data)
+  const tw = isWide ? 64 : 52
+  const th = isWide ? 48 : 39
+  const month = monthOf(look.now, back)
+  const inMonth = (one: PageEntry) => atOf(one.at) >= month.first.getTime() && atOf(one.at) < month.next.getTime()
+  const totalOf = (area: PageArea) => monthCounts((figures.get(area.id) as AreaFigures).days, look.now, back).total
+  let thumbs = 0
+  const box = (area: PageArea) => {
+    const f = figures.get(area.id) as AreaFigures
+    const entries = back ? (data.entries.get(area.id) ?? []).filter(inMonth) : (data.entries.get(area.id) ?? [])
+    const live = !back && f.live ? entries.find(one => one.task && data.working.has(one.task)) : undefined
+    const newest = live ?? entries[0]
+    const best = entries.map(one => look.pictures(one)[0]).find(Boolean)
+    const thumb = best && (thumbs += 1) <= progressView.thumbs ? look.small(best) : null
+    return (
+      <Box key={`progress-box-${area.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <Box width={0.375} flexShrink={0} backgroundColor={live ? LIVE : 'transparent'} />
+        <Box flexDirection="row" alignItems="center" gap={isWide ? 2 : 1.5} paddingX={isWide ? 1.5 : 1} paddingY={1} flexGrow={1} minWidth={0}>
+          {Svg ? <Box flexShrink={0}>{thumb && hrefOf(thumb) ? <Svg source={pictureOf(`r-${area.id}`, hrefOf(thumb), tw, th)} alt={area.name} width={tw} height={th} /> : <Svg source={noPictureOf(tw, th)} alt="No picture" width={tw} height={th} />}</Box> : null}
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+            <Box flexDirection="row" minWidth={0}>
+              <Button key={`progress-boxname-${area.id}-${look.gen}`} plain hover={{ underline: true }} onPress={() => look.acts.open(area.id)}>
+                <Text bold wrap="truncate-end">{area.name}</Text>
+              </Button>
+            </Box>
+            {newest ? (
+              <Box flexDirection="row" gap={1} minWidth={0}>
+                <Box flexShrink={0}>{live ? <Text color={LIVE}>Working</Text> : <Text dimColor>{dayOf(atOf(newest.at), look.now)}</Text>}</Box>
+                <Box flexShrink={1} minWidth={0}>
+                  <Text wrap="truncate-end">{newest.title}</Text>
+                </Box>
+              </Box>
+            ) : null}
+          </Box>
+          <Box flexShrink={0}>
+            <Button key={`progress-go-${area.id}-${look.gen}`} label="›" plain dimColor onPress={() => look.acts.open(area.id)} />
+          </Box>
+        </Box>
+      </Box>
+    )
+  }
+  const noGoal = (areas: PageArea[]) => (
+    <Box key="progress-nogoal" flexDirection="column" gap={0.5} flexShrink={0}>
+      <Box flexDirection="row" backgroundColor={FILL} flexShrink={0} alignItems="center" gap={1.5} paddingX={isWide ? 1.5 : 1} paddingY={1}>
+        <Box flexShrink={0}>
+          <Button key={`progress-nogoal-${progressView.isOtherOpen ? 'open' : 'shut'}-${look.gen}`} plain hover={{ underline: true }} onPress={look.acts.other}>
+            <Text bold>No goal</Text>
+          </Button>
+        </Box>
+        <Box flexShrink={1} minWidth={0} flexGrow={1}>
+          <Text dimColor wrap="truncate-end">{progressView.isOtherOpen ? '' : areas.map(area => area.name).join(', ')}</Text>
+        </Box>
+        <Box flexShrink={0}><Text dimColor>{areas.length === 1 ? '1 area' : `${areas.length} areas`}</Text></Box>
+        <Box flexShrink={0}>
+          <Button key={`progress-nogoal-go-${progressView.isOtherOpen ? 'open' : 'shut'}-${look.gen}`} label={progressView.isOtherOpen ? '⌄' : '›'} plain dimColor onPress={look.acts.other} />
+        </Box>
+      </Box>
+      {progressView.isOtherOpen ? areas.map(box) : null}
+    </Box>
+  )
   const strip = (one: ChartRow) => (
     <Box key={`progress-row-${one.id}`} flexDirection="row" alignItems="center" flexShrink={0}>
       {Svg ? (
@@ -353,6 +431,27 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
           ) : null}
         </Box>
       ) : null}
+      <Box key={`progress-boxes-${back}`} flexDirection="column" gap={2.5} flexShrink={0} paddingTop={1.5}>
+        {back ? (
+          <Box key="progress-month-areas" flexDirection="column" gap={0.5} flexShrink={0}>
+            {data.areas.filter(area => totalOf(area) > 0).sort((a, b) => totalOf(b) - totalOf(a)).map(box)}
+          </Box>
+        ) : (
+          groups.map(({ goal, areas }) =>
+            goal === OTHER_GOAL && groups.length > 1 ? (
+              noGoal(areas)
+            ) : (
+              <Box key={`progress-goal-${goal.id || 'other'}`} flexDirection="column" gap={0.5} flexShrink={0}>
+                <Box flexDirection="row" gap={0.75} alignItems="center" paddingLeft={0.5}>
+                  {Svg && goal.id ? <Svg source={dotOf(goal.color)} alt="" width={8} height={20} /> : null}
+                  <Text bold dimColor>{goal.id ? goal.name : 'No goal'}</Text>
+                </Box>
+                {areas.map(box)}
+              </Box>
+            ),
+          )
+        )}
+      </Box>
     </Box>
   )
 }

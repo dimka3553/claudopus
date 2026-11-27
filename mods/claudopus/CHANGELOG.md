@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.290 · 27 November 2026
+- The boxes for every area are back under the Progress chart: each area with its picture and newest result, opened by a press on its name. This month's stand under their goals, with those under no goal folded; an earlier month shows its own.
+
 ## 0.2.289 · 27 November 2026
 - Memory moved from the top of the panel into Config, under You: its Open opens the folder where Claudopus keeps what it remembers.
 
