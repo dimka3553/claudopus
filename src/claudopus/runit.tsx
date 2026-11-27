@@ -239,9 +239,9 @@ const stopRun = async ($: EngineInterface, run: PressRun) => {
 // that saw the end. Whatever step of its own comes first reads it instead (runsAtStep). Says whether it was sent, is kept, or is not
 // sent (a task the person stopped)
 const deliverRun = async ($: EngineInterface, cardId: string, target: string, run: PressRun, text: string) => {
-  const card = (await ownCards($)).find(one => one.id === cardId)
+  const card = (await read($, todos)).find(one => one.id === cardId)
   if (!card) return 'held'
-  const isWorking = (await ownCards($)).find(one => one.id === target)?.status === 'working'
+  const isWorking = (await read($, todos)).find(one => one.id === target)?.status === 'working'
   const told = isWorking ? await tell($, target, text) : undefined
   if (told && !told.deny) return 'sent'
   // A task the person stopped gets nothing more: what it printed stays in its file
@@ -268,7 +268,7 @@ const wakeForRun = async ($: EngineInterface, run: PressRun, target: string) => 
     // Still wanted as it goes: not yet read at a step of the task's own, and the task still at work
     const isStill = async () => {
       const one = kept()
-      if (!one?.waiting || one.waiting.target !== target || (await ownCards($)).find(card => card.id === target)?.status !== 'working') return false
+      if (!one?.waiting || one.waiting.target !== target || (await read($, todos)).find(card => card.id === target)?.status !== 'working') return false
       runSending.add(key)
       return true
     }

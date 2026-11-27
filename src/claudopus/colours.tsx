@@ -53,7 +53,7 @@ const resultGiven = (id: string, text: string) => {
 // The tasks a drawn reply is about: the one whose result it passes on (given this load, or the end report a card keeps), else by
 // its row id, else by its words (the desktop app names a reply by its message's id)
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
-  const cards = (await ownCards($)).filter(one => !one.parentId && !one.chat)
+  const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
   const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
   if (passed && cards.some(one => one.id === passed)) {
     colourBuilder ??= new ColourBuilder()
@@ -107,7 +107,7 @@ const colourPass = async ($: EngineInterface, isWhole: boolean) => {
   colourBuilder = builder
   builder.ingest(fresh)
   await readHeard($).catch(err => log($, `messages said not read back: ${String(err)}`))
-  const value = builder.index({ cards: cardWords(await ownCards($)), heard: personHeard })
+  const value = builder.index({ cards: cardWords(await read($, todos)), heard: personHeard })
   const json = JSON.stringify(value)
   if (json === colourWritten) return
   colourWritten = json
@@ -175,7 +175,7 @@ const colourSoon = ($: EngineInterface, gap = 400, isNew = true) => {
 // opens on its card, else the box that continues from its result. Only the terminal, whose bar has no box, opens its Details
 const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
   if (surface === 'terminal') return openWork($, id)
-  const one = (await ownCards($)).find(card => card.id === id)
+  const one = (await read($, todos)).find(card => card.id === id)
   if (one?.ask && needsPerson(one)) return openBar($, { kind: 'answer', id, one }, surface)
   if (one && canChange(one)) return openBar($, { kind: 'change', id }, surface)
   const kept = (await ownReports($)).find(r => r.agent === id)

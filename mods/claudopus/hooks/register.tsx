@@ -1577,7 +1577,7 @@ const readPicture = async ($: EngineInterface): Promise<ProgressPicture> => pict
 const readAreas = async ($: EngineInterface): Promise<ProgressArea[]> => areasFrom(await readOr($, `${progressDir()}/areas.json`))
 const readEntries = async ($: EngineInterface, areaId: string): Promise<ProgressEntry[]> => (isAreaId(areaId) ? entriesFrom(await readOr($, `${progressDir()}/areas/${areaId}.json`)) : [])
 const areasBeingBuilt = async ($: EngineInterface) => {
-const working = new Set((await ownCards($)).filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id))
+const working = new Set((await read($, todos)).filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id))
 const found = new Set<string>()
 if (!working.size) return found
 for (const area of await readAreas($)) if ((await readEntries($, area.id)).some(entry => entry.task && working.has(entry.task))) found.add(area.id)
@@ -2003,7 +2003,7 @@ const sync = async ($: EngineInterface) => {
 const listed = await $.agent.list().catch(() => undefined)
 const live = listed ?? []
 const now = await $.clock.now()
-const known = new Map((await ownCards($)).map(one => [one.id, one.parentId] as const))
+const known = new Map((await read($, todos)).map(one => [one.id, one.parentId] as const))
 const isUnseen = live.some(
 one => (!known.has(one.id) || known.get(one.id) === HELPER) && !helpersChecked.has(one.id) && (one.status === 'running' || one.status === 'pending') && !one.parentId && one.type !== 'fork',
 )
@@ -2071,7 +2071,7 @@ const overSince = new Map<string, number>()
 const lookOver = async ($: EngineInterface, live: { id: string; status: string }[], now: number, heard = '') => {
 const { id: chat } = await read($, me)
 if (!dir || isOff) return
-const list = await ownCards($)
+const list = await read($, todos)
 const statusOf = (one: Todo) => live.find(agent => agent.id === one.id)?.status
 const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at
 const isGone = (one: Todo) =>
@@ -2105,7 +2105,7 @@ return isReceived ? { ...ended(card, 'done', now), answer, reportAt: now } : { .
 }),
 )
 overSince.delete(one.id)
-const card = (await ownCards($)).find(c => c.id === one.id)
+const card = (await read($, todos)).find(c => c.id === one.id)
 if (card && !card.parentId && card.status === 'done' && card.answer.trim()) $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${card.id} not kept: ${String(err)}`)))
 }
 if (!endedNow.length) return
@@ -2152,18 +2152,18 @@ return true
 }
 const retrySet = new Set<string>()
 const followRetry = async ($: EngineInterface, id: string) => {
-const due = (await ownCards($)).find(one => one.id === id)?.retry?.at
+const due = (await read($, todos)).find(one => one.id === id)?.retry?.at
 if (due === undefined || retrySet.has(`${id}:${due}`)) return
 retrySet.add(`${id}:${due}`)
 $.clock.after(Math.max(0, due - (await $.clock.now())), () => void sendRetry($, id, due).catch(err => log($, `work ${id} not tried again: ${String(err)}`)))
 }
 const followRetries = async ($: EngineInterface) => {
-for (const one of await ownCards($)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
+for (const one of await read($, todos)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
 }
 const RETRY_TEXT = (why: string) => `Your last step stopped on a network error (${why}). This message starts you again: carry on from where you were, then end with your report as before.`
 const sendRetry = async ($: EngineInterface, id: string, due: number) => {
-const isStill = async () => (await ownCards($)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
-const why = (await ownCards($)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
+const isStill = async () => (await read($, todos)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
+const why = (await read($, todos)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
 if (!(await isStill())) return
 const r = await sendOwn($, { to: { agentId: id }, text: RETRY_TEXT(why) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
 const now = await $.clock.now()
@@ -2181,7 +2181,7 @@ redraw($)
 
 const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo, isOwn = false) => {
 const now = await $.clock.now()
-if (!(await ownCards($)).some(one => one.id === agentId)) await sync($)
+if (!(await read($, todos)).some(one => one.id === agentId)) await sync($)
 await changeTodos($, list => {
 const id = isOwn && list.some(one => one.id === agentId) ? agentId : topOf(list, agentId)
 return list.map(one => (one.id === id ? fn(one, now) : one))
@@ -2193,7 +2193,7 @@ const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.close
 const dismissedNow = new Map<string, number>()
 const dismiss = async ($: EngineInterface, id: string) => {
 const at = await $.clock.now()
-const card = (await ownCards($)).find(one => one.id === id)
+const card = (await read($, todos)).find(one => one.id === id)
 if (!card || card.status === 'working' || card.closedAt || dismissedNow.has(id)) return
 dismissedNow.set(id, at)
 doneMoments.set(id, { pressedAt: at, shownAt: 0 })
@@ -2215,11 +2215,11 @@ const tell = ($: EngineInterface, id: string, text: string) =>
 $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
 
 const stop = async ($: EngineInterface, id: string) => {
-if ((await ownCards($)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
+if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
 const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
 if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
 stoppedHere.add(id)
-const before = await ownCards($)
+const before = await read($, todos)
 const card = before.find(one => one.id === id)
 const isYours = Boolean(card && card.status === 'working')
 const under = [card, ...underOf(before, id)].filter((one): one is Todo => Boolean(one))
@@ -2243,16 +2243,16 @@ await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 }
 
 const startAgain = async ($: EngineInterface, id: string) => {
-const one = (await ownCards($)).find(todo => todo.id === id)
+const one = (await read($, todos)).find(todo => todo.id === id)
 if (!one || !((one.status === 'stopped' && one.byYou) || one.status === 'failed')) return
-const target = one.parentId && one.parentId !== HELPER ? `the task "${titleOf((await ownCards($)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the task'
+const target = one.parentId && one.parentId !== HELPER ? `the task "${titleOf((await read($, todos)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the task'
 const why = one.status === 'failed' ? `which had failed${one.why ? ` (${one.why.charAt(0).toLowerCase()}${one.why.slice(1)})` : ''}` : 'which they had stopped'
 await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Start again" on "${titleOf(one)}" (${id}), ${why}. Start it again: send ${target} "${titleOf(one)}" (${id}) a message with SendMessage so it continues from where it stopped.`)
 }
 
 const choose = async ($: EngineInterface, id: string, model: string) => {
 await update($, view, v => ({ ...v, picking: '' }))
-const one = (await ownCards($)).find(todo => todo.id === id)
+const one = (await read($, todos)).find(todo => todo.id === id)
 if (!one || one.status !== 'working' || modelName(one.chosen ?? one.model ?? '') === modelName(model)) return
 await changeTodos($, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
 await tell($, id, movedTo(modelName(model), await $.clock.now()))
@@ -2325,7 +2325,7 @@ const finishedPath = (chatId: string) => `${dir}/finished/${chatId}.json`
 let finishedSaved = ''
 const saveFinished = async ($: EngineInterface) => {
 const { id } = await read($, me)
-const all = await ownCards($)
+const all = await read($, todos)
 const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
 const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : '', one.closedAt ?? ''].join(':')).join(',')
 if (!id || !dir || !ended.length || sign === finishedSaved) return
@@ -2337,7 +2337,7 @@ finishedSaved = sign
 const isBare = (card: Todo) => card.status !== 'working' && card.endedAt === card.startedAt && !card.model
 const recoverEnded = async ($: EngineInterface) => {
 const { id } = await read($, me)
-const list = await ownCards($)
+const list = await read($, todos)
 if (!id) return
 const live = await $.agent.list().catch(() => [])
 type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
@@ -3129,7 +3129,7 @@ return copies
 const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
 
 const saveReport = async ($: EngineInterface, card: Todo, text: string, isPart = false) => {
-const one = (await ownCards($)).find(todo => todo.id === card.id) ?? card
+const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
 const isKept = isPart || text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path))
 const kept = await loadReports($)
 const marked = mark(text)
@@ -3817,7 +3817,7 @@ givenResults.push({ id, text: text.slice(0, 20_000) })
 givenResults.splice(0, Math.max(0, givenResults.length - 30))
 }
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
-const cards = (await ownCards($)).filter(one => !one.parentId && !one.chat)
+const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
 const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
 if (passed && cards.some(one => one.id === passed)) {
 colourBuilder ??= new ColourBuilder()
@@ -3862,7 +3862,7 @@ const fresh = rows.slice(builder.read)
 colourBuilder = builder
 builder.ingest(fresh)
 await readHeard($).catch(err => log($, `messages said not read back: ${String(err)}`))
-const value = builder.index({ cards: cardWords(await ownCards($)), heard: personHeard })
+const value = builder.index({ cards: cardWords(await read($, todos)), heard: personHeard })
 const json = JSON.stringify(value)
 if (json === colourWritten) return
 colourWritten = json
@@ -3920,7 +3920,7 @@ look(400)
 
 const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
 if (surface === 'terminal') return openWork($, id)
-const one = (await ownCards($)).find(card => card.id === id)
+const one = (await read($, todos)).find(card => card.id === id)
 if (one?.ask && needsPerson(one)) return openBar($, { kind: 'answer', id, one }, surface)
 if (one && canChange(one)) return openBar($, { kind: 'change', id }, surface)
 const kept = (await ownReports($)).find(r => r.agent === id)
@@ -5844,7 +5844,7 @@ const files = r.made ?? madeOfOld.get(r.id)
 if (!files && !madeLoading.has(r.id)) {
 madeLoading.add(r.id)
 void (async () => {
-const one = (await ownCards($)).find(card => card.id === r.agent)
+const one = (await read($, todos)).find(card => card.id === r.agent)
 const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one), one?.said ?? [], one?.titles ?? {}).catch(() => ({ made: [] }))
 if (madeOfOld.size > 200) madeOfOld.delete(madeOfOld.keys().next().value ?? '')
 madeOfOld.set(r.id, listed)
@@ -6260,7 +6260,7 @@ for (const r of await ownReports($)) {
 const file = r.made?.code?.files?.find(one => diffPaneOf(one.path) === id)
 if (file) return { file, since: r.made?.code?.since ?? 0, owner: r.id }
 }
-for (const one of await ownCards($)) {
+for (const one of await read($, todos)) {
 const path = (one.wrote ?? []).find(path => diffPaneOf(path) === id)
 if (path) return { file: { path, inRepo: '', plus: 0, minus: 0 }, since: Math.floor((one.begunAt ?? one.startedAt) / 1000), owner: one.id }
 }
@@ -6316,7 +6316,7 @@ const diff = diffCut(got?.text ?? '', DIFF_CHARS)
 const showsWhole = isWhole || isNew
 const wholeText = got?.whole ?? ''
 const wholeCut = wholeText.length > DIFF_CHARS ? wholeText.slice(0, wholeText.lastIndexOf('\n', DIFF_CHARS)) : wholeText
-const card = (await ownCards($)).find(one => one.id === owner)
+const card = (await read($, todos)).find(one => one.id === owner)
 const result = card ? undefined : (await ownReports($)).find(r => r.id === owner)
 const folder = file.inRepo.includes('/') ? file.inRepo.slice(0, file.inRepo.lastIndexOf('/')) : file.path.slice(0, file.path.lastIndexOf('/'))
 const table = ui as Ui & { Code?: (props: { key?: string; source: string; path?: string; format?: 'source' | 'diff'; startLine?: number; wrap?: 'wrap' | 'truncate-end' }) => JSX.Element }
@@ -6589,7 +6589,7 @@ const standing = (stage: string, endedAt: number) => (stage === 'working' || sta
 
 const lookEnds = async ($: EngineInterface) => {
 const mine = await sessionName($)
-const list = await ownCards($)
+const list = await read($, todos)
 const cards = list.filter(one => !one.parentId)
 const runs = (await read($, flows)).filter(f => f.session === mine)
 const now = await $.clock.now()
@@ -6656,7 +6656,7 @@ try {
 config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
 } catch {
 }
-const cards = await ownCards($)
+const cards = await read($, todos)
 const runs = await read($, flows)
 const items = ids.map(one => readyOf(one, cards, runs)).filter(one => one !== undefined)
 if (!items.length) return
@@ -6779,7 +6779,7 @@ const ASK_NAMED_MOST = REMIND_AT.at(-1)!
 let cardsSent = ''
 const cardsNow = async ($: EngineInterface) => {
 const now = await $.clock.now()
-const list = (await ownCards($)).filter(one => {
+const list = (await read($, todos)).filter(one => {
 const waits = one.parentId ? undefined : waitingOnPerson(one)
 return !one.parentId && (one.status === 'working' ? true : waits ? now - waits.at < ASK_NAMED_MOST : now - one.endedAt < 30 * 60_000)
 }).slice(-12)
@@ -7595,7 +7595,7 @@ return value
 }
 const paneShape = async ($: EngineInterface, paneId: string) => {
 const at = await $.clock.now()
-const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
 const own = await read($, todos)
 const chats = await read($, others)
 const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -7607,7 +7607,7 @@ const calmCard = (one: Todo) => {
 const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
 return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await ownCards($)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
 const holdTimes = ($: EngineInterface) => {
 if (!isTyping) recordEvent($, 'hold')
 const made = (typing += 1)
@@ -7644,7 +7644,7 @@ const isEngaged = (at: number) => engagedAt > 0 && at - engagedAt < ENGAGED
 const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
 const chats = await read($, others)
-const cards = await ownCards($)
+const cards = await read($, todos)
 const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
 const momentAt = await $.clock.now()
 const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
@@ -7652,7 +7652,7 @@ return JSON.stringify([
 presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
 [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
 [...pictureIn.keys()], isUpdating, loadMark,
-[...(await ownCards($)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+[...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
 ])
 }
 const PRESS_HOLD = 2000
@@ -7718,7 +7718,7 @@ if (now !== text) (drawnFiles.set(path, now), (isNew = true))
 if (!isHeld && paneWork.size) {
 const shownPanes = new Set((await $.ui.panes().catch(() => [])).filter(pane => pane.isShown !== false).map(pane => pane.id))
 for (const pane of [...paneWork.keys()]) if (!shownPanes.has(pane)) paneWork.delete(pane)
-const cards = paneWork.size ? await ownCards($) : []
+const cards = paneWork.size ? await read($, todos) : []
 const live = liveSign([...paneWork.values()].flatMap(id => [id, ...cards.filter(kid => kid.parentId === id).map(kid => kid.id)]), now)
 if (live !== liveDrawn) ((liveDrawn = live), recordEvent($, 'redraw-live'), $.ui.invalidate('ui.render'))
 }
@@ -7745,7 +7745,7 @@ void update($, draftsKept, kept => Object.fromEntries(Object.entries(kept as Rec
 }
 const readDrafts = async ($: EngineInterface) => {
 const kept = ((await read($, draftsKept).catch(() => ({}))) ?? {}) as Record<string, string>
-const ids = new Set((await ownCards($)).map(one => one.id))
+const ids = new Set((await read($, todos)).map(one => one.id))
 const live = Object.entries(kept).filter(([key, value]) => typeof value === 'string' && ids.has(key.split('|')[0] ?? ''))
 for (const [key, value] of live) if (!drafts.has(key)) drafts.set(key, value)
 if (live.length !== Object.keys(kept).length) await update($, draftsKept, () => Object.fromEntries(live))
@@ -7851,7 +7851,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 const picked = takeAttached(id)
 const mark = barOpen?.kind === 'answer' && barOpen.id === id ? barOpen.mark : ''
 const run = (async () => {
-const one = (await ownCards($)).find(card => card.id === id)
+const one = (await read($, todos)).find(card => card.id === id)
 const files = [...new Set([...picked, ...(await pathsIn($, value))])]
 const ask = one ? (asksOf(one).find(other => askMark(other) === mark) ?? one.ask) : undefined
 if (one && ask && (value.trim() || files.length)) await answerAsk($, askView(one, ask), value, true, picked, files)
@@ -8146,7 +8146,7 @@ files.length
         .join('\n')}`
 : ''
 const changeTask = async ($: EngineInterface, id: string, said: string, picked: string[] = [], isNow = false) => {
-const card = (await ownCards($)).find(one => one.id === id)
+const card = (await read($, todos)).find(one => one.id === id)
 if (!card || (!said && !picked.length) || card.chat || card.parentId) return
 const wasHeld = isHeld(card)
 if (wasHeld) await changeTodos($, list => list.map(one => (one.id === id && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
@@ -8164,7 +8164,7 @@ return void (await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown,
 }
 const text = card.status === 'working' ? MESSAGE_SENT(words) : wasHeld ? STOPPED_ASKED(words) : CHANGE_ASKED(words)
 const sent = { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
-const told = (await ownCards($)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
+const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
 if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
 else await toEnded($, card, id, text, sent)
 await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`)))
@@ -8242,7 +8242,7 @@ if (!ask.refused) {
 if (isAside) await markAside($, one.id).catch(err => log($, `task ${one.id} not marked set aside: ${String(err)}`))
 queueSoon($, { kind: isAside ? 'aside' : 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}${ask.details ? `\n${ask.details}` : ''}\nAnswer: ${said}` })
 }
-const working = (await ownCards($)).find(card => card.id === one.id)?.status === 'working'
+const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
 const told = working ? await tell($, target, to) : undefined
 if (ask.refused && !isReply) {
 if (told && !told.deny) writtenIn($, target, one.id)
@@ -8275,7 +8275,7 @@ const sent = sentReplies.get(one.id)
 const ask = sent?.asked
 if (!sent || !ask || sent.at !== shownAt) return
 const target = sent.target ?? one.id
-const now = (await ownCards($)).find(card => card.id === one.id)
+const now = (await read($, todos)).find(card => card.id === one.id)
 if (!now || sentReplies.get(one.id) !== sent || !canTakeBack(now, await $.clock.now())) return
 const waiting = wakes.find(w => w.target === target && w.answers.some(a => a.one.id === one.id && a.sent.at === sent.at))
 if (waiting) {
@@ -8308,7 +8308,7 @@ if (answeredAsks.has(key)) return
 answeredAsks.add(key)
 const at = await $.clock.now()
 let isHeld = false
-const listed = await ownCards($)
+const listed = await read($, todos)
 const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
 await changeTodos($, list =>
 ((isHeld = false), list).map(card => (card.id === one.id && hasAsk(card, ask) ? ((isHeld = true), { ...mapAsk(card, ask, kept => ({ ...kept, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(kept.refused ? { talk: [...(kept.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) })), entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
@@ -8323,7 +8323,7 @@ sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCar
 redraw($)
 $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
 if (inChat.has(chatKey(one.id, ask))) (inChat.delete(chatKey(one.id, ask)), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`, ask.text))))
-const working = (await ownCards($)).find(card => card.id === target)?.status === 'working'
+const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
 const to = ask.refused ? `${REFUSAL_WORDS(ask.copy ?? ask.text, said)}${note}` : `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}\n${named(REPLY_HOLDS)}`
 const told = working ? await tell($, target, to) : undefined
 if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
@@ -8331,7 +8331,7 @@ await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: 
 }
 const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[] }[] = []
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
-const list = await ownCards($)
+const list = await read($, todos)
 const top = list.find(card => card.id === topOf(list, target))
 if (top && !top.chat && isInterrupted(top)) {
 sentReplies.set(one.id, { ...sent, to: 'work' })
@@ -8355,7 +8355,7 @@ if (wake) await sendWake($, wake)
 }
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
-if (isHeld((await ownCards($)).find(one => one.id === wake.target))) return void (await log($, `task ${wake.target} not started with an answer: the person stopped it`))
+if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `task ${wake.target} not started with an answer: the person stopped it`))
 const r = (await isReplaced($))
 ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
 : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
@@ -8378,7 +8378,7 @@ if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(ta
 await log($, `work ${target} not started again with an answer: ${reason}`)
 const ids = new Set(answers.map(({ one }) => one.id))
 await changeTodos($, list => list.map(card => (ids.has(card.id) ? mapAsks(card, ask => (ask.replied?.isWaking ? { ...ask, replied: { text: ask.replied.text, at: ask.replied.at } } : ask)) : card)))
-const list = await ownCards($)
+const list = await read($, todos)
 const top = list.find(card => card.id === topOf(list, target))
 const isGone = UNRESUMABLE.test(reason) && top && !top.chat && Boolean(top.chatWas) && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
 if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
@@ -8434,7 +8434,7 @@ await changeTodos($, all => all.map(one => (one.id === a.card.id && hasAsk(one, 
 dropDrafts($, a.card.id, a.ask)
 sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
 writtenIn($, to, a.card.id)
-const helper = a.ask.from && a.ask.from !== to ? (await ownCards($)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
+const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
 if (helper) await tell($, helper.id, `${who(true)} answered your question ("${a.ask.text}") in the chat, in their own words: ${a.words}`)
 redraw($)
 }
@@ -8453,7 +8453,7 @@ const sent = sentReplies.get(card)
 if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
 const markRead = async ($: EngineInterface, agentId: string) => {
-if (!(await ownCards($)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
+if (!(await read($, todos)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
 const now = await $.clock.now()
 const readNow = (entry: Entry): Entry => {
 if (!entry.isUnread || entry.at > now) return entry
@@ -8468,7 +8468,7 @@ if (card === undefined || wakes.some(w => w.target === agentId)) return
 pending.delete(agentId)
 const sent = sentReplies.get(card)
 if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'work' && (sentReplies.set(card, { ...sent, to: 'read' }), redraw($)))
-const one = (await ownCards($)).find(todo => todo.id === card)
+const one = (await read($, todos)).find(todo => todo.id === card)
 if (sent?.to !== 'work' || !one) return
 const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
 await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
@@ -10336,7 +10336,7 @@ const countOf = (lines: string[], snippet: string) => lines.filter(line => line.
 const opened = async ($: EngineInterface, agent: string | undefined, tool: string, input: unknown) => {
 const at = await $.clock.now()
 const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`
-const list = await ownCards($)
+const list = await read($, todos)
 const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
 const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
 const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card), card: card.id } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
@@ -10394,7 +10394,7 @@ return one.result
 }
 const sendOne = async ($: EngineInterface, { message, isStill, resolve, reject }: HeldSend, text = message.text) => {
 const id = message.to.agentId
-if (stoppedHere.has(id) || isHeld((await ownCards($)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
+if (stoppedHere.has(id) || isHeld((await read($, todos)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
 if (isStill && !(await isStill().catch(() => false))) return resolve({ isDelivered: false, reason: 'no longer wanted by the time it could be sent' } as SendResult)
 await sendOwnNow($, { ...message, text }).then(resolve, reject)
 }
@@ -10517,7 +10517,7 @@ return undefined
 const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
 const refusal = refusalOf(r)
 if (!refusal || !dir || isOff) return
-const list = await ownCards($)
+const list = await read($, todos)
 const top = list.find(one => one.id === topOf(list, agent))
 const own = list.find(one => one.id === agent)
 if (!top || top.chat) return
@@ -10533,7 +10533,7 @@ await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.refused && 
 if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same command waits on it already`))
 await offerRun($, top.id, agent, at, runnable)
 await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
-const card = (await ownCards($)).find(one => one.id === top.id)
+const card = (await read($, todos)).find(one => one.id === top.id)
 if (card) await askAloud($, card, asked).catch(err => log($, `ask not told: ${String(err)}`))
 if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
@@ -10562,7 +10562,7 @@ let isPut = false
 await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
 if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same action waits on it already`))
 await log($, `refusal of ${tool} for ${agent} put to the person on its card, with the rule that lets it through`)
-const card = (await ownCards($)).find(one => one.id === top)
+const card = (await read($, todos)).find(one => one.id === top)
 if (card) await askAloud($, card, CONNECTOR_ASK).catch(err => log($, `ask not told: ${String(err)}`))
 if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
@@ -10809,9 +10809,9 @@ redraw($)
 await stopProcess($, run)
 }
 const deliverRun = async ($: EngineInterface, cardId: string, target: string, run: PressRun, text: string) => {
-const card = (await ownCards($)).find(one => one.id === cardId)
+const card = (await read($, todos)).find(one => one.id === cardId)
 if (!card) return 'held'
-const isWorking = (await ownCards($)).find(one => one.id === target)?.status === 'working'
+const isWorking = (await read($, todos)).find(one => one.id === target)?.status === 'working'
 const told = isWorking ? await tell($, target, text) : undefined
 if (told && !told.deny) return 'sent'
 if (isHeld(card)) return 'held'
@@ -10832,7 +10832,7 @@ const text = kept()?.waiting?.text
 if (!text) return
 const isStill = async () => {
 const one = kept()
-if (!one?.waiting || one.waiting.target !== target || (await ownCards($)).find(card => card.id === target)?.status !== 'working') return false
+if (!one?.waiting || one.waiting.target !== target || (await read($, todos)).find(card => card.id === target)?.status !== 'working') return false
 runSending.add(key)
 return true
 }
@@ -11133,7 +11133,7 @@ return ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), left).
 const NOTICE_HEADER = /\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n(?:(?:This is an automated background-task event|Do NOT interpret this|No human input has been received)[^\n]*\n?)*/
 type Quiet = { isQuiet: boolean; isRepeat: boolean }
 const reportsFor = async ($: EngineInterface, ids?: string[]) => {
-const given = (await ownCards($)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
+const given = (await read($, todos)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
 if (!given.length) return []
 await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
 await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
@@ -11142,7 +11142,7 @@ given.forEach((one, n) => resultGiven(one.id, reports[n] ?? ''))
 return given.map((one, n) => named(REPORT_FOR_CHAT(titleOf(one), one.id, reports[n] ?? '')))
 }
 const partsFor = async ($: EngineInterface) => {
-const given = (await ownCards($)).filter(one => one.partsForChat?.length)
+const given = (await read($, todos)).filter(one => one.partsForChat?.length)
 if (!given.length) return []
 await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)))
 await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
@@ -11516,7 +11516,7 @@ const isAskOf = (need: Need, card: string) => need.id === `ask-${card}` || need.
 type Typed = { need: Need; card?: Todo; title: string; isPressOnly: boolean }
 const typedWaiting = async ($: EngineInterface): Promise<Typed[]> => {
 const now = await $.clock.now()
-const cards = (await ownCards($)).filter(one => !one.parentId && !one.chat)
+const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
 const own = new Set(cards.map(one => one.id))
 const onCards = cards.flatMap(one => needsOf($, asPressed(one), '', now).map(need => ({ need, card: one, title: titleOf(one), isPressOnly: Boolean(isAskOf(need, one.id) && need.card?.ask?.refused) })))
 const loose = [
@@ -13318,7 +13318,7 @@ brief || 'Not kept: the first line of its saved transcript holds them.',
 }
 const CARRY_PROMPT = (path: string) => `Carry on a task the Claude app's close cut off. Read ${path} first: it holds the task's instructions, its to-dos, its last notes, its worktree and its saved transcript. Then go on from where it stopped.`
 const carryOn = async ($: EngineInterface, id: string, answer = '') => {
-const list = await ownCards($)
+const list = await read($, todos)
 const one = list.find(card => card.id === topOf(list, id))
 const { id: chat } = await read($, me)
 if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat)) return
@@ -14736,7 +14736,7 @@ const saved = await saveStream($, name, { repo: input.repo, state: input.state?.
 if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
 const page = pageOf(saved.name)
 if (added) {
-const card = e.agentId === undefined ? undefined : (await ownCards($)).find(one => one.id === e.agentId)
+const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId)
 await addHistory($, saved.name, historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
 }
 if (brief && !isLong) await writePage($, saved.name, hideKeys(brief))
@@ -14830,7 +14830,7 @@ const like = same ? undefined : saved.find(one => sameKey(one.name, keyName))
 const about = cut(keyAskDetails([text === asked ? '' : asked, given1].filter(Boolean).join('\n\n'), from, keyName, same, like), ASK_DETAILS)
 const keyAt = await $.clock.now()
 await change($, e.agentId, one => withKeyAsks(one, [...keyAsksOf(one).filter(other => other.name !== keyName), { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt }]))
-const cards = await ownCards($)
+const cards = await read($, todos)
 const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
 await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
 if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
@@ -14853,7 +14853,7 @@ const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : 
 const pictures: string[] = []
 for (const path of givenPics) if (path.startsWith('/') && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
 const at = await $.clock.now()
-const before = await ownCards($)
+const before = await read($, todos)
 const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
 const isSameAsk = Boolean(was && was.text === text && JSON.stringify(was.choices ?? []) === JSON.stringify(choices))
 const wantsPicture = Boolean(text && choices.length) && (await wantsQuestionPictures($).catch(() => false))
@@ -14888,7 +14888,7 @@ if (!text) return ((cleared = asksOf(one).filter(ask => isOwnAsk(one, ask))), wi
 const kept = asksOf(one).filter(ask => !ask.isResult && !(isOwnAsk(one, ask) && (ask.text === text || (ask.replied && !ask.refused))))
 return withAsks(one, [...kept, { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: asker, ...(pictures.length ? { pictures } : {}), at }])
 })
-const list = await ownCards($)
+const list = await read($, todos)
 const card = list.find(one => one.id === topOf(list, asker))
 if (!text) {
 if (card && keyAsksOf(card).some(ask => ask.from === asker)) await changeTodos($, all => all.map(one => (one.id === card.id ? withKeyAsks(one, keyAsksOf(one).filter(ask => ask.from !== asker)) : one)))
@@ -14918,7 +14918,7 @@ on('tool.call', { tool: 'mcp__claudopus__report' }, async ($, e) => {
 const text = String((e as unknown as { message?: unknown }).message ?? '').trim()
 if (e.agentId === undefined) return { result: `Only a background task hands in a part of its result; the chat tells ${who()} in its reply.` }
 if (!text) return { result: 'A report needs its text, in `message`.' }
-const card = (await ownCards($)).find(one => one.id === e.agentId)
+const card = (await read($, todos)).find(one => one.id === e.agentId)
 if (!card || card.chat || isOff || !dir) return { result: `Not handed in: Claudopus does not follow this task. Put it in your last report instead.` }
 if (card.parentId) return { result: named(PART_FROM_HELPER) }
 if (card.status !== 'working') return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' }
@@ -14939,7 +14939,7 @@ const kind: Entry['kind'] = input.decision ? 'decision' : 'note'
 await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined, questionChoices: asked.length && answers.length ? answers : undefined } : {}) }))
 const task = oneLine(input.task ?? '').slice(0, 400)
 if (!task) return { result: 'Noted.' }
-const list = await ownCards($)
+const list = await read($, todos)
 const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
 const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? ''
 said = words || task

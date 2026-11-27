@@ -73,7 +73,7 @@ const countOf = (lines: string[], snippet: string) => lines.filter(line => line.
 const opened = async ($: EngineInterface, agent: string | undefined, tool: string, input: unknown) => {
   const at = await $.clock.now()
   const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`
-  const list = await ownCards($)
+  const list = await read($, todos)
   const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
   const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
   const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card), card: card.id } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
@@ -147,7 +147,7 @@ const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => 
 // (never to a task the person stopped while it waited, nor one no longer wanted)
 const sendOne = async ($: EngineInterface, { message, isStill, resolve, reject }: HeldSend, text = message.text) => {
   const id = message.to.agentId
-  if (stoppedHere.has(id) || isHeld((await ownCards($)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
+  if (stoppedHere.has(id) || isHeld((await read($, todos)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
   if (isStill && !(await isStill().catch(() => false))) return resolve({ isDelivered: false, reason: 'no longer wanted by the time it could be sent' } as SendResult)
   await sendOwnNow($, { ...message, text }).then(resolve, reject)
 }
@@ -300,7 +300,7 @@ const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isErro
 const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
   const refusal = refusalOf(r)
   if (!refusal || !dir || isOff) return
-  const list = await ownCards($)
+  const list = await read($, todos)
   const top = list.find(one => one.id === topOf(list, agent))
   const own = list.find(one => one.id === agent)
   if (!top || top.chat) return
@@ -319,7 +319,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same command waits on it already`))
   await offerRun($, top.id, agent, at, runnable)
   await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
-  const card = (await ownCards($)).find(one => one.id === top.id)
+  const card = (await read($, todos)).find(one => one.id === top.id)
   if (card) await askAloud($, card, asked).catch(err => log($, `ask not told: ${String(err)}`))
   if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
@@ -354,7 +354,7 @@ const refusedConnector = async ($: EngineInterface, agent: string, top: string, 
   await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same action waits on it already`))
   await log($, `refusal of ${tool} for ${agent} put to the person on its card, with the rule that lets it through`)
-  const card = (await ownCards($)).find(one => one.id === top)
+  const card = (await read($, todos)).find(one => one.id === top)
   if (card) await askAloud($, card, CONNECTOR_ASK).catch(err => log($, `ask not told: ${String(err)}`))
   if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }

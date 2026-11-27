@@ -201,7 +201,7 @@ const sync = async ($: EngineInterface) => {
   // Work the mod never saw start (it was running when the mod was installed or renamed) that no loop is said to have started:
   // the chat's own Agent calls tell a piece of work from a helper whose start the engine did not record
   // A card taken for a helper that way is looked at again
-  const known = new Map((await ownCards($)).map(one => [one.id, one.parentId] as const))
+  const known = new Map((await read($, todos)).map(one => [one.id, one.parentId] as const))
   const isUnseen = live.some(
     one => (!known.has(one.id) || known.get(one.id) === HELPER) && !helpersChecked.has(one.id) && (one.status === 'running' || one.status === 'pending') && !one.parentId && one.type !== 'fork',
   )
@@ -285,7 +285,7 @@ const overSince = new Map<string, number>()
 const lookOver = async ($: EngineInterface, live: { id: string; status: string }[], now: number, heard = '') => {
   const { id: chat } = await read($, me)
   if (!dir || isOff) return
-  const list = await ownCards($)
+  const list = await read($, todos)
   const statusOf = (one: Todo) => live.find(agent => agent.id === one.id)?.status
   const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at
   // A task no run of this process is behind, that nothing has moved under for STUCK_AFTER, and that can't be reached: its run went
@@ -325,7 +325,7 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
       }),
     )
     overSince.delete(one.id)
-    const card = (await ownCards($)).find(c => c.id === one.id)
+    const card = (await read($, todos)).find(c => c.id === one.id)
     if (card && !card.parentId && card.status === 'done' && card.answer.trim()) $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${card.id} not kept: ${String(err)}`)))
   }
   if (!endedNow.length) return
@@ -383,18 +383,18 @@ const retryLater = async ($: EngineInterface, id: string, why: string) => {
 // Each try due is set once by this load; a reload's load sets those it finds again (followRetries)
 const retrySet = new Set<string>()
 const followRetry = async ($: EngineInterface, id: string) => {
-  const due = (await ownCards($)).find(one => one.id === id)?.retry?.at
+  const due = (await read($, todos)).find(one => one.id === id)?.retry?.at
   if (due === undefined || retrySet.has(`${id}:${due}`)) return
   retrySet.add(`${id}:${due}`)
   $.clock.after(Math.max(0, due - (await $.clock.now())), () => void sendRetry($, id, due).catch(err => log($, `work ${id} not tried again: ${String(err)}`)))
 }
 const followRetries = async ($: EngineInterface) => {
-  for (const one of await ownCards($)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
+  for (const one of await read($, todos)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
 }
 const RETRY_TEXT = (why: string) => `Your last step stopped on a network error (${why}). This message starts you again: carry on from where you were, then end with your report as before.`
 const sendRetry = async ($: EngineInterface, id: string, due: number) => {
-  const isStill = async () => (await ownCards($)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
-  const why = (await ownCards($)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
+  const isStill = async () => (await read($, todos)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
+  const why = (await read($, todos)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
   if (!(await isStill())) return
   const r = await sendOwn($, { to: { agentId: id }, text: RETRY_TEXT(why) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   const now = await $.clock.now()
@@ -415,7 +415,7 @@ const sendRetry = async ($: EngineInterface, id: string, due: number) => {
 // (`isOwn`: a helper's own card where it has one, as for its to-dos, which are never the task's above it)
 const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo, isOwn = false) => {
   const now = await $.clock.now()
-  if (!(await ownCards($)).some(one => one.id === agentId)) await sync($)
+  if (!(await read($, todos)).some(one => one.id === agentId)) await sync($)
   await changeTodos($, list => {
     const id = isOwn && list.some(one => one.id === agentId) ? agentId : topOf(list, agentId)
     return list.map(one => (one.id === id ? fn(one, now) : one))
@@ -436,7 +436,7 @@ const dismiss = async ($: EngineInterface, id: string) => {
   // (marked from the press's own time, so the card's green moment is drawn from the press itself, in the place it stood)
   const at = await $.clock.now()
   // (a second press on a card already marked, as a double click or a press on a drawing from before, changes nothing)
-  const card = (await ownCards($)).find(one => one.id === id)
+  const card = (await read($, todos)).find(one => one.id === id)
   if (!card || card.status === 'working' || card.closedAt || dismissedNow.has(id)) return
   dismissedNow.set(id, at)
   doneMoments.set(id, { pressedAt: at, shownAt: 0 })
@@ -464,11 +464,11 @@ const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
 
 const stop = async ($: EngineInterface, id: string) => {
-  if ((await ownCards($)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
+  if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   stoppedHere.add(id)
-  const before = await ownCards($)
+  const before = await read($, todos)
   const card = before.find(one => one.id === id)
   // A press on Stop is the person's own stop, kept on the card so a reload keeps it too: what was already finished stays finished
   const isYours = Boolean(card && card.status === 'working')
@@ -498,9 +498,9 @@ const stop = async ($: EngineInterface, id: string) => {
 // A task the person stopped, or one that failed, started again by their press on its card: a message from the panel in their
 // name, which lifts the hold. Nothing else starts it again
 const startAgain = async ($: EngineInterface, id: string) => {
-  const one = (await ownCards($)).find(todo => todo.id === id)
+  const one = (await read($, todos)).find(todo => todo.id === id)
   if (!one || !((one.status === 'stopped' && one.byYou) || one.status === 'failed')) return
-  const target = one.parentId && one.parentId !== HELPER ? `the task "${titleOf((await ownCards($)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the task'
+  const target = one.parentId && one.parentId !== HELPER ? `the task "${titleOf((await read($, todos)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the task'
   const why = one.status === 'failed' ? `which had failed${one.why ? ` (${one.why.charAt(0).toLowerCase()}${one.why.slice(1)})` : ''}` : 'which they had stopped'
   await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Start again" on "${titleOf(one)}" (${id}), ${why}. Start it again: send ${target} "${titleOf(one)}" (${id}) a message with SendMessage so it continues from where it stopped.`)
 }
@@ -509,7 +509,7 @@ const startAgain = async ($: EngineInterface, id: string) => {
 // told in its own chat, where the panel shows the change as a line of its own
 const choose = async ($: EngineInterface, id: string, model: string) => {
   await update($, view, v => ({ ...v, picking: '' }))
-  const one = (await ownCards($)).find(todo => todo.id === id)
+  const one = (await read($, todos)).find(todo => todo.id === id)
   if (!one || one.status !== 'working' || modelName(one.chosen ?? one.model ?? '') === modelName(model)) return
   await changeTodos($, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
   await tell($, id, movedTo(modelName(model), await $.clock.now()))
@@ -601,7 +601,7 @@ let finishedSaved = ''
 const saveFinished = async ($: EngineInterface) => {
   const { id } = await read($, me)
   // Its helpers are kept with it, so its Details still lists them after a reload
-  const all = await ownCards($)
+  const all = await read($, todos)
   const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
   const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : '', one.closedAt ?? ''].join(':')).join(',')
   if (!id || !dir || !ended.length || sign === finishedSaved) return
@@ -616,7 +616,7 @@ const saveFinished = async ($: EngineInterface) => {
 const isBare = (card: Todo) => card.status !== 'working' && card.endedAt === card.startedAt && !card.model
 const recoverEnded = async ($: EngineInterface) => {
   const { id } = await read($, me)
-  const list = await ownCards($)
+  const list = await read($, todos)
   if (!id) return
   // The engine lists only the work of its own process; the transcripts of the rest are in the chat's folder, one per agent
   const live = await $.agent.list().catch(() => [])

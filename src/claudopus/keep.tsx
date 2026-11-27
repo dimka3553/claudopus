@@ -335,7 +335,7 @@ const CARRY_PROMPT = (path: string) => `Carry on a task the Claude app's close c
 // The person's press on Carry on, or their answer to what a cut-off task asked: the chat starts a fresh task told everything the
 // ledger holds of it. Its card goes under Finished once the fresh task starts, which takes its place, its to-dos and its notes
 const carryOn = async ($: EngineInterface, id: string, answer = '') => {
-  const list = await ownCards($)
+  const list = await read($, todos)
   const one = list.find(card => card.id === topOf(list, id))
   const { id: chat } = await read($, me)
   if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat)) return

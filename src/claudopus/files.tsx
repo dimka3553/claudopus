@@ -262,7 +262,7 @@ const madeOfReport = ($: EngineInterface, r: Report, text: string): FilesMade =>
   if (!files && !madeLoading.has(r.id)) {
     madeLoading.add(r.id)
     void (async () => {
-      const one = (await ownCards($)).find(card => card.id === r.agent)
+      const one = (await read($, todos)).find(card => card.id === r.agent)
       const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one), one?.said ?? [], one?.titles ?? {}).catch(() => ({ made: [] }))
       if (madeOfOld.size > 200) madeOfOld.delete(madeOfOld.keys().next().value ?? '')
       madeOfOld.set(r.id, listed)
@@ -742,7 +742,7 @@ const diffOf = async ($: EngineInterface, id: string): Promise<DiffOf | undefine
     const file = r.made?.code?.files?.find(one => diffPaneOf(one.path) === id)
     if (file) return { file, since: r.made?.code?.since ?? 0, owner: r.id }
   }
-  for (const one of await ownCards($)) {
+  for (const one of await read($, todos)) {
     const path = (one.wrote ?? []).find(path => diffPaneOf(path) === id)
     if (path) return { file: { path, inRepo: '', plus: 0, minus: 0 }, since: Math.floor((one.begunAt ?? one.startedAt) / 1000), owner: one.id }
   }
@@ -802,7 +802,7 @@ const diffView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   const showsWhole = isWhole || isNew
   const wholeText = got?.whole ?? ''
   const wholeCut = wholeText.length > DIFF_CHARS ? wholeText.slice(0, wholeText.lastIndexOf('\n', DIFF_CHARS)) : wholeText
-  const card = (await ownCards($)).find(one => one.id === owner)
+  const card = (await read($, todos)).find(one => one.id === owner)
   const result = card ? undefined : (await ownReports($)).find(r => r.id === owner)
   const folder = file.inRepo.includes('/') ? file.inRepo.slice(0, file.inRepo.lastIndexOf('/')) : file.path.slice(0, file.path.lastIndexOf('/'))
   const table = ui as Ui & { Code?: (props: { key?: string; source: string; path?: string; format?: 'source' | 'diff'; startLine?: number; wrap?: 'wrap' | 'truncate-end' }) => JSX.Element }

@@ -235,7 +235,7 @@ const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpo
 // Keeps what a finished piece of work reported, once
 // (`isPart`: a part a task handed in while at work, kept however short, as the task chose to hand it in)
 const saveReport = async ($: EngineInterface, card: Todo, text: string, isPart = false) => {
-  const one = (await ownCards($)).find(todo => todo.id === card.id) ?? card
+  const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
   const isKept = isPart || text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path))
   const kept = await loadReports($)
   const marked = mark(text)

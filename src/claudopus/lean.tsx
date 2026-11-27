@@ -281,7 +281,7 @@ type Quiet = { isQuiet: boolean; isRepeat: boolean }
 // The reports Claudopus took at a task's hand-back that the chat has not been given, for the tasks a notice names (or all), each
 // once: marked given, so a later notice of the same end repeats nothing (quietNotices)
 const reportsFor = async ($: EngineInterface, ids?: string[]) => {
-  const given = (await ownCards($)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
+  const given = (await read($, todos)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
   if (!given.length) return []
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
   await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
@@ -293,7 +293,7 @@ const reportsFor = async ($: EngineInterface, ids?: string[]) => {
 }
 // The parts of their results tasks handed in while at work that the chat has not been given, each once, the oldest first
 const partsFor = async ($: EngineInterface) => {
-  const given = (await ownCards($)).filter(one => one.partsForChat?.length)
+  const given = (await read($, todos)).filter(one => one.partsForChat?.length)
   if (!given.length) return []
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)))
   await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)

@@ -123,9 +123,11 @@ const draftDrawn = (key: string) => {
 // What a pane shows, as far as it moves while the person types: work that starts, finishes, asks, waits on an admin command, is cut
 // or stuck, or leaves after its pause, here or in another chat; workflows; boxes, gates and prompts that come or go; a Details
 // tab's own to-dos
+// (whether a card has a call running, not which: named by when it began, every call of every task was a new shape, and the
+// whole pane was drawn afresh for it)
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), keyAsksOf(one).map(ask => ask.at), one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running ? 1 : 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -141,7 +143,7 @@ const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, steps: _steps, quiet: _quiet, owes: _owes, ...rest } = one as Todo & Record<string, unknown>
   return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await ownCards($)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, await read($, reportsMark), (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates, [...lastCall].map(([agent, call]) => [agent, call.what])])
 const holdTimes = ($: EngineInterface) => {
   if (!isTyping) recordEvent($, 'hold')
   const made = (typing += 1)
@@ -201,7 +203,7 @@ const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
   const chats = await read($, others)
   // (only the cards that ask or wait on a gate: a card that merely starts or ends waits)
-  const cards = await ownCards($)
+  const cards = await read($, todos)
   const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, asksOf(one).map(ask => [ask.at, ask.replied?.at ?? 0]), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
   // (and what the person's own presses change once their write lands: a card dismissed, a result's question answered or set aside,
   // a task their answer starts again. Without them, a drawing made between the press and its write was kept while they used the
@@ -214,7 +216,7 @@ const personSign = async ($: EngineInterface) => {
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
     [...pictureIn.keys()], isUpdating, loadMark,
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
-    [...(await ownCards($)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+    [...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
 }
 // A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
@@ -327,7 +329,7 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   if (!isHeld && paneWork.size) {
     const shownPanes = new Set((await $.ui.panes().catch(() => [])).filter(pane => pane.isShown !== false).map(pane => pane.id))
     for (const pane of [...paneWork.keys()]) if (!shownPanes.has(pane)) paneWork.delete(pane)
-    const cards = paneWork.size ? await ownCards($) : []
+    const cards = paneWork.size ? await read($, todos) : []
     const live = liveSign([...paneWork.values()].flatMap(id => [id, ...cards.filter(kid => kid.parentId === id).map(kid => kid.id)]), now)
     if (live !== liveDrawn) ((liveDrawn = live), recordEvent($, 'redraw-live'), $.ui.invalidate('ui.render'))
   }
@@ -361,7 +363,7 @@ const dropDrafts = ($: EngineInterface, id: string, ask?: Ask) => {
 }
 const readDrafts = async ($: EngineInterface) => {
   const kept = ((await read($, draftsKept).catch(() => ({}))) ?? {}) as Record<string, string>
-  const ids = new Set((await ownCards($)).map(one => one.id))
+  const ids = new Set((await read($, todos)).map(one => one.id))
   const live = Object.entries(kept).filter(([key, value]) => typeof value === 'string' && ids.has(key.split('|')[0] ?? ''))
   for (const [key, value] of live) if (!drafts.has(key)) drafts.set(key, value)
   if (live.length !== Object.keys(kept).length) await update($, draftsKept, () => Object.fromEntries(live))
@@ -538,7 +540,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
   // (the question the box was opened on, of the card's open questions, as it is sent)
   const mark = barOpen?.kind === 'answer' && barOpen.id === id ? barOpen.mark : ''
   const run = (async () => {
-    const one = (await ownCards($)).find(card => card.id === id)
+    const one = (await read($, todos)).find(card => card.id === id)
     const files = [...new Set([...picked, ...(await pathsIn($, value))])]
     const ask = one ? (asksOf(one).find(other => askMark(other) === mark) ?? one.ask) : undefined
     if (one && ask && (value.trim() || files.length)) await answerAsk($, askView(one, ask), value, true, picked, files)
@@ -889,7 +891,7 @@ const filesNote = (files: string[]) =>
         .join('\n')}`
     : ''
 const changeTask = async ($: EngineInterface, id: string, said: string, picked: string[] = [], isNow = false) => {
-  const card = (await ownCards($)).find(one => one.id === id)
+  const card = (await read($, todos)).find(one => one.id === id)
   if (!card || (!said && !picked.length) || card.chat || card.parentId) return
   // A task the person stopped is carried on by their own message to it: the hold their Stop put on it is lifted for it alone
   const wasHeld = isHeld(card)
@@ -912,7 +914,7 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
   }
   const text = card.status === 'working' ? MESSAGE_SENT(words) : wasHeld ? STOPPED_ASKED(words) : CHANGE_ASKED(words)
   const sent = { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
-  const told = (await ownCards($)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
+  const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
   if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
   else await toEnded($, card, id, text, sent)
   await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`)))
@@ -1013,7 +1015,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   }
   // A task whose run ended a moment ago refuses the line: it is sent to it as a message instead, which starts it with it
   // Marked on its way once written, so a step that began before it never counts as reading it
-  const working = (await ownCards($)).find(card => card.id === one.id)?.status === 'working'
+  const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const told = working ? await tell($, target, to) : undefined
   // A press on a blocked command starts no task again and is never sent twice: a task at a step reads it there, and one that has
   // ended hears what the command printed when it ends (runit.tsx), or nothing of a command that was not run
@@ -1060,7 +1062,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   const target = sent.target ?? one.id
   // Judged on the card as it is now, not as the drawing pressed showed it (a held drawing may be older than a newer question), and
   // before the answer leaves anything: one that cannot be taken back stays answered, its waiting message and all
-  const now = (await ownCards($)).find(card => card.id === one.id)
+  const now = (await read($, todos)).find(card => card.id === one.id)
   if (!now || sentReplies.get(one.id) !== sent || !canTakeBack(now, await $.clock.now())) return
   // A message still waiting to start the work again loses this answer; one that carries only it goes
   const waiting = wakes.find(w => w.target === target && w.answers.some(a => a.one.id === one.id && a.sent.at === sent.at))
@@ -1101,7 +1103,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const at = await $.clock.now()
   let isHeld = false
   // Acted on from now while the work is started again with it; never on a card no run of its own will end
-  const listed = await ownCards($)
+  const listed = await read($, todos)
   const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
   await changeTodos($, list =>
     ((isHeld = false), list).map(card => (card.id === one.id && hasAsk(card, ask) ? ((isHeld = true), { ...mapAsk(card, ask, kept => ({ ...kept, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(kept.refused ? { talk: [...(kept.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) })), entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
@@ -1120,7 +1122,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(chatKey(one.id, ask))) (inChat.delete(chatKey(one.id, ask)), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`, ask.text))))
-  const working = (await ownCards($)).find(card => card.id === target)?.status === 'working'
+  const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
   const to = ask.refused ? `${REFUSAL_WORDS(ask.copy ?? ask.text, said)}${note}` : `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
@@ -1138,7 +1140,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[] }[] = []
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
   // A task the app's close cut off has no run to start again: the answer carries it on, as a fresh task told it (keep.tsx)
-  const list = await ownCards($)
+  const list = await read($, todos)
   const top = list.find(card => card.id === topOf(list, target))
   if (top && !top.chat && isInterrupted(top)) {
     sentReplies.set(one.id, { ...sent, to: 'work' })
@@ -1167,7 +1169,7 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
   // A task the person stopped is not started by an answer that was on its way
-  if (isHeld((await ownCards($)).find(one => one.id === wake.target))) return void (await log($, `task ${wake.target} not started with an answer: the person stopped it`))
+  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `task ${wake.target} not started with an answer: the person stopped it`))
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
@@ -1201,7 +1203,7 @@ const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes
   // A task a rewind brought over (its record is in the chat it came from) that Claude Code can't start again, and that no run of
   // this chat's is behind, can't be reached at all: its card ends so, and the chat has the words (keep.tsx). Any other answer that
   // could not go waits in the chat for the person's next message, as below
-  const list = await ownCards($)
+  const list = await read($, todos)
   const top = list.find(card => card.id === topOf(list, target))
   const isGone = UNRESUMABLE.test(reason) && top && !top.chat && Boolean(top.chatWas) && !(await $.agent.list().catch(() => [])).some(agent => agent.id === target && WORKING.includes(agent.status))
   if (top && isGone && (await cutUnreachable($, top.id, answers.map(({ sent }) => sent.text)))) {
@@ -1277,7 +1279,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   dropDrafts($, a.card.id, a.ask)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn($, to, a.card.id)
-  const helper = a.ask.from && a.ask.from !== to ? (await ownCards($)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
+  const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
   if (helper) await tell($, helper.id, `${who(true)} answered your question ("${a.ask.text}") in the chat, in their own words: ${a.words}`)
   redraw($)
 }
@@ -1300,7 +1302,7 @@ const replyRead = ($: EngineInterface, agentId: string) => {
 }
 // The person's messages to a task that a model step of it now holds are read from then: each one sent before the step began
 const markRead = async ($: EngineInterface, agentId: string) => {
-  if (!(await ownCards($)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
+  if (!(await read($, todos)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
   const now = await $.clock.now()
   const readNow = (entry: Entry): Entry => {
     if (!entry.isUnread || entry.at > now) return entry
@@ -1317,7 +1319,7 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   // The run that ends was started by the answer itself: it read it
   if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'work' && (sentReplies.set(card, { ...sent, to: 'read' }), redraw($)))
-  const one = (await ownCards($)).find(todo => todo.id === card)
+  const one = (await read($, todos)).find(todo => todo.id === card)
   if (sent?.to !== 'work' || !one) return
   const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
   await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
