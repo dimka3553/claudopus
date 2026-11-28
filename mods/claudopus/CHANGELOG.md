@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.326 · 28 November 2026
+- When a connector such as Higgsfield is missing or needs signing in, the chat now shows the app's own Connect button for you to press, whether you ask it to connect one or a task needs one. Before, the chat was not allowed to show it, and tasks gave you steps through Settings instead.
+
 ## 0.2.325 · 28 November 2026
 - A go-ahead you type in the chat while a change waits is read for what you mean, in whatever words, not by a list of words: talk of something else that happens to say push or release no longer counts, and a wording Claudopus did not know now does.
 - A question or go-ahead that waits for you now also shows in the chat with its buttons, not only in the panel: once, when its task stops for you or hands in its result, and a press there answers it.

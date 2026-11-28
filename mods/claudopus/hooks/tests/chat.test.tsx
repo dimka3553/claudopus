@@ -1860,11 +1860,21 @@ test("a chat's own thread may only read, run a single command in the background,
     { tool: 'Bash', command: 'cat /repo/src/nose.ts' },
     { tool: 'WebFetch', url: 'https://example.com', prompt: 'p' },
     { tool: 'mcp__other__write_file', path: '/repo/x' },
+    { tool: 'mcp__other__authenticate_and_send', to: 'x' },
   ].entries())
     expect((await $.tool.call({ ...call, tool_use_id: `n${i}` } as never)).deny).toContain('Start a fresh agent')
 
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 't2', prompt: 'fix the nose', subagent_type: 'general-purpose', model: 'opus' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', tool_use_id: 't3', recap: 'r' } as never)).deny).toBeUndefined()
+  // It brings up the app's own Connect button for a connector that is missing or needs signing in, which only the person's press
+  // uses (28 Nov: the registry was refused, and "authenticate it" showed Dima no button)
+  for (const [i, call] of [
+    { tool: 'mcp__mcp-registry__search_mcp_registry', keywords: ['higgsfield'] },
+    { tool: 'mcp__mcp-registry__suggest_connectors', uuids: ['u1'], keywords: ['videos'] },
+    { tool: 'mcp__claude_ai_Notion__authenticate' },
+    { tool: 'mcp__claude_ai_Notion__complete_authentication', callback_url: 'http://localhost/cb' },
+  ].entries())
+    expect((await $.tool.call({ ...call, tool_use_id: `c${i}` } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't4', command: 'ls', agentId: 'fork-1' } as never)).deny).toBeUndefined()
   // Work and its helpers are not held to the chat's reading: they read, write and run
   for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())

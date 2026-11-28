@@ -309,6 +309,12 @@ const SECRETS_MS = 60_000
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
 // Where a chat's words are: the person's own messages on their own, and the whole conversation, too long to read whole
 const WORDS_LINE = (id: string) => `${who(true)}'s own messages in the chat, word for word, the newest last: ${dir}/words/${id}.said.md. The chat's saved words, Claude's replies too, too long to read whole (search them): ${dir}/words/${id}.md`
+// A task that needs a connector that is missing or needs signing in has the chat show the app's own Connect button, which only the
+// person's press uses (28 Nov: a task gave Dima steps through the app's Settings for Higgsfield, and "authenticate it" showed no button)
+const CONNECT_FOR_CHAT = (title: string, id: string, connector: string) =>
+  `The task "${title}" needs the connector ${connector}, which is not connected here or needs signing in. Show {name} the app's own Connect button for it now, as your rules say, and write no steps for it. Once {name} has connected it, tell that task with SendMessage to "${id}".`
+const CONNECT_ASKED = (message: string) =>
+  `Nothing is on your card. Have the chat show {name} the app's own Connect button now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${message}\nOnly {name}'s press on that button connects it: never give them steps to connect it another way. Carry on with what does not need it, or end your step; the chat tells you once it is connected, and its tools then load with ToolSearch, or a general-purpose helper uses them.`
 // What the chat's model is told when its work asks the person something: the ask, its answers and pictures, with how to pass an
 // answer on, in a row of its own that starts no turn. The person sees it on the card, and nothing of it in the chat (17 Nov: a
 // notice line in the chat for every ask was among "these fucking shits within the chat")

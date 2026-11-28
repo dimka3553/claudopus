@@ -144,8 +144,18 @@ const toolHooks = (on: On) => {
 
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown; key?: unknown; from?: unknown }
+    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown; key?: unknown; from?: unknown; connector?: unknown }
     if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
+    // A connector that is missing or needs signing in is the chat's to show, with the app's own Connect button, which only the
+    // person's press uses: nothing goes on the card, and the task has the chat show it (a session can't send to itself, so the
+    // task sends it, as a new task of its own is handed back)
+    const connector = oneLine(typeof input.connector === 'string' ? input.connector : '').slice(0, 300)
+    if (connector) {
+      const cards = await read($, todos)
+      const top = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
+      await log($, `work ${e.agentId} needs the connector ${cut(connector, 60)}: handed to the chat to show its Connect button`)
+      return { result: named(CONNECT_ASKED(named(CONNECT_FOR_CHAT(top ? titleOf(top) : 'in the background', e.agentId, connector)))) }
+    }
     // The question is one line; what it is about goes with it, whole, so the person never answers an ask whose reason has not reached
     // them yet (a report reaches the chat only after the work ends). A question too long for one line is cut at a word on the card and
     // kept whole at the top of its details
