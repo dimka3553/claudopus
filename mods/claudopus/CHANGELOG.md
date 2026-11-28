@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.317 · 28 November 2026
+- The Progress chart no longer shows fewer squares as the panel gets wider: a wider chart now draws at least as many as a narrower one.
+
 ## 0.2.316 · 28 November 2026
 - Code copies whose work is merged are now removed even when they hold only what a build makes (a type cache, Next's or Vercel's own files) or a settings file the same as the main copy's, and when their branch was squashed onto main. On 28 Nov 18 merged copies had stayed for that.
 - A code copy that stays, because its work isn't merged or has unsaved changes, loses its installed packages and build folder once it has been left alone for two days. An install brings them back. These had kept 1 to 3 GB each.

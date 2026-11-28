@@ -136,7 +136,8 @@ export type ChartRow = ChartPart & { id: string; name: string; total: number; li
 // rows `head`, the north star; under them `foot`, the days. A square is one result, or more in a busy month; `since`, when
 // Claudopus came in, is a line down the rows in its month
 export const chartOf = (star: string, areas: ChartArea[], width: number, now: number, since = 0, back = 0, all = false) => {
-  const isWide = width >= 560
+  // (names beside the rows from 765, where three of the larger squares fit a day of the longest month)
+  const isWide = width >= 765
   const quoted = star.trim() ? `“${star.trim().replace(/^["“]+|["”]+$/g, '')}”` : ''
   const starSize = isWide ? 14 : 12.5
   // The north star on one line, or two of about the same length
@@ -160,7 +161,8 @@ export const chartOf = (star: string, areas: ChartArea[], width: number, now: nu
   const sq = isWide ? 4 : 3
   const gap = isWide ? 1.2 : 0.9
   const step = sq + gap
-  const per = Math.max(1, Math.floor((colW - 2) / step))
+  // (narrow, at most three, so a wider chart never draws fewer squares)
+  const per = Math.max(1, Math.min(isWide ? 99 : 3, Math.floor((colW - 2) / step)))
   // A square stands for more results once the busiest day would stand taller than this many rows of them
   const tallest = Math.max(1, ...shown.flatMap(row => row.counts))
   const unit = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find(u => Math.ceil(tallest / u) <= per * 24) ?? 1000
