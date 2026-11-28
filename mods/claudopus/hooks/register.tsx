@@ -1810,7 +1810,7 @@ const dropEvent = ($: EngineInterface, name: string) => runOn($, ['rm', '-f', `$
 const keepUp = async ($: EngineInterface, event: ProgressEvent, answer: Record<string, unknown>, places: string[]) => {
 if (event.kind === 'said') for (const id of places) await appendTo($, `${progressDir()}/areas/${id}.said.md`, saidEntry(event.at, '', event.text))
 const own = event.kind === 'said' ? starOf({ text: answer.star, own: true }) : undefined
-if (own?.text) await writeStar($, monthKey(event.at), own)
+if (own?.text) await writeStars($, [[monthKey(event.at), own]])
 const topic = event.kind === 'result' && event.topic ? await topicNamed($, event.topic) : ''
 if (!topic || !places.length) return
 const areas = (await readAreas($)).filter(area => places.includes(area.id)).slice(0, 2)
@@ -1969,24 +1969,28 @@ if (!(!entry.name.endsWith('.said.md') && names.has(entry.name.replace(/\.md$/, 
 return words.sort((a, b) => (a.at < b.at ? -1 : 1))
 }
 
-const writeStar = async ($: EngineInterface, month: string, star: { text: string; own: boolean }) => {
+const writeStars = async ($: EngineInterface, picks: [string, { text: string; own: boolean }][]) => {
 const now = await $.clock.now()
-await withProgressFiles($, async () => $.fs.write(`${progressDir()}/picture.json`, `${JSON.stringify(withStar(await readPicture($), month, star, now), null, 2)}\n`))
-await indexLog($, `north star of ${month} picked`)
-await progressMoved($)
+await withProgressFiles($, async () => $.fs.write(`${progressDir()}/picture.json`, `${JSON.stringify(picks.reduce((was, [month, star]) => withStar(was, month, star, now), await readPicture($)), null, 2)}\n`))
+const named = picks.filter(([, star]) => star.text).map(([month]) => month)
+if (named.length) await indexLog($, `north star of ${named.join(', ')} picked`), await progressMoved($)
 }
 const refreshStars = async ($: EngineInterface) => {
 if (starsTried) return
 starsTried = true
-const due = starsDue(await readPicture($), await $.clock.now())
+let picture = await readPicture($)
+const now = await $.clock.now()
+const due = starsDue(picture, now)
 if (!due.length) return
 const [words, { areas, entries }, results, topics] = await Promise.all([wordsSince($, Math.min(...due.map(one => one.from))), readProgress($), loadReports($), readIndex($)])
+const picks: [string, { text: string; own: boolean }][] = []
 for (const one of due.reverse()) {
-const prompt = starPrompt(await readPicture($), one, words, areas, entries, results, topics)
+const prompt = starPrompt(picture, one, words, areas, entries, results, topics)
 const r = prompt ? await $.model.complete({ model: 'sonnet', system: STAR_SYSTEM, prompt, maxTokens: 200, timeoutMs: 120_000 }).catch(() => undefined) : undefined
 const star = prompt ? starOf(r?.isAnswered ? answerJson(r.text) : undefined) : { text: '', own: false }
-if (star && (star.text || !one.isNow)) await writeStar($, one.month, star)
+if (star && (star.text || !one.isNow)) picks.push([one.month, star]), (picture = withStar(picture, one.month, star, now))
 }
+if (picks.length) await writeStars($, picks)
 }
 
 const asideTold = async ($: EngineInterface, title: string, prompt: string) => {
