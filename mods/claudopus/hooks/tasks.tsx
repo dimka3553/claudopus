@@ -23,12 +23,12 @@ const TABS: [TaskFilter, string][] = [
 // What a card is, for the tabs that pick among the cards up: 1 working, 2 waiting for the person, 3 delivered, 0 the rest (stopped,
 // failed, interrupted), which only All shows
 const KINDS: Partial<Record<TaskFilter, number[]>> = { working: [1], you: [2, 3] }
-// A long list shows this many rows at first and a row that shows as many more: two thousand finished tasks in one drawing would
-// be more than the app draws
+// A long list shows one page of this many rows at a time, with Newer and Older under it: the panel never holds more than a page,
+// as each press of the old Show more added 40 rows until the app refused the whole drawing (28 Nov)
 export const TASKS_PAGE = 40
-// What the person picked, kept while the mod runs: the tab, whether the search box is open and the words searched for, how many
-// rows a long list shows, and a count of presses that makes each button new after one
-export const tasksView = { filter: 'all' as TaskFilter, isFinding: false, find: '', most: TASKS_PAGE, n: 0 }
+// What the person picked, kept while the mod runs: the tab, whether the search box is open and the words searched for, the row a
+// long list's page begins at, and a count of presses that makes each button new after one
+export const tasksView = { filter: 'all' as TaskFilter, isFinding: false, find: '', from: 0, n: 0 }
 
 const isFound = (title: string) => !tasksView.find || title.toLowerCase().includes(tasksView.find.toLowerCase())
 // Whether a card up in the panel is drawn under the filter picked and the search
@@ -162,7 +162,7 @@ export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, su
           const n = filter === 'finished' ? 0 : (counts[filter] ?? 0)
           return (
             <Box key={`tab-${filter}`} flexDirection="column" flexShrink={0}>
-              <Button key={`tasks-${filter}-${tasksView.n}`} label={`${word}${n ? ` ${n.toLocaleString('en-US')}` : ''}`} plain {...(isOn ? {} : { dimColor: true, hover: { scope: `tasks-${filter}`, underline: true } })} onPress={pressed(acts, () => ((tasksView.filter = filter), (tasksView.most = TASKS_PAGE)))} />
+              <Button key={`tasks-${filter}-${tasksView.n}`} label={`${word}${n ? ` ${n.toLocaleString('en-US')}` : ''}`} plain {...(isOn ? {} : { dimColor: true, hover: { scope: `tasks-${filter}`, underline: true } })} onPress={pressed(acts, () => ((tasksView.filter = filter), (tasksView.from = 0)))} />
               {isDesk ? <Box height={LINE * 2} backgroundColor={isOn ? '#e8e6dc' : undefined} /> : null}
             </Box>
           )
@@ -174,8 +174,8 @@ export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, su
 }
 
 // A list with its heading: Finished (folded at the panel's bottom under All, open as its own tab) or Starred. Its rows the newest
-// first, as many as `most`, then a row that shows more
-export type ListLook = { head: string; side?: string; surface: string; isOpen: boolean; fold?: () => void; hotkey?: string; now: number; fill: string; lead: number | string; empty: string }
+// first, a page at a time (fewer on a pane drawn with less in it, `most`), then Newer and Older with where the page stands
+export type ListLook = { head: string; side?: string; surface: string; most?: number; isOpen: boolean; fold?: () => void; hotkey?: string; now: number; fill: string; lead: number | string; empty: string }
 export const tasksList = (ui: Ui, items: TaskItem[], look: ListLook, acts: TasksActs) => {
   const { Box, Button, Input, Text } = ui as unknown as Parts
   // Search, at the heading's right, opens a box under it for a name, which every list and card then answers (on the desktop: a
@@ -183,7 +183,9 @@ export const tasksList = (ui: Ui, items: TaskItem[], look: ListLook, acts: Tasks
   const canFind = Boolean(Input) && look.surface !== 'terminal'
   const isFinding = tasksView.isFinding || Boolean(tasksView.find)
   const shown = tasksView.find ? items.filter(one => isFound(one.title)) : items
-  const page = look.isOpen ? shown.slice(0, tasksView.most) : []
+  const most = look.most ?? TASKS_PAGE
+  const from = Math.max(0, Math.min(tasksView.from, Math.floor(Math.max(0, shown.length - 1) / most) * most))
+  const page = look.isOpen ? shown.slice(from, from + most) : []
   const head = `${look.head} ${shown.length.toLocaleString('en-US')}`
   const row = (one: TaskItem) => (
     <Box key={`task-row-${one.id}`} flexDirection="row" alignItems="flex-start" gap={1} backgroundColor={look.fill} paddingX={2} paddingY={1} flexShrink={0}>
@@ -211,11 +213,11 @@ export const tasksList = (ui: Ui, items: TaskItem[], look: ListLook, acts: Tasks
           {look.fold ? <Button key={`finished-fold-${tasksView.n}`} label={`${look.isOpen ? '▾' : '▸'} ${head}`} plain hotkey={look.hotkey} onPress={pressed(acts, look.fold)} /> : <Text bold>{head}</Text>}
         </Box>
         {look.side ? <Text dimColor>{look.side}</Text> : null}
-        {canFind ? <Button key={`tasks-find-${tasksView.n}`} label={isFinding ? 'Close' : 'Search'} plain dimColor hover={{ scope: 'tasks-find', underline: true }} onPress={pressed(acts, () => ((tasksView.isFinding = !isFinding), (tasksView.find = ''), (tasksView.most = TASKS_PAGE)))} /> : null}
+        {canFind ? <Button key={`tasks-find-${tasksView.n}`} label={isFinding ? 'Close' : 'Search'} plain dimColor hover={{ scope: 'tasks-find', underline: true }} onPress={pressed(acts, () => ((tasksView.isFinding = !isFinding), (tasksView.find = ''), (tasksView.from = 0)))} /> : null}
       </Box>
       {canFind && isFinding && Input ? (
         <Box paddingX={2}>
-          <Input key={`tasks-box-${tasksView.n}`} value={tasksView.find} placeholder="Search tasks by name" submitLabel="Search" autoFocus onInput={acts.typing} onSubmit={(value: string) => (acts.typed(), pressed(acts, () => ((tasksView.find = value.trim()), (tasksView.most = TASKS_PAGE)))())} />
+          <Input key={`tasks-box-${tasksView.n}`} value={tasksView.find} placeholder="Search tasks by name" submitLabel="Search" autoFocus onInput={acts.typing} onSubmit={(value: string) => (acts.typed(), pressed(acts, () => ((tasksView.find = value.trim()), (tasksView.from = 0)))())} />
         </Box>
       ) : null}
       {page.map(one => (one.draw ? one.draw() : row(one)))}
@@ -225,8 +227,10 @@ export const tasksList = (ui: Ui, items: TaskItem[], look: ListLook, acts: Tasks
         </Box>
       ) : null}
       {shown.length > page.length && page.length ? (
-        <Box paddingX={2} alignItems="flex-start">
-          <Button key={`tasks-more-${tasksView.n}`} label={`Show ${Math.min(TASKS_PAGE, shown.length - page.length)} more`} plain dimColor onPress={pressed(acts, () => (tasksView.most += TASKS_PAGE))} />
+        <Box flexDirection="row" alignItems="center" columnGap={2} paddingX={2}>
+          {from > 0 ? <Button key={`tasks-newer-${tasksView.n}`} label="Newer" plain dimColor hover={{ scope: 'tasks-newer', underline: true }} onPress={pressed(acts, () => (tasksView.from = Math.max(0, from - most)))} /> : null}
+          <Text dimColor>{`${(from + 1).toLocaleString('en-US')}–${(from + page.length).toLocaleString('en-US')} of ${shown.length.toLocaleString('en-US')}`}</Text>
+          {from + page.length < shown.length ? <Button key={`tasks-older-${tasksView.n}`} label="Older" plain dimColor hover={{ scope: 'tasks-older', underline: true }} onPress={pressed(acts, () => (tasksView.from = from + most))} /> : null}
         </Box>
       ) : null}
     </Box>
