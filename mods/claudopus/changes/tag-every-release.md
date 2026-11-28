@@ -1,1 +1,2 @@
 - Every release now checks that its version tag is on GitHub, and stops with a clear error naming the one command that finishes it when it is not. The 61 early versions that had no tag now have one, so all 331 are counted.
+- On Windows, a project whose version file holds only its number now gets a new number with each release, instead of the same one again.

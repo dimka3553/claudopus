@@ -191,7 +191,8 @@ trap 'exit 1' INT TERM HUP
 
 derived() { for d in $DERIVED; do [ "$1" = "$d" ] && return 0; done; return 1; }
 getv() { perl -ne 'if (/"version"\s*:\s*"(\d+\.\d+\.\d+)"/ || /^(\d+\.\d+\.\d+)\s*$/) { print $1; exit }' "$1"; }
-setv() { perl -0pi -e 's/("version"\s*:\s*")\d+\.\d+\.\d+"/${1}'"$2"'"/ or s/^\d+\.\d+\.\d+$/'"$2"'/m' "$1"; }
+# (a file holding only the number may end its line with \r, as a Windows checkout writes it, and is numbered all the same)
+setv() { perl -0pi -e 's/("version"\s*:\s*")\d+\.\d+\.\d+"/${1}'"$2"'"/ or s/^\d+\.\d+\.\d+(?=\r?$)/'"$2"'/m' "$1"; }
 # The version's tag, pushed and then read back from the remote: it is there on the release's very commit, or this says why not (a
 # tag the remote already has on another commit is never moved). A push that fails is tried again twice, a few seconds apart
 tag_on_remote() { git ls-remote "$REMOTE" "refs/tags/$1" 2>/dev/null | awk -v t="refs/tags/$1" '$2 == t "^{}" { p = $1 } $2 == t { d = $1 } END { print (p != "" ? p : d) }'; }
@@ -205,7 +206,7 @@ push_tag() {
     [ $try -gt 1 ] && sleep 2
     out=$(RELEASE_PUSH=1 git push -q "$REMOTE" "$want:refs/tags/$tag" 2>&1) && out=
   done
-  printf 'git said: %s' "$(printf '%s' "${out:-the push went through, but $REMOTE does not show the tag}" | tail -3 | tr '\n' ' ' | cut -c1-300)"
+  printf 'git said: %s' "$(printf '%s\n' "${out:-the push went through, but $REMOTE does not show the tag}" | grep -v '^To ' | tr -s '\r\n\t ' ' ' | cut -c1-300)"
   return 1
 }
 gained() { [ -n "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN" 2>/dev/null)" ] || return 0; git -C "$top" log --no-merges --format='  %h %s' "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN")..$REMOTE/$MAIN" | cut -c1-150 | head -12; }
