@@ -1941,7 +1941,21 @@ test('a gate allowed but not let through says so in its grey line, never a bare 
 })
 
 test("a short answer the person types in the chat is their press on the newest block it fits, or on the task it names: \"allow\" lets a held admin command run, \"release it\" is Release it on a go-ahead; a task's message, Claudopus's own, a long message and words that name no waiting task answer nothing; a command Claude Code blocked still runs only on the press, which its card and the chat say (24 Nov: \"it counts if I type allow\"); while a release waits, a plain go-ahead counts read more widely, \"all\" for every one, a question or a hold is told to the chat as no go-ahead, and a task's or Claudopus's \"push it\" presses nothing (28 Nov)", async ($, on) => {
-  const { list, bash, held, files, logged, clock, holding } = await gated($, on)
+  // The model that reads a message for what it means while a release waits, standing in: what it says of each message here
+  const READ: Record<string, string> = {
+    'release it and switch now so I can test': '{"go":"yes","which":[1],"more":true,"about":true}',
+    'is now all pushed?': '{"go":"no","which":[],"more":false,"about":true}',
+    "don't push yet": '{"go":"no","which":[],"more":false,"about":true}',
+    'yes, go': '{"go":"yes","which":[1],"more":false,"about":true}',
+    'push it so I can test': '{"go":"yes","which":[],"more":true,"about":true}',
+    'OK to all go push it': '{"go":"yes","which":"all","more":false,"about":true}',
+    'the push notifications look good': '{"go":"no","which":[],"more":false,"about":false}',
+    'ship it, I think': 'I am not sure what they mean.',
+  }
+  const isReading = (e: { system?: string }) => Boolean(e.system?.startsWith('You read one message a person typed'))
+  const readOf = (e: { system?: string; prompt: string }) => (isReading(e) ? (READ[/"""\n([\s\S]*)\n"""$/.exec(e.prompt)?.[1] ?? ''] ?? '{"go":"no","which":[],"more":false,"about":false}') : undefined)
+  const { list, bash, held, files, logged, clock, holding, completed } = await gated($, on, {}, { complete: readOf })
+  const readings = () => completed.filter(isReading)
   const say = async (text: string, origin: unknown = composer) => ((await $.prompt.submit({ text, wait: false, origin } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   const typedLog = () => (files.get(`${MEMORY}/log.md`) ?? '').split('\n').filter(line => line.includes('typed answer'))
   // An admin command waits on the task's card
@@ -1994,7 +2008,7 @@ test("a short answer the person types in the chat is their press on the newest b
   expect(await say('release it')).toContain('is their answer "Release it" to the task "Fix the hosts file"\'s question: Release the nose fix?')
   expect(files.get(`${MEMORY}/log.md`)).toContain('release of fix-nose from /repo/wt allowed once for a1')
 
-  // While a release waits, a plain go-ahead counts, read more widely (typed-release.test.tsx has each phrase): first a release the
+  // While a release waits, any other message is read for what it means by a model (typed-release.test.tsx has its answers): first a release the
   // admin gate holds for the nose task, its Allow pressed by a message that says more, which the chat may pass on to the task
   const gate = $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a2', command: 'hold xr1; /plug/claudopus/bin/release' } as never) as Promise<{ deny?: string }>
   expect(await until(async () => keyed(list, 'gate-r1-r0-once'))).toBeDefined()
@@ -2016,13 +2030,21 @@ test("a short answer the person types in the chat is their press on the newest b
   const asked = await goAhead()
   for (const typed of ['is now all pushed?', "don't push yet"]) {
     const told = await say(typed)
-    expect(told).toContain(`From Claudopus: the release of the task "Fix the hosts file" waits for Sam's go-ahead, and their message "${typed}" did not give it. If the message is about that release, begin your reply with one short line saying it is not pushed yet and waits for their yes, which they give by typing yes in the chat or pressing Release it above the chat, then answer the rest of the message; if it is about something else, say nothing of the release.`)
+    expect(told).toContain(`From Claudopus: the release of the task "Fix the hosts file" waits for Sam's go-ahead, and their message "${typed}" did not give it. If the message is about that release, begin your reply with one short line saying it is not pushed yet and waits for their yes, which they give by typing yes in the chat or pressing Release it, then a line of its own holding only \`“Fix the hosts file” is waiting for you.\`, which Claudopus draws as that card's question with its buttons, then answer the rest of the message; if it is about something else, say nothing of the release.`)
     expect(told).toContain('A message of yours to the task approves nothing.')
   }
-  const taken = typedLog().length
+  // A message about something else, though it holds a word such as push, presses nothing and tells the chat nothing; one the
+  // model gives no reading of presses nothing, and the chat is told the release waits
+  expect(await say('the push notifications look good')).not.toContain('go-ahead')
+  expect(await say('ship it, I think')).toContain('did not give it')
+  expect(Boolean(await list.find({ type: 'Text', text: asked }))).toBe(true)
+  // The model is given the person's own message and the name the chat gave the task, never the task's own question
+  expect(readings().at(-1)?.prompt).toBe('Waiting for the go-ahead:\n1. Fix the hosts file\n\nThe person\'s message:\n"""\nship it, I think\n"""')
+  // and is never asked about a task's message or Claudopus's own, which press nothing
+  const [taken, read] = [typedLog().length, readings().length]
   await say('push it', { kind: 'peer' })
   await say('push it', { kind: 'plugin' })
-  expect([typedLog().length, Boolean(await list.find({ type: 'Text', text: asked }))]).toEqual([taken, true])
+  expect([typedLog().length, readings().length, Boolean(await list.find({ type: 'Text', text: asked }))]).toEqual([taken, read, true])
   const yes = await say('yes, go')
   expect(yes).toContain(`is their go-ahead, taken as their press on "Release it" on the task "Fix the hosts file"'s question: ${asked}`)
   expect(yes).toContain('send it to no task')

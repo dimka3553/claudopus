@@ -245,6 +245,66 @@ const quoteOf = ($: EngineInterface, ui: Ui, key: string, words: string) => {
 // (a page served on this computer is named as this computer is: This PC on Windows)
 const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind === 'This Mac' ? `T${thisMac().slice(1)}` : link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
 
+// What waits for the person on a card and is answered with a button: its questions and permissions, never a password, a key or
+// the disk
+const pressNeeds = ($: EngineInterface, card: Todo, surface: string, now: number) =>
+  needsOf($, asPressed(card), surface, now).filter(need => (need.kind === 'permission' || need.kind === 'question') && !need.isActing && need.buttons.some(button => !button.isOpener))
+// Said in the chat already, by Claudopus or the chat, each by its block and when it was asked: said once
+const waitsSaid = new Set<string>()
+// One asked longer ago than this is no news: after an update of the mod, what has waited for hours is not said again
+const WAITS_FRESH = 15 * 60_000
+// The line for each card of this chat's that asks the person something not yet said in the chat, for a turn only a paused
+// task's notice started (work.tsx); nothing when there is none
+const waitsToSay = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  const lines: string[] = []
+  for (const card of (await read($, todos)).filter(one => !one.parentId && !one.chat)) {
+    const needs = pressNeeds($, card, '', now)
+    if (!needs.some(need => !waitsSaid.has(`${need.id}:${need.at}`) && now - need.at < WAITS_FRESH)) continue
+    for (const need of needs) waitsSaid.add(`${need.id}:${need.at}`)
+    lines.push(WAITS_LINE(titleOf(card)))
+  }
+  if (lines.length) await log($, `said in the chat, with no model asked, what waits for ${who()}: ${lines.length === 1 ? 'one card' : `${lines.length} cards`}`)
+  return [...new Set(lines)].join('\n\n')
+}
+// A reply that holds such a line: each is taken out of its words and drawn under them as its card's question with its buttons,
+// the very block its card has, and once that is answered as one grey line (memory.tsx draws the two). Nothing for a reply with
+// no such line
+const waitsIn = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string } }, ui: Ui) => {
+  const lines = e.props.text.split('\n')
+  if (!dir || isOff || !lines.some(line => WAITS_TITLE.test(line.trim()))) return undefined
+  const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
+  const now = await $.clock.now()
+  const { Box, Button, Text } = ui
+  const blocks: JSX.Element[] = []
+  const held: string[] = []
+  for (const line of lines) {
+    const title = WAITS_TITLE.exec(line.trim())?.[1]
+    // The card of that name that asks something, else the newest of that name; a line that names no card stays words
+    const named = title === undefined ? [] : cards.filter(one => titleOf(one) === title)
+    const card = named.find(one => pressNeeds($, one, e.surface, now).length) ?? named.at(-1)
+    if (title === undefined || !card) {
+      held.push(line)
+      continue
+    }
+    const needs = pressNeeds($, card, e.surface, now)
+    for (const need of needs) waitsSaid.add(`${need.id}:${need.at}`)
+    const n = blocks.length
+    blocks.push(
+      <Box key={`waits-${n}`} flexDirection="column" gap={1}>
+        <Box key="waits-head" flexDirection="row">
+          <Text color={taskColour(card.id) ?? NEEDS}>● </Text>
+          <Button key={`waits-open-${card.id}-${presses}`} plain hover={{ scope: `waits-open-${n}-${card.id}`, underline: true }} onPress={() => openWork($, card.id)}>
+            <Text bold>{cut(title, 60)}</Text>
+          </Button>
+        </Box>
+        {needs.length ? needs.map(need => needBlock($, ui, need, { surface: e.surface })) : <Text key={`waits-done-${n}`} dimColor>✓ Answered</Text>}
+      </Box>,
+    )
+  }
+  return blocks.length ? { rest: held.join('\n').trim(), blocks } : undefined
+}
+
 // A chat reply as drawn, with its task's box around it while colours are on and its links at its end while links are on
 const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {
   if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply

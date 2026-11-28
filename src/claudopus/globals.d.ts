@@ -463,8 +463,12 @@ declare global {
   export import isOutsideAll = M22.isOutsideAll
   export import OUTSIDE_COMMAND = M22.OUTSIDE_COMMAND
   export import refusedAim = M22.refusedAim
-  export import chooseReleases = M23.chooseReleases
-  export import releaseReading = M23.releaseReading
+  export import chosenBy = M23.chosenBy
+  export import GO_AHEAD_MODEL = M23.GO_AHEAD_MODEL
+  export import GO_AHEAD_SYSTEM = M23.GO_AHEAD_SYSTEM
+  export import GO_AHEAD_WAIT = M23.GO_AHEAD_WAIT
+  export import goAheadPrompt = M23.goAheadPrompt
+  export import goAheadRead = M23.goAheadRead
   export import TYPED_GO_AHEAD = M23.TYPED_GO_AHEAD
   export import TYPED_NOT_GIVEN = M23.TYPED_NOT_GIVEN
   export import TYPED_TALK = M23.TYPED_TALK
@@ -556,6 +560,8 @@ declare global {
   export import TYPED_ANSWERED = M24.TYPED_ANSWERED
   export import TYPED_PRESS_ONLY = M24.TYPED_PRESS_ONLY
   export import TYPED_UNSURE = M24.TYPED_UNSURE
+  export import WAITS_LINE = M24.WAITS_LINE
+  export import WAITS_TITLE = M24.WAITS_TITLE
   export import drifted = M24.drifted
   export import framed = M24.framed
   export import quotedItems = M24.quotedItems

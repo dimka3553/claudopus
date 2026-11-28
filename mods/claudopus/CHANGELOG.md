@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.325 · 28 November 2026
+- A go-ahead you type in the chat while a change waits is read for what you mean, in whatever words, not by a list of words: talk of something else that happens to say push or release no longer counts, and a wording Claudopus did not know now does.
+- A question or go-ahead that waits for you now also shows in the chat with its buttons, not only in the panel: once, when its task stops for you or hands in its result, and a press there answers it.
+
 ## 0.2.324 · 28 November 2026
 - Refresh, beside Open panel and Close panel above the chat, puts the panel back as it first opens: the All tab, no search, the first page of every list, nothing unfolded or scrolled, every other tab of Claudopus's closed, and everything drawn afresh. Your tasks, results, stars and memory stay as they are. A tab Claudopus couldn't show has Refresh too.
 
