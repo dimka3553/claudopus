@@ -40,6 +40,11 @@ export type ColourIndex = {
    * to it or asked about it in, and what they wrote to it on its card. A reply quotes the newest of its task's before it (quoteFor).
    */
   said: Record<string, Said[]>
+  /**
+   * The replies, by row id and by the hash of their text, that carry on from an earlier reply of the same turn about the same
+   * tasks, as when the chat writes a line, starts a task and writes another: drawn under the first with no name or quote again.
+   */
+  more?: Record<string, true>
 }
 
 /**
@@ -527,6 +532,7 @@ export class Builder {
     const said = new Map<string, Said[]>()
     const sayTo = (id: string, row: number, text: string, until?: number) => said.set(id, [...(said.get(id) ?? []), { row, text, ...(until === undefined ? {} : { until }) }])
     const rows: Record<string, number> = {}
+    const more: Record<string, true> = {}
     const heardWords = heard.map(personWords).filter(Boolean)
     const heardAt = (text: string) => heardWords.map(wordsOnly).lastIndexOf(wordsOnly(text))
     // The newest of the person's messages each task was given, by its place among those messages
@@ -575,6 +581,7 @@ export class Builder {
         sayTo(gift.id, gift.row, gift.text, many ? end : undefined)
         newestHeard.set(gift.id, Math.max(newestHeard.get(gift.id) ?? -1, heardAt(gift.text)))
       }
+      const told = new Set<string>()
       for (const reply of replied) {
         let mine = ids
         if (ids.length > 1) {
@@ -589,6 +596,13 @@ export class Builder {
         if (reply.uuid) rows[reply.uuid] = reply.row
         rows[hash] = reply.row
         if (!mine.length) continue
+        // The second reply of a turn about the same tasks carries on from the first (28 Nov, the person, of a line before a task
+        // was started and another after: "This could be, by the way, one message")
+        if (told.has(mine.join())) {
+          if (reply.uuid) more[reply.uuid] = true
+          more[hash] = true
+        }
+        told.add(mine.join())
         if (reply.uuid) replies[reply.uuid] = mine
         if (!clashed.has(hash)) {
           const was = texts[hash]
@@ -624,6 +638,6 @@ export class Builder {
     }
     // Each task's, in the order they came, the newest dozen
     const sent = Object.fromEntries([...said].map(([id, list]) => [id, [...list].sort((a, b) => a.row - b.row).slice(-16)]))
-    return { tasks, replies, texts, rows, said: sent }
+    return { tasks, replies, texts, rows, said: sent, more }
   }
 }

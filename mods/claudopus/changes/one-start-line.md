@@ -1,0 +1,1 @@
+- When the chat starts a task or passes your message on, it now says so in one line, after it has done it, not in one line before and another after. If it still writes two, the second carries on under the first without the task's name and your message again.

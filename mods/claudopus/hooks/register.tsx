@@ -4125,12 +4125,15 @@ bit.id ? (
 </Box>
 )
 const kind: Kind = isResult ? (isPart ? 'part' : 'result') : 'other'
+const isMore = kind === 'other' && Boolean(colourIndex.more?.[e.requestId] ?? colourIndex.more?.[hash])
 return (
 <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind, first)} paddingX={1} gap={1}>
+{isMore ? null : (
 <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
 {ids.map(id => headOf(id, kind))}
 </Box>
-{quoteOn(first)}
+)}
+{isMore ? null : quoteOn(first)}
 {reply}
 {links}
 </Box>
