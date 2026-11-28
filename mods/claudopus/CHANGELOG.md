@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.332 · 29 November 2026
+- Every release now checks that its version tag is on GitHub, and stops with a clear error naming the one command that finishes it when it is not. The 61 early versions that had no tag now have one, so all 331 are counted.
+- On Windows, a project whose version file holds only its number now gets a new number with each release, instead of the same one again.
+
 ## 0.2.331 · 29 November 2026
 - When the chat starts a task or passes your message on, it now says so in one line, after it has done it, not in one line before and another after. If it still writes two, the second carries on under the first without the task's name and your message again.
 - A result that is a file for you to read, such as a document or a post, now reaches the chat with that file to click open: the task names it in its short result, and where it did not, the chat sends it. A short result no longer points at text the chat does not show.
