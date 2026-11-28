@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.322 · 28 November 2026
+- The north star on Progress is now the bigger vision your work serves, in at most ten words, never one month's task or plan, and it's never cut off mid-sentence. Months already picked the old way are picked again.
+
 ## 0.2.321 · 28 November 2026
 - A task's result reaches the chat as a few short lines: what changed, whether it is live, and what you have to do. The rest stays in the saved result, which Result on the reply opens.
 - The chat says nothing of a task's progress, never says back what you asked, and never says something is being pushed before it is.
