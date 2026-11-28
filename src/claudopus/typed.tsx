@@ -4,7 +4,7 @@
 // Claudopus sends. A message that fits more than one named card, or a long one, answers nothing. A command Claude Code blocked runs
 // only on the person's own press on its card (runit.tsx): a typed answer to it answers nothing and the chat says so. Keys and
 // passwords are never typed in the chat (24 Nov, the person: "it counts if I type allow ... in any of the subagents if they are asking")
-// While a release waits, a plain go-ahead to release counts too, read more widely (typed-release.ts): 28 Nov, a release waited on
+// While a release waits, any other message is read for what it means by a small model (typed-release.ts): 28 Nov, a release waited on
 // its card far down the panel while the person typed "push all so I can test", "release it and switch now so I can test", "OK to
 // all go push it" and "is now all pushed?"; none counted, each went on to the task, nothing was pushed and nothing said why
 
@@ -133,26 +133,36 @@ const exactAnswer = async ($: EngineInterface, typed: string): Promise<string | 
   await log($, `typed answer "${cut(oneLine(typed), 40)}" taken as "${one.button.label}" on ${one.card?.id ?? 'this chat'}`)
   return named(TYPED_ANSWERED(typed, one.button.label, where, cut(oneLine(one.need.text), 160)))
 }
-// The wider reading while a release waits (typed-release.ts): a plain go-ahead presses it; a message about releasing that gave
-// none is told as that
+// While a release waits, any other message of the person's is read for what it means (typed-release.ts): a small model says
+// whether it gives the go-ahead, for which release, and whether it asks for more. A go-ahead presses it; a message about
+// releasing that gave none, or one the model gave no reading of, is told to the chat as that, and nothing is pressed. The model
+// is given the message and the names the chat gave the waiting tasks, never a task's own words
 const releaseAnswer = async ($: EngineInterface, typed: string): Promise<string | undefined> => {
   if (typed.length > TYPED_TALK) return undefined
   const waits = releasesOf($, await read($, todos), await $.clock.now())
   if (!waits.length) return undefined
-  const reading = releaseReading(typed)
   const said = cut(oneLine(typed), TYPED_WIDEST)
   const short = cut(oneLine(typed), 40)
   const what = (one: ReleaseWait) => (one.title ? `the task "${one.title}"` : `this chat's own "${one.need.text}"`)
   const pressable = waits.filter(one => !one.isPressOnly)
+  // (with only releases Claude Code blocked waiting, the message is still read, to say that only a press runs them)
+  const listed = pressable.length ? pressable : waits
+  const notGiven = () => (pressable.length ? named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label })))) : undefined)
+  const answer = await $.model.complete({ model: GO_AHEAD_MODEL, system: GO_AHEAD_SYSTEM, prompt: goAheadPrompt(typed, listed.map(one => one.title || 'a release of this chat\'s own')), maxTokens: 120, timeoutMs: GO_AHEAD_WAIT }).catch(() => undefined)
+  const reading = answer?.isAnswered ? goAheadRead(answer.text, listed.length) : undefined
+  if (!reading) {
+    await log($, `typed answer "${short}" not read while a release waits: the model gave no reading of it, so nothing was pressed`)
+    return notGiven()
+  }
   const blocked = waits[waits.length - 1]
-  if (reading.counts && !pressable.length && blocked) {
+  if (reading.go && !pressable.length && blocked) {
     await log($, `typed answer "${short}" not taken: the release that waits is one Claude Code blocked, which only a press runs`)
     return named(TYPED_PRESS_ONLY(said, blocked.title, cut(oneLine(blocked.need.command ?? ''), 160)))
   }
-  const { chosen, more, unsure } = reading.counts ? chooseReleases(reading, pressable) : { chosen: [], more: [] }
-  if (unsure) {
+  const { chosen, isUnsure } = chosenBy(reading, pressable)
+  if (isUnsure) {
     await log($, `typed answer "${short}" fits more than one release, so it answered nothing`)
-    return named(TYPED_WHICH_RELEASE(said, [...new Set(unsure.map(what))]))
+    return named(TYPED_WHICH_RELEASE(said, [...new Set(pressable.map(what))]))
   }
   if (chosen.length) {
     for (const one of chosen) one.button.onPress({ surface: '' })
@@ -161,9 +171,9 @@ const releaseAnswer = async ($: EngineInterface, typed: string): Promise<string 
       if (!one.need.id.startsWith('ask-')) pressedLine($, one.card?.id ?? '', one.button.label, '', `You typed “${short}” in the chat`)
       await log($, `typed answer "${short}" taken as "${one.button.label}" on ${one.card?.id ?? 'this chat'}`)
     }
-    return named(TYPED_GO_AHEAD(said, chosen.map(one => ({ label: one.button.label, where: one.title ? `the task "${one.title}"'s` : "this chat's own", asked: cut(oneLine(one.need.text), 160) })), more.length > 0))
+    return named(TYPED_GO_AHEAD(said, chosen.map(one => ({ label: one.button.label, where: one.title ? `the task "${one.title}"'s` : "this chat's own", asked: cut(oneLine(one.need.text), 160) })), reading.more))
   }
-  if (!reading.isTalk || !pressable.length) return undefined
+  if (!reading.about) return undefined
   await log($, `typed answer "${short}" is about releasing but gave no go-ahead, so the chat is told the release waits`)
-  return named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label }))))
+  return notGiven()
 }

@@ -1,0 +1,1 @@
+- A go-ahead you type in the chat while a change waits is read for what you mean, in whatever words, not by a list of words: talk of something else that happens to say push or release no longer counts, and a wording Claudopus did not know now does.

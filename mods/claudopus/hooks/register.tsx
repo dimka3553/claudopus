@@ -39,7 +39,7 @@ import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from
 import { finishedOf, isStarred, rowStar, starButton, starLine, starMoved, starredCount, starredOf, stars, STARS_FILE, STARS_TRIP, starsTook, starsUnion, taskShows, tasksBar, tasksList, tasksView } from './tasks'
 import type { StarSeen, TaskItem, TasksActs } from './tasks'
 import { addedFolders, CHANGE_TOOLS, FOLDER_ANSWERED, FOLDER_ASK, FOLDER_DETAILS, FOLDER_RULE, isInFolder, isOutsideAll, OUTSIDE_COMMAND, refusedAim } from './outside'
-import { chooseReleases, releaseReading, TYPED_GO_AHEAD, TYPED_NOT_GIVEN, TYPED_TALK, TYPED_WHICH_RELEASE, TYPED_WIDEST } from './typed-release'
+import { chosenBy, GO_AHEAD_MODEL, GO_AHEAD_SYSTEM, GO_AHEAD_WAIT, goAheadPrompt, goAheadRead, TYPED_GO_AHEAD, TYPED_NOT_GIVEN, TYPED_TALK, TYPED_WHICH_RELEASE, TYPED_WIDEST } from './typed-release'
 import { AFAR_RULE, AGAIN_BOX, AGAIN_IN, ANSWERED_IN_CHAT, ANSWER_ALREADY_SENT, ANSWER_FOR_CHAT_RELAY, ARTIFACT_ICON, ASK_KEY_FIELD, BOOK_ALONE, BRIEF, CARRY_PROMPT, CHANGE_TOLD, CHANGE_WHAT, CHAT_SEND_BACKGROUND, CHROME_COPIED, CODE_ICON, DRIVE_LINE, DRIVE_PART, DRIVE_PLAIN, DRIVE_ROOT, DRIVE_SPACED, DRIVE_TICKED, FORGET_KEPT, FROM, GATE_IN_CHAT, HELPERS_STARTED, HELPER_ALONE, HELPER_REPORT_TAKEN, HELPER_RESULT, KEEP, KEEP_AGENTS, KEEP_RULES, LINK_ICON, LOOKUP_RUN, LOOK_NOW, LOST_FOR_YOU, MAY_NOT_STOP, NOTHING_TO_PASTE, NOT_HANDED_HELPERS, NOT_HANDED_LONG, NOT_HANDED_RUNS, NOT_HANDED_TODOS, NO_BOXES, NO_DETACH, NO_FOLLOW, NO_MEMORY, NO_PERSON_WAIT, NO_PUSH, NO_READ, NO_RUNNER_MOVED, OWED, PANEL_RULE, PART_FOR_CHAT, PART_FROM_HELPER, PART_SENT, PART_TAKEN, PASTED, PASTE_LINUX, PATH_LINE, PATH_PLAIN, PATH_SPACED, PATH_TICKED, REFUSED, RELEASE_PRESSED, REPLY_HOLDS, REPORT_FOR_CHAT, REPORT_FRAMED, REPORT_IN_CHAT, REPORT_TAKEN, RESUMED_BY_ANSWER, RETRY_TEXT, RUN_RESUMED, SEND_BACKGROUND, SERIAL_RUNS, SHORT_CHARS, SHORT_LINES, SHORT_RULE, SHOWN_LONG, SHOWN_SHORT, STOPPED_BY_YOU, STOPPED_EARLIER, STOPPED_REFUSED, STUCK_ASK, TYPED_ANSWERED, TYPED_PRESS_ONLY, TYPED_UNSURE, drifted, framed, quotedItems, shortOf, withShortRule, wordCountOf } from './texts'
 const LIST = 'claudopus'
 const LIST_TITLE = 'Claudopus'
@@ -11645,20 +11645,27 @@ const releaseAnswer = async ($: EngineInterface, typed: string): Promise<string 
 if (typed.length > TYPED_TALK) return undefined
 const waits = releasesOf($, await read($, todos), await $.clock.now())
 if (!waits.length) return undefined
-const reading = releaseReading(typed)
 const said = cut(oneLine(typed), TYPED_WIDEST)
 const short = cut(oneLine(typed), 40)
 const what = (one: ReleaseWait) => (one.title ? `the task "${one.title}"` : `this chat's own "${one.need.text}"`)
 const pressable = waits.filter(one => !one.isPressOnly)
+const listed = pressable.length ? pressable : waits
+const notGiven = () => (pressable.length ? named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label })))) : undefined)
+const answer = await $.model.complete({ model: GO_AHEAD_MODEL, system: GO_AHEAD_SYSTEM, prompt: goAheadPrompt(typed, listed.map(one => one.title || 'a release of this chat\'s own')), maxTokens: 120, timeoutMs: GO_AHEAD_WAIT }).catch(() => undefined)
+const reading = answer?.isAnswered ? goAheadRead(answer.text, listed.length) : undefined
+if (!reading) {
+await log($, `typed answer "${short}" not read while a release waits: the model gave no reading of it, so nothing was pressed`)
+return notGiven()
+}
 const blocked = waits[waits.length - 1]
-if (reading.counts && !pressable.length && blocked) {
+if (reading.go && !pressable.length && blocked) {
 await log($, `typed answer "${short}" not taken: the release that waits is one Claude Code blocked, which only a press runs`)
 return named(TYPED_PRESS_ONLY(said, blocked.title, cut(oneLine(blocked.need.command ?? ''), 160)))
 }
-const { chosen, more, unsure } = reading.counts ? chooseReleases(reading, pressable) : { chosen: [], more: [] }
-if (unsure) {
+const { chosen, isUnsure } = chosenBy(reading, pressable)
+if (isUnsure) {
 await log($, `typed answer "${short}" fits more than one release, so it answered nothing`)
-return named(TYPED_WHICH_RELEASE(said, [...new Set(unsure.map(what))]))
+return named(TYPED_WHICH_RELEASE(said, [...new Set(pressable.map(what))]))
 }
 if (chosen.length) {
 for (const one of chosen) one.button.onPress({ surface: '' })
@@ -11667,11 +11674,11 @@ for (const one of chosen) {
 if (!one.need.id.startsWith('ask-')) pressedLine($, one.card?.id ?? '', one.button.label, '', `You typed “${short}” in the chat`)
 await log($, `typed answer "${short}" taken as "${one.button.label}" on ${one.card?.id ?? 'this chat'}`)
 }
-return named(TYPED_GO_AHEAD(said, chosen.map(one => ({ label: one.button.label, where: one.title ? `the task "${one.title}"'s` : "this chat's own", asked: cut(oneLine(one.need.text), 160) })), more.length > 0))
+return named(TYPED_GO_AHEAD(said, chosen.map(one => ({ label: one.button.label, where: one.title ? `the task "${one.title}"'s` : "this chat's own", asked: cut(oneLine(one.need.text), 160) })), reading.more))
 }
-if (!reading.isTalk || !pressable.length) return undefined
+if (!reading.about) return undefined
 await log($, `typed answer "${short}" is about releasing but gave no go-ahead, so the chat is told the release waits`)
-return named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label }))))
+return notGiven()
 }
 const measure = async ($: EngineInterface) => {
 const context = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context
