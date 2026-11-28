@@ -1,0 +1,1 @@
+- The north star on Progress is now the bigger vision your work serves, in at most ten words, never one month's task or plan, and it's never cut off mid-sentence. Months already picked the old way are picked again.

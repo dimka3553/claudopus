@@ -3,8 +3,8 @@
 // the files, keeps the queue and runs the indexer; the Progress tab draws from them
 
 // A month's north star ('YYYY-MM'): picked from all that month's work, or the person's own words for it (`own`), with when it was
-// picked; its text is '' where the month left nothing to go on
-export type ProgressStar = { month: string; text: string; own: boolean; picked: string }
+// picked and by which way of picking (`v`, STAR_V); its text is '' where the month left nothing to go on
+export type ProgressStar = { month: string; text: string; own: boolean; picked: string; v: number }
 // The north star (the newest month's), each month's newest first, and the goals, each in the person's own words with the day they
 // were said
 export type ProgressPicture = { star: { text: string; said: string }; stars: ProgressStar[]; goals: { id: string; name: string; words: string; said: string }[]; updated: string }
@@ -103,7 +103,7 @@ export const pictureFrom = (text: string): ProgressPicture => {
     .map(goal => ({ id: goal.id, name: goal.name, words: textOr(goal.words), said: textOr(goal.said) }))
   const stars = (Array.isArray(raw?.stars) ? raw.stars : [])
     .filter(one => one && isText(one.month) && /^\d{4}-\d\d$/.test(one.month))
-    .map(one => ({ month: one.month, text: textOr(one.text), own: one.own === true, picked: textOr(one.picked) }))
+    .map(one => ({ month: one.month, text: textOr(one.text), own: one.own === true, picked: textOr(one.picked), v: typeof one.v === 'number' ? one.v : 1 }))
     .sort((a, b) => (a.month < b.month ? 1 : -1))
   return { star, stars, goals, updated: textOr(raw?.updated) }
 }
@@ -367,6 +367,9 @@ export const monthKey = (at: number) => {
 }
 // How many months back a north star is picked
 export const STAR_MONTHS = 6
+// The way of picking: a north star picked an older way is picked again, unless it is the person's own words (2: the bigger vision,
+// 28 Nov, after the first way gave one month's task, cut off at 16 words)
+export const STAR_V = 2
 // The months to pick now, this one first, each with the time its work is read from and to
 export const starsDue = (picture: ProgressPicture, now: number) => {
   const today = new Date(now)
@@ -375,13 +378,13 @@ export const starsDue = (picture: ProgressPicture, now: number) => {
     const first = new Date(today.getFullYear(), today.getMonth() - back, 1).getTime()
     const next = new Date(today.getFullYear(), today.getMonth() - back + 1, 1).getTime()
     const had = picture.stars.find(one => one.month === monthKey(first))
-    if (!had || (back > 0 && !had.own && !(Date.parse(had.picked) >= next))) due.push({ month: monthKey(first), from: back ? first : Math.min(first, now - 14 * 86_400_000), to: back ? next : now + 1, isNow: !back })
+    if (!had || (!had.own && had.v !== STAR_V) || (back > 0 && !had.own && !(Date.parse(had.picked) >= next))) due.push({ month: monthKey(first), from: back ? first : Math.min(first, now - 14 * 86_400_000), to: back ? next : now + 1, isNow: !back })
   }
   return due
 }
-export const STAR_SYSTEM = `You pick one person's north star for one month: the one thing all their work that month was for. Weigh everything they did: what their tasks worked on and came to, in which areas and topics, and what their messages kept asking for, never one sentence alone. Say it in at most 16 plain words close to their own, as an aim, such as "A seed shop every gardener trusts". Where their messages that month name their north star outright, use their words and set "own" to true. Reply with one JSON object and nothing else:
-{"text": "<at most 16 words>", "own": true | false}
-No code, file names, ids, model names, dates or the month in the words. With nothing to go on, give "text" as an empty string.`
+export const STAR_SYSTEM = `You name one person's north star for one month: the bigger vision all their work that month serves, what they are building toward over years, never the month's tasks. Read everything they did (what their tasks worked on and came to, in which areas and topics, and what their messages kept asking for) and step back from it: past the fixes, tools, models, files and steps, to what it is all for and who it is for. Weigh each line of work by how much of the month went into it: a month spent mostly on one thing has that thing's vision, and a month spent on something new has a new one. Where the work is spread evenly, name what ties it together. Say it in at most 10 plain words, as an aim someone could keep for years, such as "Every garden can grow its own food" for work on a seed shop's checkout, its scanner and its books. Never name a tool, product, model, company or step, and never write a plan ("then ..."). Where their messages that month name their north star outright, use their words and set "own" to true. Reply with one JSON object and nothing else:
+{"text": "<at most 10 words>", "own": true | false}
+No code, file names, ids, dates or the month in the words. With nothing to go on, give "text" as an empty string.`
 // What the model is asked for one month, from what happened from `from` to `to`; '' when nothing did
 export const starPrompt = (
   picture: ProgressPicture,
@@ -415,7 +418,7 @@ export const starPrompt = (
   const [y = '', m = ''] = due.month.split('-')
   return [
     `The month: ${new Date(Number(y), Number(m) - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' })}`,
-    before ? `The month before's north star, for what changed since (say this month's in its own words): ${before.text}` : '',
+    before ? `The month before's north star (the same words only where this month's work was mostly for the same): ${before.text}` : '',
     `What their tasks came to, by area of their work (how many, then the newest):\n${work.join('\n') || '(none)'}`,
     `Their results, by the topic each was recorded under:\n${recorded.join('\n') || '(none)'}`,
     `Their own messages, oldest first:\n"""\n${said.join('\n').slice(-40_000) || '(none)'}\n"""`,
@@ -424,10 +427,11 @@ export const starPrompt = (
     .join('\n\n')
 }
 // The model's answer, or the person's own words, as a month's north star; nothing for an answer that is not one
-export const starOf = (answer: Record<string, unknown> | undefined) => (answer && isText(answer.text) ? { text: plainLine(answer.text, 16, 160), own: answer.own === true } : undefined)
+// (asked for 10 words, it is cut only past 24, so a longer one stays a whole sentence)
+export const starOf = (answer: Record<string, unknown> | undefined) => (answer && isText(answer.text) ? { text: plainLine(answer.text, 24, 200), own: answer.own === true } : undefined)
 // The picture with a month's north star put in, and its north star the newest month's
 export const withStar = (picture: ProgressPicture, month: string, star: { text: string; own: boolean }, now: number): ProgressPicture => {
-  const stars = [{ month, ...star, picked: new Date(now).toISOString() }, ...picture.stars.filter(one => one.month !== month)].sort((a, b) => (a.month < b.month ? 1 : -1))
+  const stars = [{ month, ...star, picked: new Date(now).toISOString(), v: STAR_V }, ...picture.stars.filter(one => one.month !== month)].sort((a, b) => (a.month < b.month ? 1 : -1))
   const newest = stars.find(one => one.text)
   return { ...picture, stars, star: newest ? { text: newest.text, said: newest.picked.slice(0, 10) } : picture.star }
 }
