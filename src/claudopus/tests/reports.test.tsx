@@ -622,7 +622,7 @@ test("each task is sorted into an area of the work in the background: its start 
   const asked: string[] = []
   const answers = {
     start: { areas: ['nose'], entry: { title: 'Fix the nose' } },
-    said: { areas: ['nose'], next: { add: ['A nose that moves with the mouth'] } },
+    said: { areas: ['nose'], star: 'A nose for every face', next: { add: ['A nose that moves with the mouth'] } },
     result: { areas: ['nose'], state: 'nose fits side faces', entry: { title: 'Fixed the nose', kind: 'milestone', outcome: 'The nose fits side faces', pictures: ['nose.png', 'other.png'] }, next: { done: ['n1'], aside: ['n1'] }, aside: { task: 'a1', reason: 'Not needed' } },
   }
   const { files, clock } = world(on, {
@@ -658,6 +658,8 @@ test("each task is sorted into an area of the work in the background: its start 
   expect(queued()).toEqual([])
   // The person's words about the area are kept in its own log of them
   expect(files.get(`${MEMORY}/progress/areas/nose.said.md`)).toMatch(/^## \d{4}-\d\d-\d\dT[\d:.]+Z\nfix the nose on side faces\n\n$/)
+  // and their own words for their north star are this month's, as they said them
+  expect((await until(async () => JSON.parse(files.get(`${MEMORY}/progress/picture.json`) ?? '{"stars":[]}').stars.find((one: { own: boolean }) => one.own)))).toMatchObject({ text: 'A nose for every face', own: true })
   // Its result takes that entry's place, with only its own pictures; no step is ticked or set aside by it
   await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 'u1', agentId: 'a1', name: 'Nose work', state: 'started' } as never)
   await $.turn.complete({ agentId: 'a1', answer: `The nose now fits side faces.\n\nThe picture: /private/tmp/s/scratchpad/nose.png\n`, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })

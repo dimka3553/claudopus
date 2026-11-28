@@ -64,6 +64,7 @@ const PICTURE_READ = 80_000
 let drainTimer: Timer | undefined
 let draining = false
 let pictureTried = false
+let starsTried = false
 const drainSoon = ($: EngineInterface, ms = PROGRESS_AFTER) => {
   if (drainTimer) return
   drainTimer = afterLoad($, ms, () => void ((drainTimer = undefined), drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`))))
@@ -155,8 +156,11 @@ const dropEvent = ($: EngineInterface, name: string) => runOn($, ['rm', '-f', `$
 
 // What an indexed event keeps up beside progress/: a result's topic gets its state line in the index from the model's answer and,
 // at the top of its page, the Latest block of the areas it went into; the person's words go into each area's own log of them
+// (and their own words for their north star are that month's)
 const keepUp = async ($: EngineInterface, event: ProgressEvent, answer: Record<string, unknown>, places: string[]) => {
   if (event.kind === 'said') for (const id of places) await appendTo($, `${progressDir()}/areas/${id}.said.md`, saidEntry(event.at, '', event.text))
+  const own = event.kind === 'said' ? starOf({ text: answer.star, own: true }) : undefined
+  if (own?.text) await writeStar($, monthKey(event.at), own)
   const topic = event.kind === 'result' && event.topic ? await topicNamed($, event.topic) : ''
   if (!topic || !places.length) return
   const areas = (await readAreas($)).filter(area => places.includes(area.id)).slice(0, 2)
@@ -181,6 +185,7 @@ const drainProgress = async ($: EngineInterface) => {
   let isLate = false
   try {
     await refreshPicture($).catch(err => indexLog($, `picture not written: ${String(err)}`))
+    await refreshStars($).catch(err => indexLog($, `north star not picked: ${String(err)}`))
     await tidyIndex($).catch(err => indexLog($, `topics not tidied: ${String(err)}`))
     await recountResults($).catch(err => indexLog($, `results not queued to be counted: ${String(err)}`))
     await backfillProgress($).catch(err => indexLog($, `history not queued: ${String(err)}`))
@@ -307,21 +312,49 @@ const refreshPicture = async ($: EngineInterface) => {
   const updated = Date.parse(was.updated)
   const isKnown = Boolean(was.updated) && Number.isFinite(updated)
   if (isKnown && now - updated < PICTURE_EVERY) return
-  const since = isKnown ? updated : now - BACKFILL_DAYS * 86_400_000
-  const words: { at: string; text: string }[] = []
-  // (a chat's own words alone, where they are kept apart from Claude's replies)
-  const listed = (await $.fs.list(`${dir}/words`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
-  const names = new Set(listed.map(entry => entry.name))
-  for (const entry of listed)
-    if (!(!entry.name.endsWith('.said.md') && names.has(entry.name.replace(/\.md$/, '.said.md'))) && !(entry.mtimeMs && entry.mtimeMs < since)) words.push(...wordsIn(await fileEnd($, `${dir}/words/${entry.name}`), since))
+  const words = await wordsSince($, isKnown ? updated : now - BACKFILL_DAYS * 86_400_000)
   if (!words.length) return
-  words.sort((a, b) => (a.at < b.at ? -1 : 1))
   const r = await $.model.complete({ model: 'sonnet', system: PICTURE_SYSTEM, prompt: picturePrompt(was, words, now, PICTURE_READ), maxTokens: 1500, timeoutMs: 120_000 }).catch(() => undefined)
-  const picture = pictureOf(r?.isAnswered ? answerJson(r.text) : undefined, now)
+  const picture = pictureOf(r?.isAnswered ? answerJson(r.text) : undefined, now, was)
   if (!picture) return void (await indexLog($, 'picture not written: no answer'))
   await withProgressFiles($, () => $.fs.write(`${progressDir()}/picture.json`, `${JSON.stringify(picture, null, 2)}\n`))
   await indexLog($, `picture written: ${picture.goals.length} goals`)
   await progressMoved($)
+}
+
+// The person's own messages in every chat since a time, oldest first (a chat's own words alone, where they are kept apart from
+// Claude's replies)
+const wordsSince = async ($: EngineInterface, since: number) => {
+  const words: { at: string; text: string }[] = []
+  const listed = (await $.fs.list(`${dir}/words`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
+  const names = new Set(listed.map(entry => entry.name))
+  for (const entry of listed)
+    if (!(!entry.name.endsWith('.said.md') && names.has(entry.name.replace(/\.md$/, '.said.md'))) && !(entry.mtimeMs && entry.mtimeMs < since)) words.push(...wordsIn(await fileEnd($, `${dir}/words/${entry.name}`), since))
+  return words.sort((a, b) => (a.at < b.at ? -1 : 1))
+}
+
+const writeStar = async ($: EngineInterface, month: string, star: { text: string; own: boolean }) => {
+  const now = await $.clock.now()
+  await withProgressFiles($, async () => $.fs.write(`${progressDir()}/picture.json`, `${JSON.stringify(withStar(await readPicture($), month, star, now), null, 2)}\n`))
+  await indexLog($, `north star of ${month} picked`)
+  await progressMoved($)
+}
+// Each month's north star picked by the model from all that month's work, once a load at most: this month's when it has none, and
+// a month just ended once more from the whole of it (starsDue). A month with nothing to go on keeps an empty one; this one is
+// tried again at the next load
+const refreshStars = async ($: EngineInterface) => {
+  if (starsTried) return
+  starsTried = true
+  const due = starsDue(await readPicture($), await $.clock.now())
+  if (!due.length) return
+  const [words, { areas, entries }, results, topics] = await Promise.all([wordsSince($, Math.min(...due.map(one => one.from))), readProgress($), loadReports($), readIndex($)])
+  // (the oldest first, so each is told the one before)
+  for (const one of due.reverse()) {
+    const prompt = starPrompt(await readPicture($), one, words, areas, entries, results, topics)
+    const r = prompt ? await $.model.complete({ model: 'sonnet', system: STAR_SYSTEM, prompt, maxTokens: 200, timeoutMs: 120_000 }).catch(() => undefined) : undefined
+    const star = prompt ? starOf(r?.isAnswered ? answerJson(r.text) : undefined) : { text: '', own: false }
+    if (star && (star.text || !one.isNow)) await writeStar($, one.month, star)
+  }
 }
 
 // What a task starting is told: what was set aside before in the areas its words are about, with why, so that data point is used

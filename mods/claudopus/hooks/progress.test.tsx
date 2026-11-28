@@ -1,11 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 
-import { answerJson, applyProgress, areasFrom, asideLines, chatEventOf, entriesFrom, pictureOf, progressPrompt, progressThumb, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, asideLines, chatEventOf, entriesFrom, pictureFrom, pictureOf, progressPrompt, progressThumb, starOf, starPrompt, starsDue, withSetAside, withStar, wordsIn } from './progress'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
 const REPORTS = '/home/sam/.claude/claudopus/reports'
 const NOW = Date.parse('2026-11-20T12:00:00Z')
-const picture: ProgressPicture = { star: { text: 'Make heads people love', said: '2026-11-10' }, goals: [{ id: 'heads', name: 'Better heads', words: 'heads that look real', said: '2026-11-10' }], updated: '2026-11-10T00:00:00.000Z' }
+const picture: ProgressPicture = { star: { text: 'Make heads people love', said: '2026-11-10' }, stars: [], goals: [{ id: 'heads', name: 'Better heads', words: 'heads that look real', said: '2026-11-10' }], updated: '2026-11-10T00:00:00.000Z' }
 const areas = (): ProgressArea[] => [
   { id: 'nose', name: 'Nose', goal: 'heads', aim: 'A nose that fits every face', next: [{ id: 'n1', text: 'A nose that fits side faces', state: 'open', at: '' }, { id: 'n2', text: 'A nose that moves with the mouth', state: 'open', at: '' }], updated: '' },
   { id: 'site', name: 'Website', goal: '', aim: 'The home page', next: [], updated: '' },
@@ -93,11 +93,50 @@ test('the files read back whole whatever was written, the model is shown each ar
   expect(withSetAside(['Skip this one', 'Set aside task'])).toEqual(['Skip this one', 'Set aside task'])
 })
 
-test('the picture is made only from the person\'s own messages, and a task is told only what was set aside in the area its words share', async () => {
+test('the goals are made only from the person\'s own messages, each month\'s north star from all that month\'s work, and a task is told only what was set aside in the area its words share', async () => {
   const words = `## 2026-11-18T09:00:00.000Z\nI want heads people love\n\n### Claude 2026-11-18T09:00:05.000Z\nSure\n\n## 2026-11-18T10:00:00.000Z (sent by a program)\nbuild ok\n\n## 2026-11-19T10:00:00.000Z (from the phone)\nand the song too\n\n## 2026-11-01T10:00:00.000Z\ntoo old\n`
   expect(wordsIn(words, Date.parse('2026-11-10'))).toEqual([{ at: '2026-11-18T09:00:00.000Z', text: 'I want heads people love' }, { at: '2026-11-19T10:00:00.000Z', text: 'and the song too' }])
-  expect(pictureOf({ star: { text: 'Heads people love', said: '2026-11-18' }, goals: [{ id: 'Heads!', name: 'Heads' }, { id: 'heads', name: 'Again' }, { name: '' }] }, NOW)).toEqual({ star: { text: 'Heads people love', said: '2026-11-18' }, goals: [{ id: 'heads', name: 'Heads', words: '', said: '' }], updated: new Date(NOW).toISOString() })
-  expect(pictureOf({ goals: [] }, NOW)).toBe(undefined)
+  // The goals' answer keeps the north stars as they were, whatever the model says of one
+  const starred = withStar(picture, '2026-10', { text: 'Heads that look real', own: false }, Date.parse('2026-11-02T08:00:00Z'))
+  expect(pictureOf({ star: { text: 'Something else', said: '2026-11-18' }, goals: [{ id: 'Heads!', name: 'Heads' }, { id: 'heads', name: 'Again' }, { name: '' }] }, NOW, starred)).toEqual({ ...starred, goals: [{ id: 'heads', name: 'Heads', words: '', said: '' }], updated: new Date(NOW).toISOString() })
+  expect(pictureOf({ star: { text: 'Heads' } }, NOW, picture)).toBe(undefined)
+  // This month is picked when it has none, from at least its last two weeks; a month picked before it ended once more from the
+  // whole of it, never one in the person's own words; months picked after they ended, never again
+  const day = 86_400_000
+  expect(starsDue(starred, NOW).map(one => [one.month, one.from, one.to])).toEqual([
+    ['2026-11', Date.parse('2026-11-01T00:00:00'), NOW + 1],
+    ['2026-09', Date.parse('2026-09-01T00:00:00'), Date.parse('2026-10-01T00:00:00')],
+    ['2026-08', Date.parse('2026-08-01T00:00:00'), Date.parse('2026-09-01T00:00:00')],
+    ['2026-07', Date.parse('2026-07-01T00:00:00'), Date.parse('2026-08-01T00:00:00')],
+    ['2026-06', Date.parse('2026-06-01T00:00:00'), Date.parse('2026-07-01T00:00:00')],
+  ])
+  expect(starsDue(picture, Date.parse('2026-11-03T12:00:00'))[0]?.from).toBe(Date.parse('2026-11-03T12:00:00') - 14 * day)
+  const early = withStar(withStar(picture, '2026-10', { text: 'Early', own: false }, Date.parse('2026-10-03T08:00:00')), '2026-09', { text: 'Mine', own: true }, Date.parse('2026-09-03T08:00:00'))
+  expect(starsDue(early, NOW).map(one => one.month)).toEqual(['2026-11', '2026-10', '2026-08', '2026-07', '2026-06'])
+  // Kept newest first, the north star the newest month's with words, read back whatever was written
+  const both = withStar(starred, '2026-11', { text: 'One 3D head for every customer', own: false }, NOW)
+  expect(both.star).toEqual({ text: 'One 3D head for every customer', said: '2026-11-20' })
+  expect(both.stars.map(one => one.month)).toEqual(['2026-11', '2026-10'])
+  expect(withStar(starred, '2026-11', { text: '', own: false }, NOW).star.text).toBe('Heads that look real')
+  expect(pictureFrom(JSON.stringify({ ...both, stars: [{ month: 'nope', text: 'x' }, ...both.stars.reverse()] })).stars.map(one => one.month)).toEqual(['2026-11', '2026-10'])
+  expect(starOf({ text: 'Fix `register.tsx` for heads people love', own: true })).toEqual({ text: 'Fix for heads people love', own: true })
+  expect(starOf({ own: true })).toBe(undefined)
+  // The month's own work: the person's messages, each area's results and the results by topic, all of that month alone, and the
+  // month before's north star; nothing to ask of a month with none
+  const work = new Map([['nose', [entry({ title: 'Nose for side faces', at: '2026-10-12T10:00:00.000Z' }), entry({ title: 'Too new', at: '2026-11-02T10:00:00.000Z' })]]])
+  const results = [{ at: Date.parse('2026-10-14T10:00:00Z'), title: 'Scan ratios checked', subject: 'Scans' }, { at: Date.parse('2026-09-14T10:00:00Z'), title: 'Too old', subject: 'Scans' }]
+  const topics = [{ name: 'scans', summary: 'An accurate, consistent scan', state: '' }]
+  const said = [{ at: '2026-10-13T09:00:00.000Z', text: 'the ratios must not change between scans' }, { at: '2026-11-13T09:00:00.000Z', text: 'not this month' }]
+  const october = starsDue(withStar(picture, '2026-09', { text: 'Heads that look real', own: false }, NOW), NOW).find(one => one.month === '2026-10')
+  const asked = starPrompt(withStar(picture, '2026-09', { text: 'Heads that look real', own: false }, NOW), october as never, said, areas(), work, results, topics)
+  for (const text of ['The month: October 2026', "The month before's north star, for what changed since (say this month's in its own words): Heads that look real", '- Nose (A nose that fits every face): 1 · Nose for side faces', '- Scans (An accurate, consistent scan): 1 · Scan ratios checked', '[2026-10-13] the ratios must not change between scans']) expect(asked).toContain(text)
+  for (const text of ['Too new', 'Too old', 'not this month']) expect(asked).not.toContain(text)
+  // Too many messages to read are spread over the whole month, the first of it as well as the last
+  const many = Array.from({ length: 300 }, (_, i) => ({ at: `2026-10-${String(1 + Math.floor(i / 10)).padStart(2, '0')}T09:00:00.000Z`, text: `${i === 0 ? 'first' : i === 299 ? 'last' : 'more'} ${'words '.repeat(60)}` }))
+  const spread = starPrompt(picture, october as never, many, areas(), work, results, topics)
+  for (const text of ['[2026-10-01] first', '[2026-10-30] more']) expect(spread).toContain(text)
+  expect(spread.length).toBeLessThan(42_000)
+  expect(starPrompt(picture, { month: '2026-06', from: Date.parse('2026-06-01'), to: Date.parse('2026-07-01') }, said, areas(), work, results, topics)).toBe('')
   const entries = new Map([['nose', [entry({ task: 'a1', title: 'Nose for side faces', kind: 'aside', reason: 'Not needed now' })]], ['site', [entry({ task: 'a2', title: 'Hero video', kind: 'aside', reason: 'Too slow' })]]])
   expect(asideLines('Fix the nose', 'The nose on side faces looks wrong', areas(), entries)).toEqual(['- In Nose: "Nose for side faces" (2026-11-19), set aside: Not needed now'])
   expect(asideLines('Render the song', 'Stills for it', areas(), entries)).toEqual([])

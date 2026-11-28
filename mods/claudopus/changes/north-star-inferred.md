@@ -1,0 +1,2 @@
+- The north star on top of Progress is picked each month from all you did that month: your messages in every chat, what each area's tasks came to, your results and their topics. It is never empty: this month's is picked as soon as there is none, and once more from the whole month after it ends.
+- Under the areas, North stars lists every month's, the newest first, and a press on one shows that month with its own. When you name your north star yourself in a chat, your words are that month's.

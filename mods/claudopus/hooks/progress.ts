@@ -2,8 +2,12 @@
 // whatever was written, what the indexer asks the model and how its answer is applied. src/claudopus/progress.tsx reads and writes
 // the files, keeps the queue and runs the indexer; the Progress tab draws from them
 
-// The north star and the goals, each in the person's own words with the day they were said
-export type ProgressPicture = { star: { text: string; said: string }; goals: { id: string; name: string; words: string; said: string }[]; updated: string }
+// A month's north star ('YYYY-MM'): picked from all that month's work, or the person's own words for it (`own`), with when it was
+// picked; its text is '' where the month left nothing to go on
+export type ProgressStar = { month: string; text: string; own: boolean; picked: string }
+// The north star (the newest month's), each month's newest first, and the goals, each in the person's own words with the day they
+// were said
+export type ProgressPicture = { star: { text: string; said: string }; stars: ProgressStar[]; goals: { id: string; name: string; words: string; said: string }[]; updated: string }
 // One step of an area: a plain sentence of what will exist when it is done, open, done, or set aside
 export type ProgressNext = { id: string; text: string; state: 'open' | 'done' | 'aside'; at: string }
 // An area of work: under a goal (its id, or '' for none), one plain line of what it is for (`next`, steps once kept, is only read back as it was); `topics`, the
@@ -97,7 +101,11 @@ export const pictureFrom = (text: string): ProgressPicture => {
   const goals = (Array.isArray(raw?.goals) ? raw.goals : [])
     .filter(goal => goal && isText(goal.id) && goal.id && isText(goal.name) && goal.name.trim())
     .map(goal => ({ id: goal.id, name: goal.name, words: textOr(goal.words), said: textOr(goal.said) }))
-  return { star, goals, updated: textOr(raw?.updated) }
+  const stars = (Array.isArray(raw?.stars) ? raw.stars : [])
+    .filter(one => one && isText(one.month) && /^\d{4}-\d\d$/.test(one.month))
+    .map(one => ({ month: one.month, text: textOr(one.text), own: one.own === true, picked: textOr(one.picked) }))
+    .sort((a, b) => (a.month < b.month ? 1 : -1))
+  return { star, stars, goals, updated: textOr(raw?.updated) }
 }
 export const areasFrom = (text: string): ProgressArea[] => {
   const raw = parsedOr(text) as { areas?: unknown } | undefined
@@ -141,19 +149,20 @@ export const progressLine = (name: string, dir: string) =>
 // ---- What the indexer asks: one answer of the model's for each event, given the picture, the areas and their newest entries ----
 
 export const PROGRESS_SYSTEM = `You keep a map of one person's work for a page that shows, at a glance, what was done in each area of it. You are given the person's north star and goals, the areas so far, the newest entries of each, and one event: a task starting, a task's result, a chat from before Claudopus came in, a message the person wrote, an answer the person gave to a task's question, or the person pressing Set aside on a question. Reply with one JSON object and nothing else:
-{"areas": ["<area id>", ...], "newArea": {"name": "...", "goal": "<goal id or empty>", "aim": "..."}, "state": "...", "entry": {"title": "...", "kind": "milestone" | "task", "outcome": "...", "live": "<web address where it went live, or empty>", "pictures": ["<path>", ...]}, "aside": {"task": "<task id>", "reason": "..."}, "rename": [{"id": "<area id>", "name": "...", "aim": "..."}], "merge": [{"from": "<area id>", "into": "<area id>"}]}
+{"areas": ["<area id>", ...], "newArea": {"name": "...", "goal": "<goal id or empty>", "aim": "..."}, "state": "...", "star": "...", "entry": {"title": "...", "kind": "milestone" | "task", "outcome": "...", "live": "<web address where it went live, or empty>", "pictures": ["<path>", ...]}, "aside": {"task": "<task id>", "reason": "..."}, "rename": [{"id": "<area id>", "name": "...", "aim": "..."}], "merge": [{"from": "<area id>", "into": "<area id>"}]}
 Leave out every key that does not apply.
 Rules:
 - "areas": the smallest existing area that covers the whole of the work; several only when it truly spans them. Make a "newArea" only for a new direction that no area covers; its name is 1 to 3 plain words, its aim one plain line, its goal the id of the goal it serves or empty.
 - "entry", for a task's start or result, or a chat from before Claudopus: "title" at most 8 plain words of what came out of it (such as "Lawyer brief and evidence pack ready"), never the task's own title or instructions repeated; "outcome" at most 14 plain words of what came of it. No code, file names, paths, versions, ids or model names. "kind" is "milestone" only when something shipped, went live or a clear finding came out; otherwise "task". "pictures": only paths from the result's own pictures, the one or two that show it best.
 - "state", for a result: at most 6 plain words of where this line of work stands now, starting with "done" once it shipped or went live.
+- "star", for a message the person wrote: only when it names outright their north star, the one thing all their work is for; it, in their words, at most 16 words.
 - "aside" (a task set aside): only when the person's own words or press set that task aside; the reason in their words, short.
 - "rename" and "merge": only when the person's words ask for it.
 - Never write that anything waits on the person or is theirs to do. Plain everyday words throughout.`
 
-export const PICTURE_SYSTEM = `You keep the bigger picture of one person's work: their north star (the one thing all of it is for) and their goals (2 to 6), with the date each rests on. Take each from what they said they want, in their own words where they said it. Where they never said a goal or a north star outright, work it out from what their messages keep aiming at and asking for, in plain words close to theirs, dated by the newest message it rests on. You are given the picture so far and the person's own messages. Change it only where their words changed it: a goal they named, dropped or reworded, work that now plainly aims somewhere new, or a new north star. Keep each unchanged goal's id. Reply with one JSON object and nothing else:
-{"star": {"text": "<at most 16 words>", "said": "<YYYY-MM-DD>"}, "goals": [{"id": "<short id of lowercase letters and dashes>", "name": "<1 to 4 words>", "words": "<their words, or what their messages show, at most 30 words>", "said": "<YYYY-MM-DD>"}]}
-No code, file names or ids in the words. Nothing their messages do not bear out: with nothing to go on, give the picture back as it was.`
+export const PICTURE_SYSTEM = `You keep the goals of one person's work (2 to 6), with the date each rests on. Take each from what they said they want, in their own words where they said it. Where they never said a goal outright, work it out from what their messages keep aiming at and asking for, in plain words close to theirs, dated by the newest message it rests on. You are given the goals so far and the person's own messages. Change them only where their words changed them: a goal they named, dropped or reworded, or work that now plainly aims somewhere new. Keep each unchanged goal's id. Reply with one JSON object and nothing else:
+{"goals": [{"id": "<short id of lowercase letters and dashes>", "name": "<1 to 4 words>", "words": "<their words, or what their messages show, at most 30 words>", "said": "<YYYY-MM-DD>"}]}
+No code, file names or ids in the words. Nothing their messages do not bear out: with nothing to go on, give the goals back as they were.`
 
 // How much of each event the model reads
 export const EVENT_CHARS: Record<ProgressEvent['kind'], number> = { start: 4000, result: 8000, said: 3000, answer: 2000, aside: 2000, chat: 6000 }
@@ -344,21 +353,97 @@ export const chatEventOf = (id: string, text: string, before: number): ProgressE
   const reply = oneLine(replies.at(-1) ?? '').slice(0, 700)
   return { kind: 'chat', at: Date.parse(first.at), chat: id, task: `chat-${id}`, title: oneLine(first.text).slice(0, 80), text: `${said}${reply ? `\n\nLast reply: ${reply}` : ''}`, isBackfill: true }
 }
-// What the model is asked for the picture, and its answer as a picture; nothing for an answer that is not one
+// What the model is asked for the goals, and its answer as the picture with them, its north stars as they were; nothing for an
+// answer that is not one
 export const picturePrompt = (was: ProgressPicture, words: { at: string; text: string }[], now: number, most: number) =>
-  `Today: ${dayOf(now)}\n\nThe picture so far:\n${JSON.stringify({ star: was.star, goals: was.goals })}\n\nThe person's messages, oldest first:\n"""\n${words
+  `Today: ${dayOf(now)}\n\nThe goals so far:\n${JSON.stringify({ goals: was.goals })}\n\nThe person's messages, oldest first:\n"""\n${words
     .map(one => `[${one.at.slice(0, 10)}] ${oneLine(one.text).slice(0, 1500)}`)
     .join('\n')
     .slice(-most)}\n"""`
-export const pictureOf = (answer: Record<string, unknown> | undefined, now: number): ProgressPicture | undefined => {
-  const star = answer?.star as { text?: unknown; said?: unknown } | undefined
-  if (!answer || !isText(star?.text)) return undefined
-  const goals = (Array.isArray(answer.goals) ? answer.goals : [])
+export const pictureOf = (answer: Record<string, unknown> | undefined, now: number, was: ProgressPicture): ProgressPicture | undefined => {
+  if (!answer || !Array.isArray(answer.goals)) return undefined
+  const goals = answer.goals
     .map(one => one as { id?: unknown; name?: unknown; words?: unknown; said?: unknown })
     .map(goal => ({ id: slug(textOr(goal.id) || textOr(goal.name)).slice(0, 40), name: plainLine(goal.name, 4, 40), words: oneLine(textOr(goal.words)).slice(0, 240), said: textOr(goal.said).slice(0, 10) }))
     .filter((goal, n, all) => goal.id && goal.name && all.findIndex(other => other.id === goal.id) === n)
     .slice(0, 6)
-  return { star: { text: oneLine(star.text).slice(0, 160), said: textOr(star.said).slice(0, 10) }, goals, updated: new Date(now).toISOString() }
+  return { ...was, goals, updated: new Date(now).toISOString() }
+}
+
+// ---- Each month's north star, picked from all that month's work: the person's messages, what each area's tasks came to, the
+// results and the topics they were recorded under. Picked once for a month with none (this one from at least its last two
+// weeks), and once more from the whole month after it ends; the person's own words for it are kept as they are ----
+
+// A month by its local time, 'YYYY-MM'
+export const monthKey = (at: number) => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+// How many months back a north star is picked
+export const STAR_MONTHS = 6
+// The months to pick now, this one first, each with the time its work is read from and to
+export const starsDue = (picture: ProgressPicture, now: number) => {
+  const today = new Date(now)
+  const due: { month: string; from: number; to: number; isNow: boolean }[] = []
+  for (let back = 0; back < STAR_MONTHS; back += 1) {
+    const first = new Date(today.getFullYear(), today.getMonth() - back, 1).getTime()
+    const next = new Date(today.getFullYear(), today.getMonth() - back + 1, 1).getTime()
+    const had = picture.stars.find(one => one.month === monthKey(first))
+    if (!had || (back > 0 && !had.own && !(Date.parse(had.picked) >= next))) due.push({ month: monthKey(first), from: back ? first : Math.min(first, now - 14 * 86_400_000), to: back ? next : now + 1, isNow: !back })
+  }
+  return due
+}
+export const STAR_SYSTEM = `You pick one person's north star for one month: the one thing all their work that month was for. Weigh everything they did: what their tasks worked on and came to, in which areas and topics, and what their messages kept asking for, never one sentence alone. Say it in at most 16 plain words close to their own, as an aim, such as "A seed shop every gardener trusts". Where their messages that month name their north star outright, use their words and set "own" to true. Reply with one JSON object and nothing else:
+{"text": "<at most 16 words>", "own": true | false}
+No code, file names, ids, model names, dates or the month in the words. With nothing to go on, give "text" as an empty string.`
+// What the model is asked for one month, from what happened from `from` to `to`; '' when nothing did
+export const starPrompt = (
+  picture: ProgressPicture,
+  due: { month: string; from: number; to: number },
+  words: { at: string; text: string }[],
+  areas: ProgressArea[],
+  entries: Map<string, ProgressEntry[]>,
+  results: { at: number; title: string; subject: string }[],
+  topics: { name: string; summary: string; state: string }[],
+) => {
+  const inside = (at: number) => at >= due.from && at < due.to
+  const all = words.filter(one => inside(Date.parse(one.at))).map(one => `[${one.at.slice(0, 10)}] ${cut(oneLine(one.text), 500)}`)
+  // (spread over the whole month where they are too many to read: every second, third, ... message)
+  const every = Math.ceil(all.join('\n').length / 40_000) || 1
+  const said = all.filter((_, i) => i % every === 0)
+  const work = areas.flatMap(area => {
+    const done = (entries.get(area.id) ?? []).filter(e => inside(Date.parse(e.at)))
+    return done.length ? [`- ${area.name}${area.aim ? ` (${area.aim})` : ''}: ${done.length} · ${done.slice(0, 12).map(e => e.title).join('; ')}`] : []
+  })
+  const byTopic = new Map<string, string[]>()
+  for (const r of results) if (inside(r.at)) byTopic.set(r.subject, [...(byTopic.get(r.subject) ?? []), oneLine(r.title)])
+  const recorded = [...byTopic]
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, 40)
+    .map(([name, titles]) => {
+      const topic = topics.find(one => slug(one.name) === slug(name))
+      return `- ${name || 'No topic'}${topic?.summary ? ` (${cut(oneLine(topic.summary), 160)})` : ''}: ${titles.length} · ${titles.slice(0, 8).join('; ')}`
+    })
+  if (!said.length && !work.length && !recorded.length) return ''
+  const before = picture.stars.find(one => one.month < due.month && one.text)
+  const [y = '', m = ''] = due.month.split('-')
+  return [
+    `The month: ${new Date(Number(y), Number(m) - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' })}`,
+    before ? `The month before's north star, for what changed since (say this month's in its own words): ${before.text}` : '',
+    `What their tasks came to, by area of their work (how many, then the newest):\n${work.join('\n') || '(none)'}`,
+    `Their results, by the topic each was recorded under:\n${recorded.join('\n') || '(none)'}`,
+    `Their own messages, oldest first:\n"""\n${said.join('\n').slice(-40_000) || '(none)'}\n"""`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+// The model's answer, or the person's own words, as a month's north star; nothing for an answer that is not one
+export const starOf = (answer: Record<string, unknown> | undefined) => (answer && isText(answer.text) ? { text: plainLine(answer.text, 16, 160), own: answer.own === true } : undefined)
+// The picture with a month's north star put in, and its north star the newest month's
+export const withStar = (picture: ProgressPicture, month: string, star: { text: string; own: boolean }, now: number): ProgressPicture => {
+  const stars = [{ month, ...star, picked: new Date(now).toISOString() }, ...picture.stars.filter(one => one.month !== month)].sort((a, b) => (a.month < b.month ? 1 : -1))
+  const newest = stars.find(one => one.text)
+  return { ...picture, stars, star: newest ? { text: newest.text, said: newest.picked.slice(0, 10) } : picture.star }
 }
 
 // ---- What a task starting is told: what was set aside before in the areas its words are about, with why, so that data point is

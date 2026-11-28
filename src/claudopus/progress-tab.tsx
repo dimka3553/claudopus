@@ -20,6 +20,7 @@ const progressRead = async ($: EngineInterface): Promise<ProgressRead> => {
   const entries = new Map(await Promise.all(areas.map(async area => [area.id, await readEntries($, area.id)] as const)))
   return {
     star: picture.star.text,
+    stars: picture.stars,
     goals: goalsOf(picture),
     areas,
     entries,
