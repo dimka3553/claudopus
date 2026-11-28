@@ -2169,6 +2169,22 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await list.unmount()
 })
 
+test('a task that needs a connector that is missing or needs signing in puts nothing on its card: it has the chat show the app\'s own Connect button, which only the person\'s press uses (28 Nov: a task gave Dima steps through Settings for Higgsfield, and "authenticate it" showed no button)', async ($, on) => {
+  const { appended, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the birthday video', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Make the birthday video', prompt: 'make the birthday video' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const asked = String((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Higgsfield is not connected. Can you connect it?', connector: 'Higgsfield https://mcp.higgsfield.ai/mcp' } as never)).result)
+  expect(asked).toContain('Nothing is on your card')
+  expect(asked).toContain(`with to "main" and this message, exactly:\nThe task "Make the birthday video" needs the connector Higgsfield https://mcp.higgsfield.ai/mcp, which is not connected here or needs signing in. Show the person the app's own Connect button for it now, as your rules say, and write no steps for it. Once the person has connected it, tell that task with SendMessage to "a1".\n`)
+  expect(asked).toContain('never give them steps to connect it another way')
+  await clock.advance(10)
+  expect(await list.find({ type: 'Text', text: 'Higgsfield is not connected. Can you connect it?' })).toBeUndefined()
+  expect(await askButtons(list, 'a1')).toEqual([])
+  expect(appended.some(line => line.includes('Higgsfield'))).toBe(false)
+})
+
 test('an ask carries what it is about, whole, on the small card, in Details and in the chat: the 13 Nov "Release PR 54, with the exact differences as explained in the chat?" asked before its explanation arrived', async ($, on) => {
   const { appended, logged, clock, notified } = world(on)
   await $.session.start(start)

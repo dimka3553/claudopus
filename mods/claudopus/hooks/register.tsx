@@ -55,6 +55,7 @@ const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
 const isTool = (tool: string | undefined, name: string) => tool === `${TOOLS}${name}` || tool === `${OLD_TOOLS}${name}`
 const OWN_SERVERS = [TOOLS, 'mcp__ccd_']
+const isConnectTool = (tool: string) => tool.startsWith('mcp__mcp-registry__') || /^mcp__[\w-]+__(?:authenticate|complete_authentication)$/.test(tool)
 const PASTE_CHARS = 12_000
 const KEPT = 40
 const ENTRIES_KEPT = 200
@@ -1051,6 +1052,10 @@ named("Claude changes {name}'s own settings and texts (config.json, the rules an
 const SECRETS_MS = 60_000
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
 const WORDS_LINE = (id: string) => `${who(true)}'s own messages in the chat, word for word, the newest last: ${dir}/words/${id}.said.md. The chat's saved words, Claude's replies too, too long to read whole (search them): ${dir}/words/${id}.md`
+const CONNECT_FOR_CHAT = (title: string, id: string, connector: string) =>
+`The task "${title}" needs the connector ${connector}, which is not connected here or needs signing in. Show {name} the app's own Connect button for it now, as your rules say, and write no steps for it. Once {name} has connected it, tell that task with SendMessage to "${id}".`
+const CONNECT_ASKED = (message: string) =>
+`Nothing is on your card. Have the chat show {name} the app's own Connect button now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${message}\nOnly {name}'s press on that button connects it: never give them steps to connect it another way. Carry on with what does not need it, or end your step; the chat tells you once it is connected, and its tools then load with ToolSearch, or a general-purpose helper uses them.`
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[], others: string[] = []) =>
 `In the background task "${title}", Claude asked {name} a question.${others.length ? ` Its card also still shows ${others.length === 1 ? 'an earlier question' : `${others.length} other questions`}, each answered on its own: ${others.map(one => `"${cut(one, 160)}"`).join(', ')}.` : ''} {Name} sees it in full on the task's card, and nothing of it in this chat: ${ask.text} (${answers.length ? `buttons: ${answers.join(' · ')}` : 'answered in words'}${ask.details ? `; what it is about, which {name} sees in full with it on the card: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, never remind {name} of it in a later reply, as {name} sees it waiting in the panel and is still deciding, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words${others.length ? ', saying which question they answer' : ''}; its card then stops showing the question.`
 const ASK_ANSWERED = (title: string, said: string, asked = '') => `✓ {Name} answered "${title}" on its card: ${said}${asked ? `, to its question "${cut(asked, 160)}"` : ''}. Claude already has the answer from the card, so it needs no second copy.`
@@ -11982,6 +11987,7 @@ cwd: { type: 'string', description: 'The full path of the folder the command run
 pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
 key: { type: 'string', description: named("Only when you ask {name} for a key, token or password a command of yours needs: the name it is saved under, such as SENTRY_READ_TOKEN. The box to paste it into shows with your question on your card at once; a saved key of that name is replaced, one of another name stays. Give no `choices` with it") },
 from: { type: 'string', description: named('With `key`: where {name} gets it, the full link of the page and what to press there, shown in the box') },
+connector: { type: 'string', description: named("Only when a connector you need is missing or needs signing in: its name, and its address when you know it, such as `Higgsfield https://mcp.higgsfield.ai/mcp`. Give it instead of steps to connect it: nothing goes on your card, and you are told how to have the chat show {name} the app's own Connect button, which only their press uses") },
 release: { type: 'string', description: 'Only when you ask for the go-ahead to put your change on main, with a single choice named for what it does in this project (Push it, Merge it, Open the pull request, Put it live; Release it where the project numbers its versions): the full path of your worktree. That press reaches you as the answer and allows your runs of the release runner from that folder until one has gone out, with no second question' },
 },
 required: ['text'],
@@ -14269,7 +14275,7 @@ return { deny: NOT_ONE_COMMAND }
 const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await runOn($, ['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
 const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
 const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !isConnectTool(e.tool) && !READS.includes(e.tool) && !isPaneShow(e)
 if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
 await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
 return { deny: SEND_BACKGROUND(who()) }
@@ -14511,7 +14517,7 @@ await lookEnds($)
 }
 return r
 }
-if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || isPaneShow(e)) return next(e)
+if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || isConnectTool(e.tool) || isPaneShow(e)) return next(e)
 if (isChatCommand) {
 const r = await next(e)
 if (!r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
@@ -14838,8 +14844,15 @@ return { ...one, items }
 return { result: items.map(item => `${item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]'} ${item.text}`).join('\n') }
 })
 on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown; key?: unknown; from?: unknown }
+const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown; key?: unknown; from?: unknown; connector?: unknown }
 if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
+const connector = oneLine(typeof input.connector === 'string' ? input.connector : '').slice(0, 300)
+if (connector) {
+const cards = await read($, todos)
+const top = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
+await log($, `work ${e.agentId} needs the connector ${cut(connector, 60)}: handed to the chat to show its Connect button`)
+return { result: named(CONNECT_ASKED(named(CONNECT_FOR_CHAT(top ? titleOf(top) : 'in the background', e.agentId, connector)))) }
+}
 const asked = oneLine(typeof input.text === 'string' ? input.text : '')
 const text = asked.length > ASK_TEXT ? cut(asked, ASK_TEXT) : asked
 const given1 = (typeof input.details === 'string' ? input.details : '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()

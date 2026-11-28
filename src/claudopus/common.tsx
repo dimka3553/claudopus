@@ -24,6 +24,10 @@ const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
 const isTool = (tool: string | undefined, name: string) => tool === `${TOOLS}${name}` || tool === `${OLD_TOOLS}${name}`
 const OWN_SERVERS = [TOOLS, 'mcp__ccd_']
+// What brings up the app's own Connect button for a connector that is missing or needs signing in: the registry's search and
+// suggestions, and a server's own sign-in tools. None of them connects anything: only the person's press on that button does
+// (28 Nov: the chat was refused the registry, and "authenticate it" showed Dima no button)
+const isConnectTool = (tool: string) => tool.startsWith('mcp__mcp-registry__') || /^mcp__[\w-]+__(?:authenticate|complete_authentication)$/.test(tool)
 // A message longer than this is a dump: the chat keeps the file's path, not the text
 const PASTE_CHARS = 12_000
 // Pieces of work kept in the list, ended ones included, and lines kept in the log of each

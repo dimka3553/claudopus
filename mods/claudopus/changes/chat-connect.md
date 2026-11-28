@@ -1,0 +1,1 @@
+- When a connector such as Higgsfield is missing or needs signing in, the chat now shows the app's own Connect button for you to press, whether you ask it to connect one or a task needs one. Before, the chat was not allowed to show it, and tasks gave you steps through Settings instead.
