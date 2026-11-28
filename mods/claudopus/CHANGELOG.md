@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.319 · 28 November 2026
+- The north star on top of Progress is picked each month from all you did that month: your messages in every chat, what each area's tasks came to, your results and their topics. It is never empty: this month's is picked as soon as there is none, and once more from the whole month after it ends.
+- Under the areas, North stars lists every month's, the newest first, and a press on one shows that month with its own. When you name your north star yourself in a chat, your words are that month's.
+
 ## 0.2.318 · 28 November 2026
 - The Stats timeline now shows every helper as a bar of its own, in its own model's colour, beside the tasks, so one chart shows every Claude at work; the strip of tasks and helpers under it is gone.
 - Time of work, time saved, efficiency and the most at work at once now count each helper's time as well as its task's, so helpers working at the same time each add theirs, on the leaderboard too.

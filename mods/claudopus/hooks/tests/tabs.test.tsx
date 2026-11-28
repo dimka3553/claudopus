@@ -1190,7 +1190,9 @@ const progressFiles = (files: Map<string, string>) => {
 test('the Progress tab opens from its button beside Results: one month\'s chart under the north star whose rows are the areas, a square for each result, an earlier month a press away, an area opened with its timeline and no next steps, and nothing says anything waits', async ($, on) => {
   const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
   const bytes = (path: string) => (path.includes('/thumbs/') ? 'B'.repeat(path.endsWith('.small.jpg') ? 4_000 : 30_000) : undefined)
-  const { files, opened, tabs, submitted, clock } = world(on, { sips, bytes })
+  // Each month's north star from all that month's work, by the month it is asked for
+  const complete = (e: { system?: string; prompt: string }) => (e.system?.includes('north star for one month') ? JSON.stringify({ text: e.prompt.includes('The month: October 2023') ? 'A menu people come back for' : 'Seeds in every garden', own: false }) : undefined)
+  const { files, opened, tabs, submitted, clock, completed } = world(on, { sips, bytes, complete })
   progressFiles(files)
   // Past results still being sorted: 10 read in, 4 left in the queue
   files.set(`${MEMORY}/progress/backfilled`, '2023-11-14T10:00:00Z\n10\n')
@@ -1209,8 +1211,10 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   const texts = async () => (await tab.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   // The chart is the areas themselves: the north star on top, then a row for each area worked on this month with its results, the
   // one at work in purple, each opened by the press beside it; the menu, last touched in October, is not among them
-  const head = async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds'))
+  // (this month's north star the one kept until its own is picked, with nothing said of whose it is)
+  const head = async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('Results a day in'))
   expect(String((await until(head))?.props.alt)).toContain('Seed shop: 5 results in November 2023, working now.')
+  expect(String((await head())?.props.alt)).toMatch(/^“A shop that sells seeds to every garden” Results a day in November 2023/)
   const strips = async () => (await tab.findAll({ type: 'Svg' })).map(one => String(one.props.source)).join('\n')
   expect((await strips()).length).toBeLessThanOrEqual(131_072)
   expect(await strips()).toMatch(/fill="#8A63F0" font-weight="600">Seed shop</)
@@ -1233,7 +1237,8 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   expect(await texts()).toContain('November 2023')
   await pressed(tab, 'progress-month-earlier')
   expect(await until(async () => ((await texts()).includes('October 2023') ? true : undefined))).toBe(true)
-  expect(String((await head())?.props.alt)).toContain('Results a day in October 2023')
+  // (with no north star, as none was picked for it yet)
+  expect(String((await head())?.props.alt)).toMatch(/^Results a day in October 2023/)
   expect(await strips()).toContain('>Cafe menu</text>')
   expect(await strips()).not.toContain('>Seed shop</text>')
   expect(await keyed(tab, 'progress-area-cafe')).toBeDefined()
@@ -1264,6 +1269,21 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   expect(await until(async () => files.get(`${MEMORY}/progress/recounted`))).toMatch(/\n1\n$/)
   const recount = [...files].filter(([path, text]) => path.startsWith(`${MEMORY}/progress/queue/`) && text.includes('"isEntryOnly":true')).map(([, text]) => JSON.parse(text).report)
   expect(recount).toEqual(['r-more'])
+  // and each month's north star is picked, from all of that month's work and that month's alone, once: this month's on top,
+  // with whose it is, and every month's under North stars, a press on one showing that month with its own
+  const starHead = async (text: string) => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).startsWith(text))
+  expect(await until(async () => starHead('“Seeds in every garden” November’s north star, picked from your work'))).toBeDefined()
+  const picks = completed.filter(e => e.system?.includes('north star for one month')).map(e => e.prompt)
+  expect(picks.map(prompt => /The month: (\w+ \d+)/.exec(prompt)?.[1])).toEqual(['October 2023', 'November 2023'])
+  for (const text of ['- Seed shop (Seeds bought in two taps.): 5 · Seed photos on every page; Seed scanner tried in the shed; Checkout in two taps', '- Bookkeeping (The books close each month.): 1 · October books closed', '- Shop: 3 · ', "The month before's north star, for what changed since (say this month's in its own words): A menu people come back for"]) expect(picks[1]).toContain(text)
+  expect(picks[0]).toContain('- Cafe menu: 1 · Menu printed')
+  expect(picks[0]).not.toContain('Seed shop')
+  for (const text of ['North stars', 'November 2023', 'October 2023', 'Seeds in every garden', 'A menu people come back for']) expect(await texts()).toContain(text)
+  await pressed(tab, 'progress-star-2023-10')
+  expect(await until(async () => starHead('“A menu people come back for” October’s north star, picked from your work'))).toBeDefined()
+  await pressed(tab, 'progress-month-later')
+  expect(await until(async () => starHead('“Seeds in every garden”'))).toBeDefined()
+  expect(JSON.parse(files.get(`${P}/picture.json`) ?? '{}').star.text).toBe('Seeds in every garden')
   // Nothing on the page says it waits on the person
   const said = async () => JSON.stringify(await tab.drawn())
   expect(await said()).not.toMatch(/wait/i)

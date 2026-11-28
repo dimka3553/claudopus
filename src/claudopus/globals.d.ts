@@ -299,6 +299,7 @@ declare global {
   export import plainOf = M10.plainOf
   export import SILENT_AFTER = M10.SILENT_AFTER
   export import SILENT_WARN = M10.SILENT_WARN
+  export import doingOf = M10.doingOf
   export import heavyOf = M10.heavyOf
   export import waitingOf = M10.waitingOf
   export import watcherOf = M10.watcherOf
@@ -307,6 +308,7 @@ declare global {
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove
+  export import ASKS_SYSTEM = M11.ASKS_SYSTEM
   export import LOG_SENT = M11.LOG_SENT
   export import NAMING_MODEL = M11.NAMING_MODEL
   export import NAMING_SYSTEM = M11.NAMING_SYSTEM
@@ -393,6 +395,12 @@ declare global {
   export import SKIP_ONE = M17.SKIP_ONE
   export import SKIP_TOLD = M17.SKIP_TOLD
   export import setAsideTold = M17.setAsideTold
+  export import STAR_SYSTEM = M17.STAR_SYSTEM
+  export import starOf = M17.starOf
+  export import starPrompt = M17.starPrompt
+  export import starsDue = M17.starsDue
+  export import monthKey = M17.monthKey
+  export import withStar = M17.withStar
   export import topicState = M17.topicState
   export import withSetAside = M17.withSetAside
   export import wordsIn = M17.wordsIn

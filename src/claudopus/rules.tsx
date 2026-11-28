@@ -504,7 +504,3 @@ const QUIET_STEPS = 12
 const NOTE_STALE = 3 * 60_000
 const unnoted = (mins: number, last: string) =>
   `${last ? `Your card has said "${cut(oneLine(last), 80)}" for ${minutesSaid(mins)}, while you have gone on working` : `Your card has not yet said what you are doing, ${minutesSaid(mins)} in`}: that line is how {name} sees what you are doing right now. In your next step, send a \`note\` saying in one plain line what you are doing now, together with your next working call in that same step, never in a step of its own.`
-const ASKS_SYSTEM = `You log one exchange of a chat between a user and an AI coding assistant. The user dictates, so messages ramble. Reply in plain lines and nothing else.
-First, one line per distinct thing the user asked for in this message, asides included. Each starts with "- ", has at most 20 words, and uses the user's words where short. A bare approval (yes, continue, push) is not a request: write no line for it. With no user message there are no such lines.
-Then, when the reply reports a result, a finding or a decision, one line "did: <what was done or found, in at most 25 words, with the names and numbers that matter>". A reply that only acknowledges gets no such line.
-Last, one line "title: <title>". Repeat the current title if it still names what the chat is working on. Otherwise write a new title of 3 to 6 words. A title names what is being done, never a model.`

@@ -17,11 +17,11 @@ import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_NOW, JOB_SHAPE, whyOf, logLines, endedName, JOB_LOOK, JOB_NEWS, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
 import { isOwnLongScript, plainOf, SILENT_AFTER, SILENT_WARN } from './jobs'
-import { heavyOf, waitingOf, watcherOf } from './jobs'
+import { doingOf, heavyOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
-import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, namingPrompt } from './naming'
+import { ASKS_SYSTEM, LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, namingPrompt } from './naming'
 import type { Naming, NamingAsk } from './naming'
 import { batteryShown, FOOTPRINT_BATTERY_EVERY, FOOTPRINT_EVERY, gbText, isOnBatteryLook, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, USAGE_BATTERY_EVERY, USAGE_EVERY, USAGE_LINUX, USAGE_WINDOWS, usageMac } from './usage'
 import type { UsageFigures, UsageKept } from './usage'
@@ -30,7 +30,7 @@ import { USAGE_CELLS, usageDrawn, usageSpacersDrawn, usageText } from './usage-b
 import { PACE_EVERY, PACE_LOOK, PACE_SET, PACE_THREADS, paceLookOf, paceNeedsThreads, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
-import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, SKIP_ONE, SKIP_TOLD, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, SKIP_ONE, SKIP_TOLD, setAsideTold, STAR_SYSTEM, starOf, starPrompt, starsDue, monthKey, withStar, topicState, withSetAside, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
 import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
@@ -1195,10 +1195,6 @@ const QUIET_STEPS = 12
 const NOTE_STALE = 3 * 60_000
 const unnoted = (mins: number, last: string) =>
 `${last ? `Your card has said "${cut(oneLine(last), 80)}" for ${minutesSaid(mins)}, while you have gone on working` : `Your card has not yet said what you are doing, ${minutesSaid(mins)} in`}: that line is how {name} sees what you are doing right now. In your next step, send a \`note\` saying in one plain line what you are doing now, together with your next working call in that same step, never in a step of its own.`
-const ASKS_SYSTEM = `You log one exchange of a chat between a user and an AI coding assistant. The user dictates, so messages ramble. Reply in plain lines and nothing else.
-First, one line per distinct thing the user asked for in this message, asides included. Each starts with "- ", has at most 20 words, and uses the user's words where short. A bare approval (yes, continue, push) is not a request: write no line for it. With no user message there are no such lines.
-Then, when the reply reports a result, a finding or a decision, one line "did: <what was done or found, in at most 25 words, with the names and numbers that matter>". A reply that only acknowledges gets no such line.
-Last, one line "title: <title>". Repeat the current title if it still names what the chat is working on. Otherwise write a new title of 3 to 6 words. A title names what is being done, never a model.`
 
 
 
@@ -1727,6 +1723,7 @@ const PICTURE_READ = 80_000
 let drainTimer: Timer | undefined
 let draining = false
 let pictureTried = false
+let starsTried = false
 const drainSoon = ($: EngineInterface, ms = PROGRESS_AFTER) => {
 if (drainTimer) return
 drainTimer = afterLoad($, ms, () => void ((drainTimer = undefined), drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`))))
@@ -1812,6 +1809,8 @@ const dropEvent = ($: EngineInterface, name: string) => runOn($, ['rm', '-f', `$
 
 const keepUp = async ($: EngineInterface, event: ProgressEvent, answer: Record<string, unknown>, places: string[]) => {
 if (event.kind === 'said') for (const id of places) await appendTo($, `${progressDir()}/areas/${id}.said.md`, saidEntry(event.at, '', event.text))
+const own = event.kind === 'said' ? starOf({ text: answer.star, own: true }) : undefined
+if (own?.text) await writeStars($, [[monthKey(event.at), own]])
 const topic = event.kind === 'result' && event.topic ? await topicNamed($, event.topic) : ''
 if (!topic || !places.length) return
 const areas = (await readAreas($)).filter(area => places.includes(area.id)).slice(0, 2)
@@ -1834,6 +1833,7 @@ if (!lock) return void ((draining = false), drainSoon($, PROGRESS_RETRY))
 let isLate = false
 try {
 await refreshPicture($).catch(err => indexLog($, `picture not written: ${String(err)}`))
+await refreshStars($).catch(err => indexLog($, `north star not picked: ${String(err)}`))
 await tidyIndex($).catch(err => indexLog($, `topics not tidied: ${String(err)}`))
 await recountResults($).catch(err => indexLog($, `results not queued to be counted: ${String(err)}`))
 await backfillProgress($).catch(err => indexLog($, `history not queued: ${String(err)}`))
@@ -1950,20 +1950,47 @@ const now = await $.clock.now()
 const updated = Date.parse(was.updated)
 const isKnown = Boolean(was.updated) && Number.isFinite(updated)
 if (isKnown && now - updated < PICTURE_EVERY) return
-const since = isKnown ? updated : now - BACKFILL_DAYS * 86_400_000
+const words = await wordsSince($, isKnown ? updated : now - BACKFILL_DAYS * 86_400_000)
+if (!words.length) return
+const r = await $.model.complete({ model: 'sonnet', system: PICTURE_SYSTEM, prompt: picturePrompt(was, words, now, PICTURE_READ), maxTokens: 1500, timeoutMs: 120_000 }).catch(() => undefined)
+const picture = pictureOf(r?.isAnswered ? answerJson(r.text) : undefined, now, was)
+if (!picture) return void (await indexLog($, 'picture not written: no answer'))
+await withProgressFiles($, () => $.fs.write(`${progressDir()}/picture.json`, `${JSON.stringify(picture, null, 2)}\n`))
+await indexLog($, `picture written: ${picture.goals.length} goals`)
+await progressMoved($)
+}
+
+const wordsSince = async ($: EngineInterface, since: number) => {
 const words: { at: string; text: string }[] = []
 const listed = (await $.fs.list(`${dir}/words`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
 const names = new Set(listed.map(entry => entry.name))
 for (const entry of listed)
 if (!(!entry.name.endsWith('.said.md') && names.has(entry.name.replace(/\.md$/, '.said.md'))) && !(entry.mtimeMs && entry.mtimeMs < since)) words.push(...wordsIn(await fileEnd($, `${dir}/words/${entry.name}`), since))
-if (!words.length) return
-words.sort((a, b) => (a.at < b.at ? -1 : 1))
-const r = await $.model.complete({ model: 'sonnet', system: PICTURE_SYSTEM, prompt: picturePrompt(was, words, now, PICTURE_READ), maxTokens: 1500, timeoutMs: 120_000 }).catch(() => undefined)
-const picture = pictureOf(r?.isAnswered ? answerJson(r.text) : undefined, now)
-if (!picture) return void (await indexLog($, 'picture not written: no answer'))
-await withProgressFiles($, () => $.fs.write(`${progressDir()}/picture.json`, `${JSON.stringify(picture, null, 2)}\n`))
-await indexLog($, `picture written: ${picture.goals.length} goals`)
-await progressMoved($)
+return words.sort((a, b) => (a.at < b.at ? -1 : 1))
+}
+
+const writeStars = async ($: EngineInterface, picks: [string, { text: string; own: boolean }][]) => {
+const now = await $.clock.now()
+await withProgressFiles($, async () => $.fs.write(`${progressDir()}/picture.json`, `${JSON.stringify(picks.reduce((was, [month, star]) => withStar(was, month, star, now), await readPicture($)), null, 2)}\n`))
+const named = picks.filter(([, star]) => star.text).map(([month]) => month)
+if (named.length) await indexLog($, `north star of ${named.join(', ')} picked`), await progressMoved($)
+}
+const refreshStars = async ($: EngineInterface) => {
+if (starsTried) return
+starsTried = true
+let picture = await readPicture($)
+const now = await $.clock.now()
+const due = starsDue(picture, now)
+if (!due.length) return
+const [words, { areas, entries }, results, topics] = await Promise.all([wordsSince($, Math.min(...due.map(one => one.from))), readProgress($), loadReports($), readIndex($)])
+const picks: [string, { text: string; own: boolean }][] = []
+for (const one of due.reverse()) {
+const prompt = starPrompt(picture, one, words, areas, entries, results, topics)
+const r = prompt ? await $.model.complete({ model: 'sonnet', system: STAR_SYSTEM, prompt, maxTokens: 200, timeoutMs: 120_000 }).catch(() => undefined) : undefined
+const star = prompt ? starOf(r?.isAnswered ? answerJson(r.text) : undefined) : { text: '', own: false }
+if (star && (star.text || !one.isNow)) picks.push([one.month, star]), (picture = withStar(picture, one.month, star, now))
+}
+if (picks.length) await writeStars($, picks)
 }
 
 const asideTold = async ($: EngineInterface, title: string, prompt: string) => {
@@ -12465,15 +12492,6 @@ const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?
 const seenLines = new Map<string, Set<string>>()
 
 const lastCall = new Map<string, { id: string; what: string; at: number; endedAt?: number }>()
-const DOUBLED = new Set(['commit', 'rerun', 'plot', 'crop', 'fit', 'refit', 'format', 'submit', 'omit', 'permit', 'chop', 'prep', 'spin', 'run', 'stop', 'get', 'set', 'put', 'cut', 'plan', 'drop', 'ship', 'scan', 'grab', 'trim', 'zip', 'pin', 'tag', 'map', 'log', 'shut', 'chat', 'swap', 'skip', 'step', 'wrap', 'snap', 'clip', 'dig', 'begin'])
-const VERBS = new Set(['run', 'download', 'upload', 'watch', 'serve', 'wait', 'check', 'render', 'build', 'test', 'install', 'fetch', 'copy', 'move', 'make', 'find', 'read', 'write', 'draw', 'train', 'fit', 'compute', 'count', 'convert', 'compress', 'push', 'pull', 'clone', 'deploy', 'start', 'stop', 'open', 'save', 'sync', 'update', 'fix', 'look', 'search', 'list', 'measure', 'compare', 'merge', 'release', 'export', 'import', 'generate', 'create', 'delete', 'remove', 'clean', 'tidy', 'record', 'capture', 'take', 'shoot', 'encode', 'decode', 'transcribe', 'play', 'send', 'load', 'prepare', 'set', 'get', 'sort', 'scan', 'crop', 'resize', 'split', 'join', 'bake', 'solve', 'analyse', 'analyze', 'plot', 'extract', 'unpack', 'pack', 'zip', 'grade', 'score', 'rank', 'evaluate', 'label', 'align', 'compile', 'lint', 'format', 'verify', 'validate', 'probe', 'query', 'print', 'show', 'restart', 'stage', 'commit', 'rebuild', 'retry', 'redo', 'rerun', 'resize', 'collect', 'gather', 'process', 'index', 'upscale', 'mesh', 'paint', 'cut', 'trim', 'publish', 'post', 'preview', 'shrink', 'combine', 'reset', 'apply', 'mark', 'tag', 'map', 'kill', 'begin', 'close', 'add', 'try'])
-const doingOf = (said: string) => {
-const [first = '', ...rest] = said.trim().split(/\s+/)
-const word = first.toLowerCase()
-if (!VERBS.has(word) || !rest.length) return said.trim()
-const ing = DOUBLED.has(word) ? `${word}${word.at(-1)}ing` : /[^aeiou]e$/.test(word) && word !== 'be' ? `${word.slice(0, -1)}ing` : /ie$/.test(word) ? `${word.slice(0, -2)}ying` : `${word}ing`
-return [ing[0]?.toUpperCase() + ing.slice(1), ...rest].join(' ')
-}
 const callWords = (tool: string, input?: { description?: unknown; command?: unknown }) => {
 const said = oneLine(String(input?.description ?? '')).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
 if (tool.startsWith(TOOLS) || tool.startsWith(OLD_TOOLS) || ['ToolSearch', 'TodoWrite', 'SubagentHandback', 'ExitPlanMode'].includes(tool)) return ''
@@ -15821,6 +15839,7 @@ const [picture, areas, kept, cards, sorting, since] = await Promise.all([readPic
 const entries = new Map(await Promise.all(areas.map(async area => [area.id, await readEntries($, area.id)] as const)))
 return {
 star: picture.star.text,
+stars: picture.stars,
 goals: goalsOf(picture),
 areas,
 entries,
