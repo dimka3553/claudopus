@@ -1275,7 +1275,7 @@ test('the Progress tab opens from its button beside Results: one month\'s chart 
   expect(await until(async () => starHead('“Seeds in every garden” November’s north star, picked from your work'))).toBeDefined()
   const picks = completed.filter(e => e.system?.includes('north star for one month')).map(e => e.prompt)
   expect(picks.map(prompt => /The month: (\w+ \d+)/.exec(prompt)?.[1])).toEqual(['October 2023', 'November 2023'])
-  for (const text of ['- Seed shop (Seeds bought in two taps.): 5 · Seed photos on every page; Seed scanner tried in the shed; Checkout in two taps', '- Bookkeeping (The books close each month.): 1 · October books closed', '- Shop: 3 · ', "The month before's north star, for what changed since (say this month's in its own words): A menu people come back for"]) expect(picks[1]).toContain(text)
+  for (const text of ['- Seed shop (Seeds bought in two taps.): 5 · Seed photos on every page; Seed scanner tried in the shed; Checkout in two taps', '- Bookkeeping (The books close each month.): 1 · October books closed', '- Shop: 3 · ', "The month before's north star (the same words only where this month's work was mostly for the same): A menu people come back for"]) expect(picks[1]).toContain(text)
   expect(picks[0]).toContain('- Cafe menu: 1 · Menu printed')
   expect(picks[0]).not.toContain('Seed shop')
   for (const text of ['North stars', 'November 2023', 'October 2023', 'Seeds in every garden', 'A menu people come back for']) expect(await texts()).toContain(text)

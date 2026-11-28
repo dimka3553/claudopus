@@ -110,6 +110,9 @@ test('the goals are made only from the person\'s own messages, each month\'s nor
   expect(starsDue(picture, Date.parse('2026-11-03T12:00:00'))[0]?.from).toBe(Date.parse('2026-11-03T12:00:00') - 14 * day)
   const early = withStar(withStar(picture, '2026-10', { text: 'Early', own: false }, Date.parse('2026-10-03T08:00:00')), '2026-09', { text: 'Mine', own: true }, Date.parse('2026-09-03T08:00:00'))
   expect(starsDue(early, NOW).map(one => one.month)).toEqual(['2026-11', '2026-10', '2026-08', '2026-07', '2026-06'])
+  // and one picked an older way, before the bigger vision, is picked again, never the person's own words
+  const older = pictureFrom(JSON.stringify({ ...starred, stars: [{ month: '2026-10', text: 'Fix the scanner', own: false, picked: '2026-11-02T08:00:00.000Z' }, { month: '2026-09', text: 'Mine', own: true, picked: '2026-09-03T08:00:00.000Z' }] }))
+  expect(starsDue(older, NOW).map(one => one.month)).toEqual(['2026-11', '2026-10', '2026-08', '2026-07', '2026-06'])
   // Kept newest first, the north star the newest month's with words, read back whatever was written
   const both = withStar(starred, '2026-11', { text: 'One 3D head for every customer', own: false }, NOW)
   expect(both.star).toEqual({ text: 'One 3D head for every customer', said: '2026-11-20' })
@@ -118,6 +121,9 @@ test('the goals are made only from the person\'s own messages, each month\'s nor
   expect(pictureFrom(JSON.stringify({ ...both, stars: [{ month: 'nope', text: 'x' }, ...both.stars.reverse()] })).stars.map(one => one.month)).toEqual(['2026-11', '2026-10'])
   expect(starOf({ text: 'Fix `register.tsx` for heads people love', own: true })).toEqual({ text: 'Fix for heads people love', own: true })
   expect(starOf({ own: true })).toBe(undefined)
+  // A north star longer than asked stays a whole sentence (28 Nov: one was cut at 16 words, "then ship them in the")
+  const long = 'Replace unreliable vision model reads with measured trained networks that beat the best, then ship them in the app'
+  expect(starOf({ text: long })?.text).toBe(long)
   // The month's own work: the person's messages, each area's results and the results by topic, all of that month alone, and the
   // month before's north star; nothing to ask of a month with none
   const work = new Map([['nose', [entry({ title: 'Nose for side faces', at: '2026-10-12T10:00:00.000Z' }), entry({ title: 'Too new', at: '2026-11-02T10:00:00.000Z' })]]])
@@ -126,7 +132,7 @@ test('the goals are made only from the person\'s own messages, each month\'s nor
   const said = [{ at: '2026-10-13T09:00:00.000Z', text: 'the ratios must not change between scans' }, { at: '2026-11-13T09:00:00.000Z', text: 'not this month' }]
   const october = starsDue(withStar(picture, '2026-09', { text: 'Heads that look real', own: false }, NOW), NOW).find(one => one.month === '2026-10')
   const asked = starPrompt(withStar(picture, '2026-09', { text: 'Heads that look real', own: false }, NOW), october as never, said, areas(), work, results, topics)
-  for (const text of ['The month: October 2026', "The month before's north star, for what changed since (say this month's in its own words): Heads that look real", '- Nose (A nose that fits every face): 1 · Nose for side faces', '- Scans (An accurate, consistent scan): 1 · Scan ratios checked', '[2026-10-13] the ratios must not change between scans']) expect(asked).toContain(text)
+  for (const text of ['The month: October 2026', "The month before's north star (the same words only where this month's work was mostly for the same): Heads that look real", '- Nose (A nose that fits every face): 1 · Nose for side faces', '- Scans (An accurate, consistent scan): 1 · Scan ratios checked', '[2026-10-13] the ratios must not change between scans']) expect(asked).toContain(text)
   for (const text of ['Too new', 'Too old', 'not this month']) expect(asked).not.toContain(text)
   // Too many messages to read are spread over the whole month, the first of it as well as the last
   const many = Array.from({ length: 300 }, (_, i) => ({ at: `2026-10-${String(1 + Math.floor(i / 10)).padStart(2, '0')}T09:00:00.000Z`, text: `${i === 0 ? 'first' : i === 299 ? 'last' : 'more'} ${'words '.repeat(60)}` }))
