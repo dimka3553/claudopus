@@ -697,9 +697,14 @@ test('a message of mine passed on to work already listed opens its to-do again, 
   await pane.unmount()
 })
 
-test('the panel shows how full the context of this chat and of each piece of work is, and the model the work runs on', async ($, on) => {
-  world(on, { model: 'claude-opus-5-5-20261001' })
+test('the panel shows how full the context of this chat and of each piece of work is, on any model, and the model the work runs on', async ($, on) => {
+  const { files } = world(on, { model: 'claude-opus-5-5-20261001', startedOn: { 'Draw the ear': 'claude-fable-5-2', 'Sketch the chin': 'claude-sonnet-5-5' } })
+  on('session.model', () => ({ value: 'claude-opus-5-5' }) as never)
+  // A chat on Fable once measured its window, kept for every chat
+  files.set(`${MEMORY}/windows.json`, JSON.stringify({ 'Fable 5.2': 1_000_000 }))
   await $.session.start(start)
+  // This chat's own model's window is kept beside it
+  expect(JSON.parse(files.get(`${MEMORY}/windows.json`) ?? '{}')).toEqual({ 'Fable 5.2': 1_000_000, 'Opus 5.5': 500_000 })
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   // A copy of the chat, as work began before every piece started from a brief, has the chat's window
   await $.agent.spawn({ ...spawn, subagentType: 'fork', fork: true, prompt: 'fix the nose' } as never)
@@ -733,6 +738,15 @@ test('the panel shows how full the context of this chat and of each piece of wor
   expect(await slim.find({ type: 'Text', text: /^Opus 5\.5 · / })).toBeUndefined()
   expect((await slim.find({ type: 'Text', text: /^\d+s$/ }))?.text).toBe('0s')
   await slim.unmount()
+  // Tasks on other models than the chat's say how full they are too: against their model's window as a chat on it measured it,
+  // else against this chat's
+  for (const [description, model] of [['Draw the ear', 'claude-fable-5-2'], ['Sketch the chin', 'claude-sonnet-5-5']]) {
+    const { agentId } = (await $.agent.spawn({ ...spawn, description, prompt: 'go' } as never)) as unknown as { agentId: string }
+    for await (const chunk of $.turn.step({ turnId: `turn-${agentId}`, index: 0, model: model!, messageCount: 2, agentId })) void chunk
+  }
+  const all = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await all.findAll({ type: 'Text', text: /^ · \d+% full/ })).map(t => t.text).sort()).toEqual([' · 31% full · 0s', ' · 61% full · 0s', ' · 61% full · 3 of 16 to-dos done · 0s'])
+  await all.unmount()
 })
 
 test("a card's title, its line of facts and every line under them start at one left edge, on a desktop and in a terminal, at work, asking (the question's outline at that edge) and finished", async ($, on) => {
@@ -1445,7 +1459,8 @@ test('work that ended before the mod kept it is read back from the chat\'s own r
   expect(fold?.props.label).toBe('▸ Finished 1')
   await pane.press({ key: String(fold?.key) })
   expect((await pane.find({ type: 'Text', text: /The old line/ }))?.text).toBe(' · The old line')
-  expect((await pane.find({ type: 'Text', text: /to-dos done ·/ }))?.text).toBe('Opus 5.5 · 1 of 1 to-dos done · 5m 00s')
+  // (how full it is, read back too, even on a model this chat does not run on)
+  expect((await pane.find({ type: 'Text', text: /to-dos done ·/ }))?.text).toBe('Opus 5.5 · 0% full · 1 of 1 to-dos done · 5m 00s')
   expect(await pane.find({ type: 'Text', text: /secret|not ours|helper/ })).toBeUndefined()
   await pane.unmount()
 })

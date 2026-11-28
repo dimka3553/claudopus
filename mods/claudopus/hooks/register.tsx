@@ -391,6 +391,20 @@ isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}
 const fill = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
 const percent = (tokens: number, window: number) => (isRunFromAfar ? Math.floor((tokens / window) * 20) * 5 : Math.round((tokens / window) * 100))
 const share = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
+let windowsKnown: Record<string, number> = {}
+const sizesPath = () => `${dir}/windows.json`
+const readWindows = async ($: EngineInterface) => {
+const kept = parsed<Record<string, unknown>>(dir ? await readOr($, sizesPath()) : '', {})
+windowsKnown = { ...Object.fromEntries(Object.entries(kept && typeof kept === 'object' ? kept : {}).filter((pair): pair is [string, number] => typeof pair[1] === 'number' && pair[1] > 0)), ...windowsKnown }
+}
+const learnWindow = async ($: EngineInterface, window: number) => {
+const name = modelName(await $.session.model().catch(() => ''))
+if (!dir || !name || !(window > 0) || windowsKnown[name] === window) return
+await readWindows($)
+windowsKnown = { ...windowsKnown, [name]: window }
+await $.fs.write(sizesPath(), JSON.stringify(windowsKnown)).catch(() => undefined)
+}
+const windowFor = (model: string, fallback: number) => windowsKnown[modelName(model)] || fallback
 const modelName = (id: string) => {
 const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
 return m?.[1] ? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}${m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''}` : ''
@@ -1027,7 +1041,7 @@ return `${drive}/${parts.join('/')}`
 const progName = (word: string) => (isWindows ? (word.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.exe$/, '') : (word.split('/').pop() ?? ''))
 const runnerAt = (root: string, name: string) => (/\s/.test(root) ? `"${root}/bin/${name}"` : `${root}/bin/${name}`)
 const MEMORY_READERS = [...BOX_READERS, 'cat', 'jq', 'diff', 'cmp', 'shasum', 'sha256sum', 'md5', 'md5sum']
-const MEMORY_OWN = ['live', 'ledger', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
+const MEMORY_OWN = ['live', 'ledger', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads', 'windows.json']
 const MEMORY_PERSON = ['config.json', 'rules', 'roles']
 const namesMemory = (text: string, names: readonly string[]) => {
 const words = BOX_WORDS(text)
@@ -11748,7 +11762,10 @@ return notGiven()
 const measure = async ($: EngineInterface) => {
 const context = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context
 const window = context?.breakdown?.rawMaxTokens ?? context?.window
-return update($, me, one => ({ ...one, tokens: context?.tokens ?? one.tokens, window: window ?? one.window }))
+await readWindows($)
+const m = await update($, me, one => ({ ...one, tokens: context?.tokens ?? one.tokens, window: window ?? one.window }))
+await learnWindow($, m.window)
+return m
 }
 const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 await measure($)
@@ -14534,7 +14551,7 @@ return { deny: shape ? `${REFUSED} ${shape}` : REFUSED }
 })
 on('session.measure', async ($, e, next) => {
 const tokens = e.context.tokens
-if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
+if (tokens !== undefined) await learnWindow($, (await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))).window)
 if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
 return next(e)
 })
@@ -15777,7 +15794,7 @@ const shownIds = new Set(shownWork.map(one => one.id))
 const needsFor = (one: Todo) => needsOf($, one, e.surface, at, !keysHeldNow()).filter(need => one.chat || shownIds.has(one.id) || !/^(?:box|prompt)-/.test(need.id))
 let keptUpNow = new Set<string>()
 const ours = modelName(await $.session.model().catch(() => ''))
-const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
+const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : windowFor(one.model ?? '', chat.window))
 const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
 const isFinishMoment = (one: Todo) => hasResult(stage(one)) && lingers(one, at)
 const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false

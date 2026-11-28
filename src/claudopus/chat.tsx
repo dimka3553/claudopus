@@ -4,7 +4,10 @@
 const measure = async ($: EngineInterface) => {
   const context = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context
   const window = context?.breakdown?.rawMaxTokens ?? context?.window
-  return update($, me, one => ({ ...one, tokens: context?.tokens ?? one.tokens, window: window ?? one.window }))
+  await readWindows($)
+  const m = await update($, me, one => ({ ...one, tokens: context?.tokens ?? one.tokens, window: window ?? one.window }))
+  await learnWindow($, m.window)
+  return m
 }
 
 // ---- After each reply: the size, the answer, the asks and the title ----

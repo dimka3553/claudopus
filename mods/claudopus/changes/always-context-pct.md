@@ -1,0 +1,1 @@
+- Every task card now says how full its task is, on any model and whether it is at work, waiting or finished: a task on another model than the chat's used to show no share at all

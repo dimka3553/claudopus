@@ -545,6 +545,25 @@ const fill = (tokens: number, window: number) => (window ? `${percent(tokens, wi
 // The same for a piece of work, short enough for its status line
 const percent = (tokens: number, window: number) => (isRunFromAfar ? Math.floor((tokens / window) * 20) * 5 : Math.round((tokens / window) * 100))
 const share = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
+// Each model's context window, by its name ("Opus 5.5"), as a chat on it measured it, kept in windows.json for every chat on this
+// Mac: a card measures its task against its own model's window, working, waiting or ended. A model no chat has run on yet is
+// measured against this chat's window, the nearest known, so every card shows how full it is (28 Nov, the person: "I always want
+// the percentage to be seen"; until then a task on another model than the chat's showed no share at all)
+let windowsKnown: Record<string, number> = {}
+const sizesPath = () => `${dir}/windows.json`
+const readWindows = async ($: EngineInterface) => {
+  const kept = parsed<Record<string, unknown>>(dir ? await readOr($, sizesPath()) : '', {})
+  windowsKnown = { ...Object.fromEntries(Object.entries(kept && typeof kept === 'object' ? kept : {}).filter((pair): pair is [string, number] => typeof pair[1] === 'number' && pair[1] > 0)), ...windowsKnown }
+}
+// The window this chat measured, kept for its model
+const learnWindow = async ($: EngineInterface, window: number) => {
+  const name = modelName(await $.session.model().catch(() => ''))
+  if (!dir || !name || !(window > 0) || windowsKnown[name] === window) return
+  await readWindows($)
+  windowsKnown = { ...windowsKnown, [name]: window }
+  await $.fs.write(sizesPath(), JSON.stringify(windowsKnown)).catch(() => undefined)
+}
+const windowFor = (model: string, fallback: number) => windowsKnown[modelName(model)] || fallback
 
 // A model's name as the app writes it, from its id or alias: "Opus 5.5". Nothing for a name it cannot read
 const modelName = (id: string) => {
