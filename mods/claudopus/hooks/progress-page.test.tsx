@@ -24,7 +24,7 @@ const squaresIn = (source: string) => (source.match(/h[34]v[34]h-[34]z/g) ?? [])
 const namesOf = (source: string) => [...source.matchAll(/<text x="([\d.]+)" y="([\d.]+)"(?: text-anchor="end")? (?![^>]*font-style)[^>]*font-size="(?:12\.5|11)"[^>]*>([^<]*)<\/text>/g)].map(m => ({ x: Number(m[1]), y: Number(m[2]), name: m[3] as string }))
 
 test('the chart is one month and its rows are the areas: a square for each result, a row for each area worked on in it with the busiest first and its results of the month at the right, at most seven and the rest as Other, the area at work in purple', () => {
-  for (const width of [728, 398]) {
+  for (const width of [800, 398]) {
     for (const n of [3, 12, 40]) {
       const areas = areasOf(n)
       const chart = chartOf('Software people trust to grow their small shop', areas, width, now)
@@ -40,7 +40,7 @@ test('the chart is one month and its rows are the areas: a square for each resul
       expect(chart.label).toBe('November 2026')
     }
   }
-  const chart = chartOf('Software people trust to grow their small shop', areasOf(12), 728, now)
+  const chart = chartOf('Software people trust to grow their small shop', areasOf(12), 800, now)
   expect(src(chart)).toContain('“Software people trust to grow their small shop”')
   // Area 3 is the busiest by far, so its row is the first; each row ends in its results of the month
   expect(namesOf(src(chart))[0]?.name).toBe('Area 3')
@@ -58,18 +58,18 @@ test('the chart is one month and its rows are the areas: a square for each resul
   // A wider chart never draws fewer squares, though from 765 its names stand beside the rows and its squares are larger
   const counts = Array.from({ length: 136 }, (_, i) => squaresIn(src(chartOf('', areasOf(12), 250 + i * 10, now))))
   expect(counts.filter((n, i) => n < (counts[i - 1] ?? 0))).toEqual([])
-  const whole = chartOf('Software people trust to grow their small shop', areasOf(12), 728, now, 0, 0, true)
+  const whole = chartOf('Software people trust to grow their small shop', areasOf(12), 800, now, 0, 0, true)
   expect([whole.rows.length, whole.top, whole.others.length]).toEqual([12, 7, 5])
 })
 
 test('an earlier month is its own chart with its own rows, back to the first month with a result: no today, a square stands for more results once a day would stand too tall, and a line shows where Claudopus came in only in its month', () => {
   const long = (n: number): ChartArea[] =>
-    Array.from({ length: n }, (_, i) => ({ ...areasOf(n)[i], days: Array.from({ length: CHART_DAYS }, (_, d) => (d < CHART_DAYS - 100 ? 0 : i === 0 ? 60 : i === 2 ? 0 : 1)) }) as ChartArea)
+    Array.from({ length: n }, (_, i) => ({ ...areasOf(n)[i], days: Array.from({ length: CHART_DAYS }, (_, d) => (d < CHART_DAYS - 100 ? 0 : i === 0 ? 100 : i === 2 ? 0 : 1)) }) as ChartArea)
   const since = now - 20 * 86_400_000
   // 100 days back from 27 Nov is 20 Aug: August, September, October, November
   expect(chartMonths(long(3), now)).toBe(4)
   expect(chartMonths(areasOf(3), now)).toBe(1)
-  for (const width of [728, 398]) {
+  for (const width of [800, 398]) {
     const chart = chartOf('Software people trust to grow their small shop', long(3), width, now, since)
     expect(Math.max(...[chart.head, ...chart.rows, chart.foot].map(part => part.source.length))).toBeLessThanOrEqual(131_072)
     expect(chart.alt).toMatch(/Each square is \d+ results\./)
@@ -82,17 +82,17 @@ test('an earlier month is its own chart with its own rows, back to the first mon
     expect(src(october)).toContain('>1 Oct</text>')
     expect(src(october)).not.toContain('>today</text>')
     expect(src(october)).not.toContain('>Claudopus</text>')
-    // All 31 days of it: 60 a day in the first area, 1 a day in the second, and the area with nothing that month has no row
-    expect(src(october)).toContain(`fill="#5CB85C">${31 * 60}</text>`)
+    // All 31 days of it: 100 a day in the first area, 1 a day in the second, and the area with nothing that month has no row
+    expect(src(october)).toContain(`fill="#5CB85C">${31 * 100}</text>`)
     expect(src(october)).toContain('fill="#5CB85C">31</text>')
-    expect(namesOf(src(october)).filter(one => !/^\d+$/.test(one.name)).map(one => one.name)).toEqual(['Area 0', width === 728 ? 'An area with a rathe…' : 'An area with a rather long name'])
+    expect(namesOf(src(october)).filter(one => !/^\d+$/.test(one.name)).map(one => one.name)).toEqual(['Area 0', width === 800 ? 'An area with a rathe…' : 'An area with a rather long name'])
     // A month before the first result says nothing is kept from it
     expect(src(chartOf('', long(3), width, now, since, 5))).toContain('>Nothing is kept from June 2026</text>')
     // August began on the 20th
-    expect(src(chartOf('', long(3), width, now, since, 3))).toContain(`fill="#5CB85C">${12 * 60}</text>`)
+    expect(src(chartOf('', long(3), width, now, since, 3))).toContain(`fill="#5CB85C">${12 * 100}</text>`)
   }
   // A quiet month's square is one result
-  expect(chartOf('Software people trust to grow their small shop', areasOf(3), 728, now, now - 60 * 86_400_000).alt).not.toContain('Each square is')
+  expect(chartOf('Software people trust to grow their small shop', areasOf(3), 800, now, now - 60 * 86_400_000).alt).not.toContain('Each square is')
 })
 
 test('a page of every area too big to draw gives up its boxes\' pictures, six at a time, then shuts the chart\'s Other, then the areas under no goal, and then has nothing more to give up', () => {
