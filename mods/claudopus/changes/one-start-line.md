@@ -1,1 +1,2 @@
 - When the chat starts a task or passes your message on, it now says so in one line, after it has done it, not in one line before and another after. If it still writes two, the second carries on under the first without the task's name and your message again.
+- A result that is a file for you to read, such as a document or a post, now reaches the chat with that file to click open: the task names it in its short result, and where it did not, the chat sends it. A short result no longer points at text the chat does not show.

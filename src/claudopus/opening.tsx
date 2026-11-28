@@ -72,17 +72,22 @@ const sentOpenable = async ($: EngineInterface, e: { files?: unknown }) => {
 // has it, and a whole line that is one path, spaces and all, as a report gives a file. A path written with backslashes (Windows) is
 // given its copy with backslashes too
 const withOpenables = async ($: EngineInterface, text: string) => {
-  if (!openablesDir() || !(text.includes('/') || (isWindows && text.includes('\\')))) return text
+  const copies = await openablesOf($, text)
+  if (!copies.size) return text
+  const quoted = [...copies.keys()].map(path => path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return text.replace(new RegExp(`(${quoted.join('|')})(?![\\w/${isWindows ? '\\\\' : ''}-]|\\.\\w)`, 'g'), path => copies.get(path) ?? path)
+}
+// Each file a text names outside the chat's folder, as the text has it, with the copy made of it
+const openablesOf = async ($: EngineInterface, text: string) => {
+  const copies = new Map<string, string>()
+  if (!openablesDir() || !(text.includes('/') || (isWindows && text.includes('\\')))) return copies
   const home = await homeOf($)
   const lines = text.split('\n').map(line => line.trim().replace(/^(?:[-*]\s+)?`?/, '').replace(/`$/, '').replace(/[.:]$/, ''))
   const named = [...new Map([...lines.filter(line => isAbsPath(line) && !line.includes('`')).map(line => ({ written: line, path: keptPath(line) })), ...pathsWritten(text)].map(one => [one.written, one.path])).entries()].filter(([, path]) => isMadeHere(path, home))
-  const copies = new Map<string, string>()
   for (const [written, path] of named.sort((a, b) => b[0].length - a[0].length)) {
     if (copies.size >= OPENABLE_MOST) break
     const to = await openable($, path, home)
     if (to) copies.set(written, isWindows && written.includes('\\') ? to.replace(/\//g, '\\') : to)
   }
-  if (!copies.size) return text
-  const quoted = [...copies.keys()].map(path => path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-  return text.replace(new RegExp(`(${quoted.join('|')})(?![\\w/${isWindows ? '\\\\' : ''}-]|\\.\\w)`, 'g'), path => copies.get(path) ?? path)
+  return copies
 }
