@@ -53,7 +53,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
     return m ? m[1][0].toUpperCase() + m[1].slice(1) + (m[2] ? ' ' + m[2] + (m[3] ? '.' + m[3] : '') : '') : String(id)
   }
 
-  // ---- the timeline, as Stats draws it in Claudopus: a row for each task running at once, each stretch in its model's colour, quiet
+  // ---- the timeline, as Stats draws it in Claudopus: a row for each task and helper at work at once, each stretch in its model's colour, quiet
   // gaps over half an hour squeezed to a narrow break. It never names a task: the board is sent stretches and models only ----
   const COLORS = [[/opus/, '#8A63F0'], [/sonnet/, '#2FA39A'], [/fable|mythos/, '#D0479A'], [/haiku/, '#7F8C9E']]
   const colorOf = id => (COLORS.find(([re]) => re.test(String(id))) || [0, '#9A9A9A'])[1]
@@ -69,7 +69,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
       return { a: Math.max(a, from), z: a + Math.max(1, Number(b[1]) || 1) * MIN, m: String(models[Number(b[2])] ?? '') }
     }).filter(b => b.z > b.a)).filter(bars => bars.length)
     if (!pieces.length) return `<section class="lb-block lb-line"><h2>Timeline</h2><p class="soft">No tasks in this range.</p></section>`
-    // Rows: each task in the first row free by its start, so the rows count the tasks running at once
+    // Rows: each task or helper in the first row free by its start, so the rows count those at work at once
     const ends = [], lane = pieces.map(bars => {
       const a = bars[0].a, i = ends.findIndex(end => end <= a), at = i < 0 ? ends.length : i
       ends[at] = bars[bars.length - 1].z
@@ -91,8 +91,8 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
     })).join('')
     const ticks = gap >= 3 ? parts.slice(1).map(p => `<path d="M${(p.x - gap / 2).toFixed(1)} 122v6" stroke="currentColor" stroke-dasharray="2 2"/>`).join('') : ''
     const used = [...new Set(pieces.flat().map(b => b.m).filter(Boolean))]
-    return `<section class="lb-block lb-line"><div class="lb-line-head"><h2>Timeline</h2><span class="soft">Up to ${rows} tasks at once</span></div>
-<svg class="lb-timeline" viewBox="0 0 ${W} 130" preserveAspectRatio="none" role="img" aria-label="${pieces.length} tasks on a timeline">${bars}${ticks}</svg>
+    return `<section class="lb-block lb-line"><div class="lb-line-head"><h2>Timeline</h2><span class="soft">Up to ${rows} at work at once</span></div>
+<svg class="lb-timeline" viewBox="0 0 ${W} 130" preserveAspectRatio="none" role="img" aria-label="${pieces.length} tasks and helpers on a timeline">${bars}${ticks}</svg>
 <div class="lb-line-axis soft"><span>${when(parts[0].a)}</span><span>${when(parts[parts.length - 1].z)}</span></div>
 <ul class="lb-line-legend">${used.map(m => `<li><i style="background:${colorOf(m)}"></i>${esc(modelName(m))}</li>`).join('')}</ul></section>`
   }
@@ -138,7 +138,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
     }).join('')
     return `<div class="lb-scroll"><table class="lb-table"><thead><tr><th>#</th><th>Username</th>${head('work', 'Time of work')}${head('clock', 'Time on the clock')}${head('efficiency', 'Efficiency')}<th>Favourite model</th>${head('tokens', 'Tokens')}${head('cost', 'API cost')}<th class="num">Tasks done</th></tr></thead><tbody>${body}</tbody></table></div>
 <p class="lb-count">${total === 1 ? '1 person' : count(total) + ' people'} on the board</p>
-<ul class="lb-notes note"><li>Time of work: how long Claude's tasks worked, added up.</li><li>Efficiency: how much work got done for each hour on the clock.</li><li>Favourite model: the model that used the most tokens.</li><li>API cost: what the same use would cost at Anthropic's list prices.</li></ul>`
+<ul class="lb-notes note"><li>Time of work: how long Claude's tasks and their helpers worked, each added up.</li><li>Efficiency: how much work got done for each hour on the clock.</li><li>Favourite model: the model that used the most tokens.</li><li>API cost: what the same use would cost at Anthropic's list prices.</li></ul>`
   }
 
   const person = p => {
@@ -172,7 +172,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
       : `<p class="soft">No models used in this range.</p>`
     const work = `<dl class="lb-work">${[
       ['Messages', count(s.messages)], ['To-dos done', count(s.todos)], ['Workflows', count(s.flows)],
-      ['Most tasks at once', count(s.most)], ['Average time per task', s.tasks ? span(s.per_task) : '–'],
+      ['Most at work at once', count(s.most)], ['Average time per task', s.tasks ? span(s.per_task) : '–'],
     ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`
     return rank + tiles + timelineHtml(p.timeline, range) + `<div class="lb-blocks">
 <section class="lb-block"><h2>Tokens</h2>${bar}${legend}</section>

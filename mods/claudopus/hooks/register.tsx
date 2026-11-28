@@ -4517,7 +4517,7 @@ kept.dirty.clear()
 
 type Head = { folder: string; sought?: number; cells: Record<string, TokenSums>; months: number[]; old?: 1 }
 const headNew = (): Head => ({ folder: '', cells: {}, months: [] })
-const MONTHS_V = 1
+const MONTHS_V = 2
 type AllKept = { v: number; mv?: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
 const allNew = (now: number): AllKept => ({ v: CACHE_V, mv: MONTHS_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
 async function allRead($: EngineInterface, memory: string) {

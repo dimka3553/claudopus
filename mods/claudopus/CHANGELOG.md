@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.318 · 28 November 2026
+- The Stats timeline now shows every helper as a bar of its own, in its own model's colour, beside the tasks, so one chart shows every Claude at work; the strip of tasks and helpers under it is gone.
+- Time of work, time saved, efficiency and the most at work at once now count each helper's time as well as its task's, so helpers working at the same time each add theirs, on the leaderboard too.
+
 ## 0.2.317 · 28 November 2026
 - The Progress chart no longer shows fewer squares as the panel gets wider: a wider chart now draws at least as many as a narrower one.
 
