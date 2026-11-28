@@ -41,7 +41,6 @@ const isDetaching = (call: { tool: string; command?: unknown }) => {
   const shell = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2\b/g, ' ').replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, '""')
   return /(?:^|[\s;&|(])(?:nohup|setsid|disown)(?:\s|$|;)/.test(shell) || /(?<![&>|<])&(?![&>])\s*(?:$|[;)\n]|echo\s+\$!|\S)/.test(shell.replace(/\d?>&\d?|&>>?/g, ' '))
 }
-const NO_DETACH = 'Not run: this command detaches what it starts (nohup, setsid, disown or a trailing &), so nothing would show it on your card or tell you when it ends. Send the command itself, without those, with `run_in_background: true`.'
 // A wait for the person themselves, by the words the work gives its command: there is no time to give them. Their answer to a
 // question comes as a message the moment they give it, however long it takes, so the work ends its step instead
 const isPersonWait = (call: { tool: string; command?: unknown; description?: unknown }, name: string) => {
@@ -56,8 +55,6 @@ const asksNow = (list: Todo[], agent: string) => {
   const top = topOf(list, agent)
   return list.some(one => (one.id === agent || one.id === top) && asksOf(one).some(ask => !ask.replied))
 }
-const NO_PERSON_WAIT = (name: string) =>
-  `Not run: this command waits for ${name}, and a wait with a time limit gives them one. Don't wait for ${name} with a command at all. End your step now: your question stays on the card for as long as it takes, and ${name}'s answer comes to you as a message the moment they give it. Anything you need to see of what they did (a recording, a file, a page), look at once their answer has come.`
 // The note Claude Code adds when a task ends its step without its report. Where the press can bring nothing (its report was taken
 // already, or it ended its step with a question or a permission open for the person), it is answered with no model, by a line the
 // app draws as nothing in a task's chat (it takes system reminders out of an agent's text, and leaves out a block left empty)
@@ -94,12 +91,6 @@ const NO_WAIT = (kind: WaitKind) =>
     : kind === 'time'
       ? 'Not run: this command only passes time, and nothing you start may wait by the clock. To wait for something far away (a cloud job, a page, a file), run a watch in the background that looks for it and ends when it is there: its end starts your next step. With nothing else to do, end your step.'
       : 'Not run: this command only waits, and held open it keeps you from everything else. Send the same call again with `run_in_background: true`, its description beginning with Watch: it is a watch on your card that ends when the thing is there, and its end starts your next step. Carry on meanwhile with what needs nothing from it, or end your step.'
-const NO_FOLLOW =
-  'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20): the end of your command starts your next step by itself.'
-const SEND_BACKGROUND = (name: string) =>
-  `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: its end starts your next step, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
-// The chat's own command, which runs only in the background
-const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
 
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
 // bin/release, bin/keyring) are let through unread
@@ -573,13 +564,23 @@ const workHooks = (on: On) => {
       const agent = e.agentId
       const refused = handbackRefused(await ownCards($), agent)
       if (refused) return (await log($, `work ${agent}'s hand-back refused: ${refused.slice(0, 60)}`), { deny: refused })
-      const report = String((e as { message?: unknown }).message ?? '').trim()
+      const given = String((e as { message?: unknown }).message ?? '').trim()
+      // A long report of a task's own begins with its short result, which is all the chat shows: one that does not is asked for
+      // again, once (shortOf); a second without it goes through, and the chat cuts it down
+      const asker = (await ownCards($)).find(one => one.id === agent)
+      if (dir && !isOff && asker && !asker.parentId && !asker.flagged && !flowAgents.has(agent) && given && !shortOf(given) && !longAsked.has(agent)) {
+        longAsked.add(agent)
+        await log($, `work ${agent}'s hand-back refused once: ${wordCountOf(given)} words with no short result at its start`)
+        return { deny: named(NOT_HANDED_LONG(wordCountOf(given), false)) }
+      }
+      const report = withShortRule(given)
       // A task's report goes to the chat as its own reply, not in Claude Code's box (REPORT_TAKEN): Claudopus answers the hand-back
       // itself, keeps the report as one that went through, and gives it to the chat with Claude Code's notice that the task ended
       // (chatHooks' prompt.submit). The task's steps after it are answered with no model (turn.step), so it ends at once
       const taken = (await ownCards($)).find(one => one.id === agent)
       if (dir && !isOff && taken && !taken.parentId && !flowAgents.has(agent)) {
         handedBack.set(agent, report)
+        longAsked.delete(agent)
         const now = await $.clock.now()
         // (one a safety check ended hands in only word of that: it failed, and says so)
         await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...(one.flagged ? { ...ended(one, 'failed', now), why: WHY_FLAGGED } : { ...ended(one, 'done', now), reportAt: now }), answer: report.slice(0, ANSWER_CHARS) || one.answer, reportForChat: report, reportGiven: undefined, tookReport: String(e.tool_use_id) })))

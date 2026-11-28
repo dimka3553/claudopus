@@ -21,17 +21,6 @@ const LONG_RUN = 60_000
 // The most lines of each kind one agent is told
 const LINES_EACH = 2
 
-// What a step sends back, in the words the work reads
-const HELPER_ALONE =
-  'That step started one helper and nothing else. The helper runs in the background and its result comes to you when it ends, so continue now with what needs nothing from it. Next time, send in the same step every call that needs nothing from the helper: other helpers, your own part, the second look, notes.'
-const LOOKUP_RUN = (n: number) =>
-  `The last ${n} steps each held one lookup. Send the lookups you already know you need together in one step. When you need only the conclusion of reading or searching across many files, send that to a helper, which keeps your context small. Read a single file you know yourself.`
-const SERIAL_RUNS = (what: string) =>
-  `Two long commands of one kind (${what}) ran one after the other, each alone in its step. When they don't depend on each other, run them side by side: each in its own throwaway chat, worktree, terminal session or background command, or each as a helper, all started in one step.`
-const BOOK_ALONE =
-  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next working call.'
-const LOOK_NOW =
-  'You committed. The second look, the pictures and the docs need nothing more than this: start them now, as helpers in the same step as your next calls, not after the rest is done.'
 
 // Per agent: its single lookups in a row, the last long run's kind, and how many of each line it was told
 const stepsSeen = new Map<string, { lookups: number; lastRun?: string; told: Record<string, number>; checkerAt?: number; steps: number; singles: number }>()
@@ -105,7 +94,6 @@ const stepHooks = (on: On) => {
 
 // ---- Helpers run in the background, and their task never waits for them with a command ----
 
-const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'
 // The helpers Claudopus stopped itself, with the task above them
 const stoppedByUs = new Set<string>()
 

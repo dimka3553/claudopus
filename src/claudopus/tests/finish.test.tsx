@@ -816,11 +816,37 @@ test('a task hands in a finished part of its result while it works on: its card 
   agents.a2 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'The jaw is built.' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd2', agentId: 'a1', item: 'Build the jawline', state: 'done' } as never)
-  const last = `The jawline is built and fits all 47 films. ${'It holds at every angle. '.repeat(25)}`
-  const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: last } as never)) as { deny?: string; result?: { message?: string } }
+  // A long report begins with its short result, all the chat shows: one that does not is asked for again, once, and so is a part
+  const rest = `How it was built\n\n${'It holds at every angle. '.repeat(40)}`
+  const long = `The jawline is built and fits all 47 films. ${'It holds at every angle. '.repeat(40)}`
+  const longPart = (await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r5', agentId: 'a1', message: long } as never)) as { result?: string }
+  expect(longPart.result).toContain('this part is 209 words long and does not begin with its short result')
+  expect(reportsOf()).toHaveLength(kept ?? 0)
+  const refused = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb0', agentId: 'a1', message: long } as never)) as { deny?: string }
+  expect(refused.deny).toContain('your report is 209 words long and does not begin with its short result')
+  expect(refused.deny).toContain('a line holding only `---`')
+  const short = 'The jawline is built and fits all 47 films.\nIt is not live yet.\nNothing is needed from you.'
+  const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: `${short}\n---\n${rest}` } as never)) as { deny?: string; result?: { message?: string } }
   expect([handed.deny, handed.result?.message]).toEqual([undefined, expect.stringContaining('Report delivered to your caller')])
   await clock.advance(1000)
-  expect(await until(async () => (reportsOf().length === (kept ?? 0) + 1 ? reportsOf() : undefined))).toHaveLength(4)
+  // The whole of it is kept, its rule apart from the short result, which alone goes to the chat, to pass on as it came
+  const all = await until(async () => (reportsOf().length === (kept ?? 0) + 1 ? reportsOf() : undefined))
+  expect(all).toHaveLength(4)
+  expect((all ?? []).map(path => files.get(path)).some(text => text === `${short}\n\n---\n${rest.trim()}\n`)).toBe(true)
+  const end = ((await $.prompt.submit({ text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Beards and jawline" finished</summary>\n</task-notification>', wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(end).toContain('has finished, and its report follows')
+  expect(end).toContain('This is its short result, all of it that goes into the chat: pass it on to ')
+  expect(end).toContain(` opens it with Result on your reply, and it is in ${(all ?? []).find(path => files.get(path)?.includes('How it was built'))}`)
+  expect(end).toContain('  It is not live yet.')
+  expect(end).not.toContain('It holds at every angle')
+  // One handed in again still without it goes through, and the chat is given it whole, to tell in a few lines
+  await $.agent.spawn({ ...spawn, description: 'Chin', prompt: 'look into it' } as never)
+  ;((agents.a4 = 'running'), (kinds.a4 = 'general-purpose'))
+  expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a4', message: long } as never)) as { deny?: string }).deny).toContain('does not begin with its short result')
+  expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb4', agentId: 'a4', message: long } as never)) as { deny?: string }).deny).toBeUndefined()
+  const whole = ((await $.prompt.submit({ text: '<task-notification>\n<task-id>a4</task-id>\n<status>completed</status>\n<summary>Agent "Chin" finished</summary>\n</task-notification>', wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(whole).toContain(' its result now in at most five short lines')
+  expect(whole).toContain('It holds at every angle')
 })
 
 test("a task's report whose notice of its end never comes goes to the chat with the person's next message, once; a message to the task after its hand-back is a step of its own; a file it names or the chat sends from outside the chat's folder reaches the person as a copy inside it, which their click opens", async ($, on) => {

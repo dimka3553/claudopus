@@ -293,7 +293,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'report',
       description: named(
-        "For background tasks: hands {name} a report on a part that is finished, which they can look at or act on now, while you go on with the rest. It reaches {name} in the chat and is kept as a result of its own; your task, its helpers and commands carry on, and its card stays at work. Use it each time such a part is finished; SubagentHandback still hands in the last report, which ends the task. Write it as you write your report: the result first, with full paths, then what is still being done.",
+        "For background tasks: hands {name} a report on a part that is finished, which they can look at or act on now, while you go on with the rest. It reaches {name} in the chat and is kept as a result of its own; your task, its helpers and commands carry on, and its card stays at work. Use it each time such a part is finished; SubagentHandback still hands in the last report, which ends the task. Write it as you write your report: its short result first, then a line of `---` and the rest.",
       ),
       inputSchema: { type: 'object', properties: { message: { type: 'string', description: named('The report on what is finished, as {name} reads it in the chat') } }, required: ['message'] },
       isDeferred: false,
@@ -315,7 +315,7 @@ const chatHooks = (on: On) => {
           pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
           key: { type: 'string', description: named("Only when you ask {name} for a key, token or password a command of yours needs: the name it is saved under, such as SENTRY_READ_TOKEN. The box to paste it into shows with your question on your card at once; a saved key of that name is replaced, one of another name stays. Give no `choices` with it") },
           from: { type: 'string', description: named('With `key`: where {name} gets it, the full link of the page and what to press there, shown in the box') },
-          release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your runs of the release runner from that folder until one has gone out, with no second question' },
+          release: { type: 'string', description: 'Only when you ask for the go-ahead to put your change on main, with a single choice named for what it does in this project (Push it, Merge it, Open the pull request, Put it live; Release it where the project numbers its versions): the full path of your worktree. That press reaches you as the answer and allows your runs of the release runner from that folder until one has gone out, with no second question' },
         },
         required: ['text'],
       },

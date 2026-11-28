@@ -51,6 +51,8 @@ const resumed = (one: Todo, at: number): Todo => ({ ...withAsks(one, asksOf(one)
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 // Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
 const handedBack = new Map<string, string>()
+// The tasks whose long report, or long part (`<id>:part`), was asked for again with its short result first: once each (rules.tsx, shortOf)
+const longAsked = new Set<string>()
 // Work stopped by the chat or the panel
 const stoppedHere = new Set<string>()
 // When each task was last asked to say on its card what it does now (NOTE_STALE), for this load
@@ -414,7 +416,6 @@ const followRetry = async ($: EngineInterface, id: string) => {
 const followRetries = async ($: EngineInterface) => {
   for (const one of await read($, todos)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
 }
-const RETRY_TEXT = (why: string) => `Your last step stopped on a network error (${why}). This message starts you again: carry on from where you were, then end with your report as before.`
 const sendRetry = async ($: EngineInterface, id: string, due: number) => {
   const isStill = async () => (await read($, todos)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
   const why = (await read($, todos)).find(one => one.id === id)?.retry?.why ?? 'a passing error'

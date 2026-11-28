@@ -1612,7 +1612,7 @@ test('F-017 · a release waits for the person\'s press on its card, and its gran
   let done = false
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'rel1', agentId: 'a1', command: 'cd /repo/wt && /plug/claudopus/bin/release' } as never).then(r => ((done = true), r as { deny?: string; result?: unknown }))
   expect(await until(async () => keyed(list, 'gate-rel1-r0-deny'))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Release fix-it to main?' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Push fix-it to main?' })).toBeDefined()
   expect(await list.find({ type: 'Markdown', text: /^Branch fix-it · from .*wt$/ })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).filter(one => (one.key ?? '').startsWith('gate-rel1-r0-')).map(one => one.props.label)).toEqual(['Allow', "Don't allow"])
   expect(done).toBe(false)

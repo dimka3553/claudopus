@@ -77,10 +77,14 @@ const NO_GATE_TOUCH = () =>
   named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
 
 // What a gate asks, in words, by its kind: the act, for a notification, and the one amber line of its block
+// A release is called what it is in its project: Release where the repo numbers its versions (its `.release` names a version file),
+// else Push, which is what the runner does there (28 Nov, the person: "a release sometimes is a push, sometimes is a merge ...
+// replace the copy that says 'release' with something that the user would understand from the context of the project")
+const releaseVerb = (gate: Pick<Gate, 'isVersion'>) => (gate.isVersion ? 'Release' : 'Push')
 const gateAct = (gate: Gate) =>
-  gate.isUndone ? `Make the change to ${gate.host} again` : gate.kind === 'release' ? `Release ${gate.host} to main` : gate.kind === 'file' ? `Change ${gate.host}` : `Run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+  gate.isUndone ? `Make the change to ${gate.host} again` : gate.kind === 'release' ? `${releaseVerb(gate)} ${gate.host} to main` : gate.kind === 'file' ? `Change ${gate.host}` : `Run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
 const gateWhat = (gate: Gate) =>
-  gate.isUndone ? `Make the change to ${gate.host} again?` : gate.kind === 'release' ? `Release ${gate.branch || gate.host} to main?` : gate.kind === 'file' ? `Change ${gate.host}?` : `Run this as admin on ${gate.host === 'here' ? thisMac() : gate.host}?`
+  gate.isUndone ? `Make the change to ${gate.host} again?` : gate.kind === 'release' ? `${releaseVerb(gate)} ${gate.branch || gate.host} to main?` : gate.kind === 'file' ? `Change ${gate.host}?` : `Run this as admin on ${gate.host === 'here' ? thisMac() : gate.host}?`
 
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
@@ -281,8 +285,6 @@ const RELEASE_MOVED =
   /(?:^|[\s;&|(`'"])(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+|BASH_FUNC_\S+)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+)\b|\b(?:export|declare|typeset)\s+(?:-\w+\s+)*-\w*f|(?:^|[;&|(]\s*)(?:source|\.)\s|\b(?:ba|z|da|k|c|tc|fi)?sh(?:\.exe)?\s+(?:-\S+\s+)*\S*bin[\\/]release(?![\w.-])/
 const movesRunner = (command: string) =>
   [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => (RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one)) || (RELEASE_NAMED.test(one) && RELEASE_MOVED.test(one)))
-const NO_RUNNER_MOVED =
-  "This command didn't run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the environment variables Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or removes CLAUDECODE, is refused, and so is one that sets the PATH, BASH_ENV, shell options or git's settings for bin/release, sources a script before it, or starts it through a shell. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')
@@ -606,7 +608,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
       releaseAllowed.set(top, { ...allowed, tips: [...(allowed.tips ?? []), tip] })
       await log($, `release of ${branch} in ${name}: allowed by the press on its task's go-ahead${allowed.tips?.length ? ', run again as nothing went out before' : ''}`)
     }
-    const said = isPressed ? 'once' : await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: now, ...(e.agentId ? { from: e.agentId } : {}), ...(await releaseFacts(git, branch)), ...(call.title ? { reason: call.title } : {}) }, card ? top : '')
+    const said = isPressed ? 'once' : await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: now, ...(/^\s*VERSION_FILE=\S/m.test(await readOr($, `${repo}/.release`).catch(() => '')) ? { isVersion: true } : {}), ...(e.agentId ? { from: e.agentId } : {}), ...(await releaseFacts(git, branch)), ...(call.title ? { reason: call.title } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }

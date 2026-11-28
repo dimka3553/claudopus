@@ -988,7 +988,7 @@ const appKeeps = (before: unknown, after: unknown) => {
 
 // Task colours and links at the end of chat replies, each a switch in Config
 
-test("with Task colours on, as it comes, a reply about a task sits in its colour's box with its name, Reply and its links, its card gets the same dot and its Details its links; off, only the links stay, and Links at the end off takes them away", async ($, on) => {
+test("with Task colours on, as it comes, a reply about a task sits in a box with its colour's dot, its name, Reply and its links, blue with Result where it passes on a result and grey otherwise, its card gets the same dot and its Details its links; off, only the links stay, and Links at the end off takes them away", async ($, on) => {
   const PR = 'https://github.com/acme/heads/pull/7'
   const said = `The nose is fixed and merged: ${PR}`
   // The chat's transcript as the app keeps it: the task is the chat's first, a1
@@ -1051,6 +1051,11 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   const result = await $.ui.mount({ ...MSG, requestId: 'msg_r6', props: { text: RESULT, isFirstOfReply: true }, surface: 'desktop' } as never)
   await clock.advance(1000)
   expect(await until(async () => result.find({ type: 'Text', text: '“Make the bridge narrower too”' }))).toBeDefined()
+  // Colour marks only what matters: the reply that passes on a task's result has a delivered card's blue edge and Result, which
+  // opens the whole of it; any other reply about a task has a grey edge and no Result, its task's colour only in its dot
+  const edgeOf = async (drawn: typeof result) => (await drawn.findAll({ type: 'Box' })).find(one => /^task-box-/.test(one.key ?? ''))?.props.borderColor
+  expect([await edgeOf(result), await edgeOf(reply)]).toEqual(['#4C9AFF', '#80808070'])
+  expect([await keyed(reply, `task-result-${r.agentId}`), await keyed(result, `task-result-${r.agentId}`)].map(Boolean)).toEqual([false, true])
   // What you write to it on its card, here in the box Reply on a reply about it opens, is what the next reply about it quotes
   const box = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await pressed(reply, `task-reply-${r.agentId}`)
@@ -1094,6 +1099,29 @@ test("with Task colours on, as it comes, a reply about a task sits in its colour
   const dots = async () => new Set((await list.findAll({ type: 'Text', text: '● ' })).map(one => one.props.color))
   expect(await until(async () => ((await dots()).size === 2 ? true : undefined))).toBe(true)
 
+  // A part handed in by a task still at work has a working card's purple edge and says it is a part
+  const PART = 'The price page has its three plans laid out, and the yearly switch works.'
+  await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'p1', agentId: 'a2', message: PART } as never)
+  await $.prompt.submit({ text: '<agent-message from="a2">\nThe task "Make the price page" handed in a part of its result, and is still working on the rest.\n</agent-message>', wait: false, origin: { kind: 'peer' }, isMeta: true } as never)
+  const part = await $.ui.mount({ ...MSG, requestId: 'msg_p1', props: { text: PART, isFirstOfReply: true }, surface: 'desktop' } as never)
+  expect(await until(async () => part.find({ type: 'Text', text: 'Part · still working' }))).toBeDefined()
+  expect(await edgeOf(part)).toBe('#8A63F0')
+  await part.unmount()
+  // Two results passed on in one reply, a line of dashes between them, stand in a box each, under their own task's name
+  const PRICE = 'The price page is live with its three plans, and nothing is needed from you.'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h2', agentId: 'a2', message: `${PRICE}\n\n---\n\n${'Each plan has its own row of what it holds. '.repeat(30)}` } as never)
+  await clock.advance(1000)
+  const two = await $.ui.mount({ ...MSG, requestId: 'msg_two', props: { text: `${RESULT}\n\n---\n\n${PRICE}`, isFirstOfReply: true }, surface: 'desktop' } as never)
+  const boxes = async () => (await two.findAll({ type: 'Box' })).filter(one => /^task-box-.*-\d$/.test(one.key ?? ''))
+  expect(await until(async () => ((await boxes()).length === 2 ? true : undefined))).toBe(true)
+  expect((await boxes()).map(one => one.props.borderColor)).toEqual(['#4C9AFF', '#4C9AFF'])
+  expect((await two.findAll({ type: 'Markdown' })).map(one => one.props.text)).toEqual(expect.arrayContaining([RESULT, PRICE]))
+  expect(await two.find({ type: 'Text', text: 'Make the price page' })).toBeDefined()
+  expect(await two.find({ type: 'Text', text: 'Fix the nose' })).toBeDefined()
+  // Result opens the whole of it, of which the chat was given only the short result
+  await pressed(two, 'task-result-1-a2')
+  expect(await until(async () => tabs.find(tab => tab.startsWith('report-')))).toBeDefined()
+  await two.unmount()
   // Task colours off in Config: the box and the dot go, the links stay
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await config.find({ type: 'Text', text: 'Task colours' })).toBeDefined()

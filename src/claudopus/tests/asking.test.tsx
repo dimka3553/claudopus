@@ -732,7 +732,7 @@ test('Release it on a go-ahead asked with its worktree reaches the task as its a
   const second = bash('r2', 'hold xr2; /plug/claudopus/bin/release') as Promise<{ deny?: string }>
   expect(await until(async () => gateButton('gate-r2-r0-once-'))).toBeDefined()
   expect((await list.find({ type: 'Text', text: 'Permission' }))?.props.dimColor).toBe(true)
-  expect((await list.find({ type: 'Text', text: 'Release fix-nose to main?' }))?.props.color).toBe(AMBER)
+  expect((await list.find({ type: 'Text', text: 'Push fix-nose to main?' }))?.props.color).toBe(AMBER)
   expect((await list.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith('gate-r2-r0-')).map(b => b.props.label)).toEqual(['Allow', "Don't allow"])
   await list.press({ key: (await gateButton('gate-r2-r0-deny-'))?.key ?? '' })
   wake()

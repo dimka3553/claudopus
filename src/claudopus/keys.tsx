@@ -186,17 +186,10 @@ const KEY_KEPT = (root: string, one: KeyEntry, asked: string, again: string) =>
   named(
     `Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${storeName(one.store)}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
   )
-// Asked again on purpose: the ask names the kept key exactly, as it is written, and says why it does not do
-const AGAIN_IN = (one: KeyEntry, field: string) => `If it no longer works, ask again with its name, ${one.name}, written as it is here, and why it does not do, in \`${field}\`.`
-// A kept key that does not do, or a second key for the same service, is asked with the ask tool's \`key\`: its box shows at once
-const AGAIN_BOX = (one: KeyEntry, asked = one.name) =>
-  `If it does not do, ask {name} for the key with \`ask\`, \`key\` set to ${asked === one.name ? `${one.name} to replace it, or to a new name for a second key` : `${asked} for a second key beside it, or to ${one.name} to replace it`}, and \`from\` saying where {name} gets it: the box to paste it in shows on your card with your question at once.`
 // An ask that wants a key pasted or typed, with no \`key\`: such a question has no box to paste into (21 Nov, the Sentry key: asked
 // three times, and the person never saw where to put it)
 const KEY_PASTE = /\b(?:paste|type|enter|put|copy|give|send|add|make|create|generate)\b/i
 const KEY_WORD = /\b(?:(?:api|access|secret|auth|personal) )?(?:key|token|secret|password|credentials?|pat)s?\b/i
-const ASK_KEY_FIELD =
-  'Not shown: a question that asks {name} for a key has no box to paste it in. Ask again with `key` set to the name the key is saved under (such as SENTRY_READ_TOKEN) and `from` saying where {name} gets it (the full link of the page and what to press there): the box shows with your question on your card at once, and replaces a saved key of that name. A password for an admin command is asked by the admin runner itself.'
 // What a task is told once its question for a key is on its card
 const KEY_ASK_SHOWN = (root: string, name: string, isSaved: boolean, beside?: string) =>
   `Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${runnerAt(root, 'secret')} ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`

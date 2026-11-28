@@ -7,25 +7,45 @@ const BAND_PICK = 6000
 // list is scrolled: how many, and what the first asks (17 Nov: the line came only once the list was scrolled, so what waited was
 // told nowhere near where the person types). Scrolled away from the top, Show takes the list back there; nothing else moves it.
 // In the terminal the band itself holds the first ask, so the line comes only once the list is scrolled.
-// Work that just finished, in its moment at the top, is pointed at the same way, in green, once the list is scrolled
+// Work that just finished, in its moment at the top, is pointed at the same way, in green, once the list is scrolled.
+// A release waiting for the go-ahead is said there always, on every surface, the panel open or not, scrolled or not, with its own
+// yes button, the card's very press (28 Nov: a release waited on its card far down the panel while the person typed in the chat,
+// and nothing near the prompt said so)
 const isListPlaced = async ($: EngineInterface) => (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 const isScrolled = (surface: string) => (listOffsets.get(surface) ?? 0) > 0
+// The releases waiting as the bar last read the cards (typed.tsx, releasesOf)
+let bandReleases: ReleaseWait[] = []
+const releasesSign = (waits: ReleaseWait[]) => waits.map(one => `${one.need.id}:${one.button.key}`).join(',')
 const isMarkerShown = async ($: EngineInterface, surface: string) =>
-  ((waitsAtTop > 0 && (surface !== 'terminal' || isScrolled(surface))) || (finishedAtTop.length > 0 && isScrolled(surface))) && (await isListPlaced($))
+  bandReleases.length > 0 || (((waitsAtTop > 0 && (surface !== 'terminal' || isScrolled(surface))) || (finishedAtTop.length > 0 && isScrolled(surface))) && (await isListPlaced($)))
 // What the marker says, empty when it is not drawn: a bar held with a box in it is drawn again when this moves, but not while the
 // box is typed in or holds the cursor
-const markerSign = async ($: EngineInterface, surface: string) => ((await isMarkerShown($, surface)) ? `${waitsAtTop}|${firstAtTop}|${isScrolled(surface)}|${finishedAtTop.join('|')}` : '')
+const markerSign = async ($: EngineInterface, surface: string) => ((await isMarkerShown($, surface)) ? `${releasesSign(bandReleases)}|${waitsAtTop}|${firstAtTop}|${isScrolled(surface)}|${finishedAtTop.join('|')}` : '')
 const markerWords = (surface: string) =>
   waitsAtTop > 0
     ? `● ${waitsAtTop} waiting for you${firstAtTop ? ` · ${firstAtTop}` : ''}${isScrolled(surface) && finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`
     : `↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} is done` : `${finishedAtTop.length} tasks are done`}, at the top of the panel`
-const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
-  (await isMarkerShown($, surface)) ? (
-    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden" gap={1}>
+// The first release waiting, by its own question and its task's name, then how many others wait: the panel's count where it is drawn, else the releases'
+const releaseWords = (first: ReleaseWait, isPlaced: boolean) => {
+  const others = Math.max(bandReleases.length, isPlaced ? waitsAtTop : 0) - 1
+  return `● ${oneLine(first.need.text)}${first.title ? ` · ${first.title}` : ''}${others > 0 ? ` · ${others} more waiting` : ''}`
+}
+const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) => {
+  if (!(await isMarkerShown($, surface))) return null
+  const isPlaced = await isListPlaced($)
+  const [release] = bandReleases
+  return (
+    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} {...(release ? { alignItems: 'center' as const } : { height: 1 })} overflow="hidden" gap={1}>
       <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <ui.Text color={waitsAtTop > 0 ? NEEDS : DONE} bold wrap="truncate-end">{markerWords(surface)}</ui.Text>
+        <ui.Text color={release || waitsAtTop > 0 ? NEEDS : DONE} bold wrap="truncate-end">{release ? releaseWords(release, isPlaced) : markerWords(surface)}</ui.Text>
       </ui.Box>
-      {isScrolled(surface) ? (
+      {/* The release's own yes, as on its card: the same press */}
+      {release ? (
+        <ui.Box flexShrink={0}>
+          <ui.Button key={`band-release-${release.button.key}`} label={release.button.label} variant="primary" onPress={release.button.onPress} />
+        </ui.Box>
+      ) : null}
+      {isScrolled(surface) && isPlaced ? (
         <ui.Box flexShrink={0}>
           <ui.Button
             key={`band-waits-${presses}`}
@@ -36,7 +56,8 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         </ui.Box>
       ) : null}
     </ui.Box>
-  ) : null
+  )
+}
 // The one box above the chat, for everything that is typed for the panel (asking.tsx, barOpen): an answer in words, a key, a
 // password, a change to a done task, what to do next from a result. One heading line says what it is for; the field under it is as
 // wide as the bar and BOX_ROWS lines tall whatever it holds; under it, a gap between, what Enter does beside Send, the big one,
@@ -186,8 +207,13 @@ const lookBar = async ($: EngineInterface) => {
   try {
   // A redraw put off while the box held the cursor is made once it no longer does (drawFresh)
   if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
-  if (!barHeld.size || !barOpen || isBoxKind(barOpen.kind)) return
-  const sign = barCardsSign(await read($, todos))
+  if (!barHeld.size || !barOpen) return
+  const cards = await read($, todos)
+  // (a release that came or went is said in the held bar too, a key's box open or not)
+  const releases = releasesOf($, cards, await $.clock.now())
+  if (releasesSign(releases) !== releasesSign(bandReleases)) return void ((bandReleases = releases), drawAgain($, true))
+  if (isBoxKind(barOpen.kind)) return
+  const sign = barCardsSign(cards)
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
   drawAgain($, true)
@@ -265,6 +291,7 @@ const bandHooks = (on: On) => {
       if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
     const cards = await drawnCards($)
+    bandReleases = releasesOf($, cards, flipAt)
     if (canBox !== barBoxes.has(e.surface)) {
       if (canBox) barBoxes.add(e.surface)
       else barBoxes.delete(e.surface)

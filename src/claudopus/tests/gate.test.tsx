@@ -172,7 +172,7 @@ test('no way to the runner gets past the press: another spelling, a shell, a hel
   files.set('git:branch', 'fix-it')
   for (const [id, command, second, shown] of [
     ['t1', `${ADMIN} here 'id -u' && ${ADMIN} here 'whoami'`, 'gate-t1-1-deny', 'whoami'],
-    ['t2', `${ADMIN} here 'id -u'; /plug/claudopus/bin/release`, 'gate-t2-r0-deny', 'Release fix-it to main?'],
+    ['t2', `${ADMIN} here 'id -u'; /plug/claudopus/bin/release`, 'gate-t2-r0-deny', 'Push fix-it to main?'],
   ] as const) {
     const both = bash(id, command)
     expect(await held(id)).toBeDefined()
@@ -408,7 +408,7 @@ test("another chat's panel shows an admin command that waits, with no button: on
   expect((await list.findAll({ type: 'Button' })).some(one => ['Allow', 'Always allow this command', "Don't allow"].includes(String(one.props.label)) || (one.key ?? '').startsWith('gate-'))).toBe(false)
 })
 
-test('a release nobody pressed for is asked, once, for its own branch, with Allow and Don\'t allow alone, saying what it puts on main: the 15 Nov run-progress-rows release, its output sent to a log, asked twice, first for a branch called ">"; and the 19 Nov release that said only its branch and folder', async ($, on) => {
+test('a release nobody pressed for is asked, once, for its own branch, with Allow and Don\'t allow alone, saying what it puts on main: the 15 Nov run-progress-rows release, its output sent to a log, asked twice, first for a branch called ">"; and the 19 Nov release that said only its branch and folder; asked as a release only where the repo\'s .release names a VERSION_FILE, else as a push', async ($, on) => {
   const { list, files, grants, holding, wake } = await gated($, on)
   files.set('git:top', '/repo/wt')
   files.set('git:branch', 'fix-it')
@@ -425,8 +425,8 @@ test('a release nobody pressed for is asked, once, for its own branch, with Allo
     expect(await until(async () => keyed(list, `gate-${id}-r0-once`))).toBeDefined()
     // Said in plain words: what is released in the question, what it puts on main under it, and no command row
     const drawn = await gateTexts(list)
-    expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 2)).toEqual(['Permission', 'Release fix-it to main?'])
-    expect((await list.find({ type: 'Text', text: 'Release fix-it to main?' }))?.props.color).toBe('#E5A50A')
+    expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 2)).toEqual(['Permission', 'Push fix-it to main?'])
+    expect((await list.find({ type: 'Text', text: 'Push fix-it to main?' }))?.props.color).toBe('#E5A50A')
     const under = (await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? ''))
     expect(under).toContain(about)
     expect([...drawn, ...under].some(one => /^>|> from/.test(one))).toBe(false)
@@ -440,6 +440,14 @@ test('a release nobody pressed for is asked, once, for its own branch, with Allo
     ;(await until(async () => holding.get(`x${id}; /plug/claudopus/bin/release${tail}`)))?.('released')
     expect((await call).deny).toBeUndefined()
   }
+  // A repo whose .release names a VERSION_FILE releases a version: asked as a release, any other as a push
+  files.set('/repo/wt/.release', 'VERSION_FILE=version.txt\n')
+  const versioned = $.tool.call({ tool: 'Bash', tool_use_id: 'rl4', agentId: 'a1', command: 'hold xrl4; /plug/claudopus/bin/release' } as never) as Promise<{ deny?: string }>
+  expect(await until(async () => keyed(list, 'gate-rl4-r0-deny'))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Release fix-it to main?' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Push fix-it to main?' })).toBeUndefined()
+  await pressed(list, 'gate-rl4-r0-deny')
+  expect((await versioned).deny).toBeTruthy()
   wake()
 })
 
@@ -465,7 +473,7 @@ test("the press on a task's go-ahead for a release lets that task's next release
     expect(run).toBeDefined()
     expect(grants().map(path => (({ host, command }) => [host, command])(JSON.parse(files.get(path) ?? '{}')))).toEqual([['release', '/repo/wt\nfix-it']])
     expect(await keyed(list, `gate-${id}-r0-once`)).toBeUndefined()
-    expect(await list.find({ type: 'Text', text: 'Release fix-it to main?' })).toBeUndefined()
+    expect(await list.find({ type: 'Text', text: 'Push fix-it to main?' })).toBeUndefined()
     run?.('released')
     expect((await call).deny).toBeUndefined()
   }
@@ -699,6 +707,44 @@ test('the line above the prompt never points into a list that is not open', asyn
   expect((await textOrder(band)).some(one => one.includes('waiting for you'))).toBe(false)
 })
 
+// 28 Nov: a release waited on its card far down the panel while the person typed in the chat, and nothing near the prompt said so
+test("while a release waits, the line above the prompt always says so with its own yes, the panel open or not, on every surface: the card's own press, Release it on a go-ahead and Allow on a release the gate holds, after which the line goes as the block does", async ($, on) => {
+  const { list, files, holding, clock } = await gated($, on)
+  files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-it')
+  await $.agent.spawn({ ...spawn, description: 'Tidy the logs', prompt: 'tidy the logs' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release the hosts fix?', choices: ['Release it', "Don't release"], release: '/repo/wt' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Release the hosts fix?' }))).toBeDefined()
+  await clock.advance(1000)
+  const gate = $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a2', command: 'hold xr1; /plug/claudopus/bin/release' } as never) as Promise<{ deny?: string }>
+  expect(await until(async () => keyed(list, 'gate-r1-r0-once'))).toBeDefined()
+  type Pane = { find: (q: { type: string; text: string }) => Promise<{ props: Record<string, unknown> } | undefined>; findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]>; press: (q: { key: string }) => Promise<unknown>; unmount: () => Promise<unknown> }
+  const yesOf = async (band: Pane) => (await band.findAll({ type: 'Button' })).find(one => String(one.key ?? '').startsWith('band-release-'))
+  const FIRST = '● Release the hosts fix? · Fix the hosts file · 1 more waiting'
+  // (no panel is placed in this world: the line comes all the same)
+  for (const surface of ['terminal', 'desktop']) {
+    const band = (await $.ui.mount({ ...BAND, surface } as never)) as unknown as Pane
+    expect((await until(async () => band.find({ type: 'Text', text: FIRST })))?.props.color).toBe('#E5A50A')
+    expect((await yesOf(band))?.props.label).toBe('Release it')
+    if (surface === 'terminal') {
+      await band.unmount()
+      continue
+    }
+    await band.press({ key: (await yesOf(band))?.key ?? '' })
+    expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').includes('release of fix-it from /repo/wt allowed once for a1') || undefined)).toBe(true)
+    expect(await until(async () => band.find({ type: 'Text', text: '● Push fix-it to main? · Tidy the logs' }))).toBeDefined()
+    expect(await band.find({ type: 'Text', text: FIRST })).toBeUndefined()
+    expect((await yesOf(band))?.props.label).toBe('Allow')
+    await band.press({ key: (await yesOf(band))?.key ?? '' })
+    ;(await until(async () => holding.get('xr1; /plug/claudopus/bin/release')))?.('released')
+    expect((await gate).deny).toBeUndefined()
+    expect(await until(async () => ((await yesOf(band)) ? undefined : true))).toBe(true)
+    expect(await band.find({ type: 'Text', text: '● Push fix-it to main? · Tidy the logs' })).toBeUndefined()
+    await band.unmount()
+  }
+})
+
 test('in the terminal, a password box that comes while a reply is being typed leaves the keys with the reply', async ($, on) => {
   const w = world(on)
   await $.session.start(start)
@@ -834,8 +880,8 @@ test("a press on a gate takes its block away in the press's own drawing and leav
     ['p1', `${ADMIN} here 'chmod 644 /etc/hosts'`, '0-once', 'Run this as admin on this Mac?', ALLOWED_LINE, 'ran'],
     ['p2', `${ADMIN} here 'chmod 600 /etc/hosts'`, '0-always', 'Run this as admin on this Mac?', '✓ You pressed “Always allow this command”', 'ran'],
     ['p3', `${ADMIN} here 'chmod 755 /etc/hosts'`, '0-deny', 'Run this as admin on this Mac?', REFUSED_LINE, 'refused'],
-    ['p4', 'hold xp4; /plug/claudopus/bin/release', 'r0-once', 'Release fix-it to main?', ALLOWED_LINE, 'held'],
-    ['p5', 'hold xp5; /plug/claudopus/bin/release', 'r0-deny', 'Release fix-it to main?', REFUSED_LINE, 'refused'],
+    ['p4', 'hold xp4; /plug/claudopus/bin/release', 'r0-once', 'Push fix-it to main?', ALLOWED_LINE, 'held'],
+    ['p5', 'hold xp5; /plug/claudopus/bin/release', 'r0-deny', 'Push fix-it to main?', REFUSED_LINE, 'refused'],
   ] as const) {
     const before = counted.seen.sleeps
     const call = w.bash(id, command)
@@ -906,8 +952,8 @@ test('a gate allowed but not let through says so in its grey line, never a bare 
   }
 })
 
-test("a short answer the person types in the chat is their press on the newest block it fits, or on the task it names: \"allow\" lets a held admin command run, \"release it\" is Release it on a go-ahead; a task's message, Claudopus's own, a long message and words that name no waiting task answer nothing; a command Claude Code blocked still runs only on the press, which its card and the chat say (24 Nov: \"it counts if I type allow\")", async ($, on) => {
-  const { list, bash, held, files, logged, clock } = await gated($, on)
+test("a short answer the person types in the chat is their press on the newest block it fits, or on the task it names: \"allow\" lets a held admin command run, \"release it\" is Release it on a go-ahead; a task's message, Claudopus's own, a long message and words that name no waiting task answer nothing; a command Claude Code blocked still runs only on the press, which its card and the chat say (24 Nov: \"it counts if I type allow\"); while a release waits, a plain go-ahead counts read more widely, \"all\" for every one, a question or a hold is told to the chat as no go-ahead, and a task's or Claudopus's \"push it\" presses nothing (28 Nov)", async ($, on) => {
+  const { list, bash, held, files, logged, clock, holding } = await gated($, on)
   const say = async (text: string, origin: unknown = composer) => ((await $.prompt.submit({ text, wait: false, origin } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   const typedLog = () => (files.get(`${MEMORY}/log.md`) ?? '').split('\n').filter(line => line.includes('typed answer'))
   // An admin command waits on the task's card
@@ -959,6 +1005,49 @@ test("a short answer the person types in the chat is their press on the newest b
   expect(await until(async () => list.find({ type: 'Text', text: 'Release the nose fix?' }))).toBeDefined()
   expect(await say('release it')).toContain('is their answer "Release it" to the task "Fix the hosts file"\'s question: Release the nose fix?')
   expect(files.get(`${MEMORY}/log.md`)).toContain('release of fix-nose from /repo/wt allowed once for a1')
+
+  // While a release waits, a plain go-ahead counts, read more widely (typed-release.test.tsx has each phrase): first a release the
+  // admin gate holds for the nose task, its Allow pressed by a message that says more, which the chat may pass on to the task
+  const gate = $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a2', command: 'hold xr1; /plug/claudopus/bin/release' } as never) as Promise<{ deny?: string }>
+  expect(await until(async () => keyed(list, 'gate-r1-r0-once'))).toBeDefined()
+  const switched = await say('release it and switch now so I can test')
+  expect(switched).toContain('Sam\'s message "release it and switch now so I can test" is their go-ahead, taken as their press on "Allow" on the task "Fix the nose"\'s question: Push fix-nose to main?')
+  expect(switched).toContain("if it asks for anything beyond the release, send those words to that task once, as Sam's words")
+  ;(await until(async () => holding.get('xr1; /plug/claudopus/bin/release')))?.('released')
+  expect((await gate).deny).toBeUndefined()
+  // Then a task's go-ahead asked with its worktree: a question or a hold presses nothing and the chat says it is not pushed yet;
+  // a task's message and Claudopus's own saying "push it" press nothing; "yes, go" is Release it
+  let round = 0
+  const goAhead = async (agentId = 'a1') => {
+    const text = `Release round ${(round += 1)}?`
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `g${round}`, agentId, text, choices: ['Release it', "Don't release"], release: '/repo/wt' } as never)
+    expect(await until(async () => list.find({ type: 'Text', text }))).toBeDefined()
+    return text
+  }
+  const gone = async (text: string) => until(async () => ((await list.find({ type: 'Text', text })) ? undefined : true))
+  const asked = await goAhead()
+  for (const typed of ['is now all pushed?', "don't push yet"]) {
+    const told = await say(typed)
+    expect(told).toContain(`From Claudopus: the release of the task "Fix the hosts file" waits for Sam's go-ahead, and their message "${typed}" did not give it. If the message is about that release, begin your reply with one short line saying it is not pushed yet and waits for their yes, which they give by typing yes in the chat or pressing Release it above the chat, then answer the rest of the message; if it is about something else, say nothing of the release.`)
+    expect(told).toContain('A message of yours to the task approves nothing.')
+  }
+  const taken = typedLog().length
+  await say('push it', { kind: 'peer' })
+  await say('push it', { kind: 'plugin' })
+  expect([typedLog().length, Boolean(await list.find({ type: 'Text', text: asked }))]).toEqual([taken, true])
+  const yes = await say('yes, go')
+  expect(yes).toContain(`is their go-ahead, taken as their press on "Release it" on the task "Fix the hosts file"'s question: ${asked}`)
+  expect(yes).toContain('send it to no task')
+  expect(await gone(asked)).toBe(true)
+  // Two waiting: unnamed, the chat asks which, saying "all" works; "all" presses both
+  const [one, two] = [await goAhead('a1'), await goAhead('a2')]
+  const which = await say('push it so I can test')
+  expect(which).toContain('released nothing, as more than one release waits for their go-ahead: the task "Fix the hosts file", the task "Fix the nose".')
+  expect(which).toContain('or "release all" for every one')
+  expect(Boolean(await list.find({ type: 'Text', text: one })) && Boolean(await list.find({ type: 'Text', text: two }))).toBe(true)
+  const both = await say('OK to all go push it')
+  expect([both.includes(one), both.includes(two)]).toEqual([true, true])
+  expect([await gone(one), await gone(two)]).toEqual([true, true])
 
   // A command Claude Code blocked is never run by a typed answer: its card says only the press runs it, and so does the chat
   files.set('auto-refuse', 'Bash')
