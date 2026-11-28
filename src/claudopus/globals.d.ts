@@ -20,6 +20,8 @@ import * as M17 from '../../mods/claudopus/hooks/progress'
 import * as M18 from '../../mods/claudopus/hooks/topics'
 import * as M19 from '../../mods/claudopus/hooks/reads'
 import * as M20 from '../../mods/claudopus/hooks/colours'
+import * as M21 from '../../mods/claudopus/hooks/tasks'
+import * as M22 from '../../mods/claudopus/hooks/texts'
 
 declare global {
   export import atom = M0.atom
@@ -391,10 +393,6 @@ declare global {
   export import progressLine = M17.progressLine
   export import progressPrompt = M17.progressPrompt
   export import progressThumb = M17.progressThumb
-  export import SET_ASIDE = M17.SET_ASIDE
-  export import SKIP_ONE = M17.SKIP_ONE
-  export import SKIP_TOLD = M17.SKIP_TOLD
-  export import setAsideTold = M17.setAsideTold
   export import STAR_SYSTEM = M17.STAR_SYSTEM
   export import starOf = M17.starOf
   export import starPrompt = M17.starPrompt
@@ -402,7 +400,6 @@ declare global {
   export import monthKey = M17.monthKey
   export import withStar = M17.withStar
   export import topicState = M17.topicState
-  export import withSetAside = M17.withSetAside
   export import wordsIn = M17.wordsIn
   export import HISTORY_MOST = M18.HISTORY_MOST
   export import holdsStems = M18.holdsStems
@@ -433,4 +430,40 @@ declare global {
   export import ProgressEntry = M17.ProgressEntry
   export import ProgressEvent = M17.ProgressEvent
   export import ProgressPicture = M17.ProgressPicture
+  export import finishedOf = M21.finishedOf
+  export import isStarred = M21.isStarred
+  export import rowStar = M21.rowStar
+  export import starButton = M21.starButton
+  export import starLine = M21.starLine
+  export import starMoved = M21.starMoved
+  export import starredCount = M21.starredCount
+  export import starredOf = M21.starredOf
+  export import stars = M21.stars
+  export import STARS_FILE = M21.STARS_FILE
+  export import STARS_TRIP = M21.STARS_TRIP
+  export import starsTook = M21.starsTook
+  export import starsUnion = M21.starsUnion
+  export import taskShows = M21.taskShows
+  export import tasksBar = M21.tasksBar
+  export import tasksList = M21.tasksList
+  export import tasksView = M21.tasksView
+  export import StarSeen = M21.StarSeen
+  export import TaskItem = M21.TaskItem
+  export import TasksActs = M21.TasksActs
+  export import ARTIFACT_ICON = M22.ARTIFACT_ICON
+  export import CHROME_COPIED = M22.CHROME_COPIED
+  export import CODE_ICON = M22.CODE_ICON
+  export import DRIVE_LINE = M22.DRIVE_LINE
+  export import DRIVE_PART = M22.DRIVE_PART
+  export import DRIVE_PLAIN = M22.DRIVE_PLAIN
+  export import DRIVE_ROOT = M22.DRIVE_ROOT
+  export import DRIVE_SPACED = M22.DRIVE_SPACED
+  export import DRIVE_TICKED = M22.DRIVE_TICKED
+  export import FORGET_KEPT = M22.FORGET_KEPT
+  export import LINK_ICON = M22.LINK_ICON
+  export import PATH_LINE = M22.PATH_LINE
+  export import PATH_PLAIN = M22.PATH_PLAIN
+  export import PATH_SPACED = M22.PATH_SPACED
+  export import PATH_TICKED = M22.PATH_TICKED
+  export import REPLY_HOLDS = M22.REPLY_HOLDS
 }

@@ -348,8 +348,6 @@ const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer
 const ANSWER_ECHO = 60 * 60_000
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
 const ASK_REPLIED = (title: string, said: string, asked = '') => `✓ {Name} replied to "${title}" on its card: ${said}${asked ? `, to its question "${cut(asked, 160)}"` : ''}. Claude is working on it now, and will ask again if it still needs {name}.`
-// What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
-const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its buttons.`
 // Message on a Done card: what the box asks, what its task is told with the person's words, and what the chat is told
 const CHANGE_WHAT = 'your message'
 // The same box on a card at work: the person's words reach the task between its steps

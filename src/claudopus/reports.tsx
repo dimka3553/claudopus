@@ -174,21 +174,6 @@ const reportsLooked = async ($: EngineInterface) => {
   await loadReports($, true).finally(() => (isReportsLook = false))
 }
 
-// The absolute paths a report names, as written, without the punctuation after them. A folder's name may hold spaces ("FaceIQ email
-// lifecycle"), and so may a whole path on a line of its own or between backticks; the shorter readings stay beside the longer, for
-// whoever looks a path up to keep the one that is there (27 Nov: a board in a folder with spaces was named as "/Users/…/FaceIQ")
-const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
-const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g
-const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g
-const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm
-// On Windows a path from a drive too, as Windows writes it (C:\Users\sam\x.png), with forward slashes (C:/Users/sam/x.png) or as Git's
-// bash does (/c/Users/sam/x.png), each part parted by either slash. A letter and a colon inside a word (https://) begins none
-const DRIVE_ROOT = String.raw`(?:[A-Za-z]:[\\/]|\/[A-Za-z]\/)`
-const DRIVE_PART = String.raw`[^\s\\/\x60'"()<>[\]{}|,;*]+`
-const DRIVE_PLAIN = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}[^\s\x60'"()<>[\]{}|,;*]+`, 'g')
-const DRIVE_SPACED = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}(?:${DRIVE_PART}(?: ${DRIVE_PART})*[\\/])+${DRIVE_PART}`, 'g')
-const DRIVE_TICKED = new RegExp(String.raw`\x60(${DRIVE_ROOT}[^\x60\n]+)\x60`, 'g')
-const DRIVE_LINE = new RegExp(String.raw`^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(${DRIVE_ROOT}[^\n\x60'"<>|*]+?)(?:\*\*)?[ \t]*$`, 'gm')
 // A path as the mod keeps it: a Windows one with forward slashes, and Git's bash's /c/x as C:/x
 const keptPath = (path: string) => {
   const one = slashed(path)

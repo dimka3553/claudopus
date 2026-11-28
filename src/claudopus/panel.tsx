@@ -85,6 +85,25 @@ const givenIfDrawn = async ($: EngineInterface, e: Parameters<EngineInterface['u
 }
 // The surface the list was last drawn on: the focus says none, and only the desktop's clicks are held for (isPressHeld)
 let listSurface = ''
+// The stars (tasks.tsx): their file in the memory folder, read at the load and whenever its size or time moves; a press adds a line
+const starsPath = () => `${dir}/${STARS_FILE}`
+const loadStars = async ($: EngineInterface) => {
+  const s = await $.fs.stat(starsPath()).catch(() => undefined)
+  const seen = `${(s as { mtimeMs?: number } | undefined)?.mtimeMs ?? 0}:${s?.size ?? 0}`
+  if (seen !== stars.seen && ((stars.seen = seen), starsTook(await readOr($, starsPath())))) drawAgain($)
+}
+const starAdd = async ($: EngineInterface, line: string) => void (line && (starsTook(stars.text + line), await appendTo($, starsPath(), line)))
+const starPress = async ($: EngineInterface, s: StarSeen) => {
+  await starAdd($, starLine({ ...s, on: !isStarred(s.id), at: await $.clock.now() }))
+  presses += 1
+  drawAgain($)
+}
+// With each other Mac, at each trip of the results (macs.tsx): both files' lines on both
+const syncStars = async ($: EngineInterface, mac: string) => {
+  const r = await runOn($, ssh(mac, STARS_TRIP), { stdin: stars.text, timeoutMs: 15_000 })
+  const next = r.exitCode === 0 ? starsUnion(stars.text, r.stdout) : undefined
+  if (next) (await $.fs.write(starsPath(), next), starsTook(next), drawAgain($))
+}
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
@@ -553,6 +572,7 @@ const panelHooks = (on: On) => {
                   </Button>
                 </Box>
                 <Box flexGrow={1} />
+                {starButton(table, one.id, () => void starPress($, starSeen(one)))}
                 {one.status === 'working' && !one.chat ? (
                   <Box flexShrink={0}>
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
@@ -1792,26 +1812,19 @@ const panelHooks = (on: On) => {
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (isUpThere(one) || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
     const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
-    const finishedPart = (isOpen: boolean) =>
-      finished.length || endedFlows.length ? (
-        <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
-          <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1}>
-            <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-              <Button
-                key={`finished-fold-${presses}`}
-                label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
-                plain
-                hotkey={keyed ? 'f' : undefined}
-                onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
-              />
-            </Box>
-            <Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
-          </Box>
-          {isOpen
-            ? [...finished.map(one => ({ at: one.endedAt, card: () => small(one) })), ...endedFlows.map(f => ({ at: f.endedAt, card: () => flowSmall(f) }))].sort((a, b) => b.at - a.at).map(one => one.card())
-            : null}
-        </Box>
-      ) : null
+    // Finished: every task that ended, its card while it is kept and else its result, a page at a time; folded at the bottom under All,
+    // open as a filter of its own. Starred: every task starred, whatever became of it since (tasks.tsx)
+    const cardItem = (one: Todo): TaskItem => ({ at: one.endedAt || one.startedAt, id: one.id, title: titleOf(one), draw: () => small(one) })
+    const finishedAll = () => finishedOf([...finished.map(cardItem), ...endedFlows.map(f => ({ at: f.endedAt, id: f.id, title: f.title, draw: () => flowSmall(f) }))], kept, [...own, ...elsewhere].filter(one => !finished.includes(one)).map(one => one.id))
+    const finishedPart = (isOpen: boolean, all = finishedAll()) => {
+      const isStars = tasksView.filter === 'starred'
+      if (!['all', 'finished', 'starred'].includes(tasksView.filter) || (!isStars && !all.length)) return null
+      const isAll = tasksView.filter === 'all'
+      return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
+    }
+    const tasksActs: TasksActs = { redraw: () => ((presses += 1), drawAgain($)), star: one => void starPress($, rowStar(one)), open: id => openReport($, id), typing: () => holdTimes($), typed: () => freeTimes($) }
+    // What a card's star keeps of it
+    const starSeen = (one: Todo): StarSeen => ({ id: one.id, title: titleOf(one), state: STAGE_WORD[stage(one)], report: left(one)?.id, chat: one.chat?.title || chat.title, ended: one.endedAt || undefined })
 
     // A workflow's Details tab: what it is, with Stop; where it started; its stages in order; its rounds, each with its agents and
     // its outcome; one agent's chat at a time, picked from the rounds; and what it returned once it ended
@@ -1989,6 +2002,9 @@ const panelHooks = (on: On) => {
       for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) topPlaces.delete(key)
     }
     const restHere = shownWork.filter(one => !isUp(one))
+    // What each card is for the filters at the top (tasks.tsx), and whether it is drawn under the one picked and the search
+    const kindOf = (one: Todo) => (isWaits(one) ? 2 : stage(one) === 'working' ? 1 : looksDelivered(one) ? 3 : 0)
+    const shows = (one: Todo) => taskShows(kindOf(one), titleOf(one))
     const isHandedIn = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
     // (a workflow in its green moment stays where it was: it is there only for two seconds)
     const restFlows = shownFlows
@@ -2028,7 +2044,7 @@ const panelHooks = (on: On) => {
       const now = new Map<string, string>()
       // (with the notice of an update above them all, or none)
       let above = outCard ? 'notice' : ''
-      const nodes = top.map(item => {
+      const nodes = top.filter(item => (item.card ? shows(item.card) : taskShows(2, item.what))).map(item => {
         const node = item.draw()
         if (item.card && cardNeeds(item.card).length) now.set(item.card.id, `${above}|${blocksSign(item.card, true)}`)
         above += `|${item.sign()}`
@@ -2076,6 +2092,14 @@ const panelHooks = (on: On) => {
     }
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
     // Where updating stands for this chat: a small box under the header's lines, its steps each a press
+    // How many each tab holds: the cards up as All draws them, and every task starred
+    const tasksCounts = () => {
+      const up = [...askCards, ...restHere, ...listedChats.flatMap(c => shownOf(c).filter(one => !isUp(one)))]
+      const n = (kind: number) => up.filter(one => kindOf(one) === kind).length
+      return { you: notices.length + n(2) + n(3), working: n(1) + restFlows.filter(f => f.status === 'working').length, starred: starredCount() }
+    }
+    // A starred task whose name, state or result moved: its star says so, for when its card is gone
+    if (paneId === LIST && !alone) for (const one of [...own, ...elsewhere]) if (isStarred(one.id)) void starAdd($, starMoved(starSeen(one), at)).catch(() => undefined)
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
     return (
@@ -2137,6 +2161,7 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         ) : null}
+        {!alone ? tasksBar(ui, tasksCounts(), e.surface, tasksActs) : null}
         {!alone ? drawTop() : null}
         {/* What was pressed on a block that belonged to no task, in one grey line where it was */}
         {!alone ? loosePressedShown(at).map((one, n) => (
@@ -2155,17 +2180,17 @@ const panelHooks = (on: On) => {
               // What was delivered comes first, the newest on top, each in that place through its green moment once marked done; then
               // the rest, each in the place it began in (19 Nov, the person: "All of the delivered things go on top. The working
               // ones go underneath it. Needs you goes even above them")
-              ...[...restHere.map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
+              ...[...restHere.filter(shows).map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.filter(f => taskShows(f.status === 'working' ? 1 : 0, f.title)).map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
                 // (what was delivered first there too, the newest on top)
                 const handedIn = (one: Todo) => stageOf(shownOf(c), one) === 'delivered'
-                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => Number(handedIn(b)) - Number(handedIn(a)) || (handedIn(a) ? b.endedAt - a.endedAt : begun(a) - begun(b)))
+                const cards = shownOf(c).filter(one => !isUp(one) && shows(one)).sort((a, b) => Number(handedIn(b)) - Number(handedIn(a)) || (handedIn(a) ? b.endedAt - a.endedAt : begun(a) - begun(b)))
                 return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
-        {!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
+        {!alone && tasksView.filter === 'all' ? <Box key="finished-gap" flexGrow={1} /> : null}
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
