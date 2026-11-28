@@ -161,9 +161,11 @@ export const chartOf = (star: string, areas: ChartArea[], width: number, now: nu
   const gap = isWide ? 1.2 : 0.9
   const step = sq + gap
   const per = Math.max(1, Math.floor((colW - 2) / step))
-  // A square stands for more results once the busiest day would stand taller than this many rows of them
+  // A square stands for more results once the busiest day would stand taller than 24 rows of them, as many a row as the narrow
+  // chart holds at its widest when that is more, so a wider chart never draws fewer squares
   const tallest = Math.max(1, ...shown.flatMap(row => row.counts))
-  const unit = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find(u => Math.ceil(tallest / u) <= per * 24) ?? 1000
+  const most = Math.max(per, Math.floor(((Math.min(width, 559) - 52) / cells.length - 2) / 3.9)) * 24
+  const unit = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find(u => Math.ceil(tallest / u) <= most) ?? 1000
   const sinceDay = new Date(since)
   const sinceCell = since > 0 && shown.length && sinceDay.getFullYear() === first.getFullYear() && sinceDay.getMonth() === first.getMonth() ? sinceDay.getDate() - 1 : -1
   const sinceX = sinceCell >= 0 ? left + colW * sinceCell : 0

@@ -1,0 +1,1 @@
+- The Progress chart no longer shows fewer squares as the panel gets wider: a wider chart now draws at least as many as a narrower one.

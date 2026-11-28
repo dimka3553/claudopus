@@ -55,6 +55,9 @@ test('the chart is one month and its rows are the areas: a square for each resul
   // Each row is an area that can be opened; past the first seven the rest are Other, named, and have rows only when asked for
   expect(chart.rows.map(row => row.id)).toEqual(['a3', 'a0', 'a1', 'a2', 'a4', 'a5', 'a6'])
   expect(chart.others).toEqual(['Area 7', 'Area 8', 'Area 9', 'Area 10', 'Area 11'])
+  // A wider chart never draws fewer squares, though from 560 its names stand beside the rows and its squares are larger
+  const counts = Array.from({ length: 136 }, (_, i) => squaresIn(src(chartOf('', areasOf(12), 250 + i * 10, now))))
+  expect(counts.filter((n, i) => n < (counts[i - 1] ?? 0))).toEqual([])
   const whole = chartOf('Software people trust to grow their small shop', areasOf(12), 728, now, 0, 0, true)
   expect([whole.rows.length, whole.top, whole.others.length]).toEqual([12, 7, 5])
 })
