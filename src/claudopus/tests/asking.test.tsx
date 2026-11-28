@@ -144,7 +144,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   // Half a reply typed, then Done pressed twice: the answer goes once, the box goes with it, and the half reply is not left for
   // the next ask
   await bar.input({ key: again?.key ?? '', text: 'Not y', kind: 'change' } as never)
-  const done = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? ''
+  const done = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done' && /^ask-/.test(b.key ?? ''))?.key ?? ''
   await Promise.all([list.press({ key: done }), list.press({ key: done }).catch(() => undefined)])
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Done"')))).toContain('Submit new. Done?')
   expect(appended.filter(line => line.startsWith('a2: ') && line.includes('"Done"'))).toHaveLength(1)
@@ -543,11 +543,11 @@ test('with work running and nobody typing, the panel is drawn again at once for 
   // A press shows what it did at once
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'May I go on?' })) ? undefined : true))).toBe(true)
-  // and so does one that only opens a part of the panel, Finished, with work ended and other work running
+  // and so does one that only opens a part of the panel, Done, with work ended and other work running
   await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
   await $.turn.complete({ answer: 'Nose checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a3' } as never)
   await clock.advance(12_000)
-  // (an ended card stays up until it is dismissed: dismissed, it is the one under Finished)
+  // (an ended card stays up until it is dismissed: dismissed, it is the one under Done)
   await pressed(list, 'dismiss-a3')
   await clock.advance(2_100)
   expect(await until(async () => keyed(list, 'finished-fold'))).toBeDefined()
@@ -600,7 +600,7 @@ test('an ask outlives the work that made it: amber after the work ends, with the
   expect(await until(async () => ((await askButtons(list, 'a1')).includes('Answer in words') ? askButtons(list, 'a1') : undefined))).toEqual(['Copy', 'Open in Terminal', 'Done', 'Answer in words'])
   expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Dismiss', 'Message', 'Not now'].includes(label))).toEqual(['Dismiss'])
   // Done starts the finished work again with the answer, and the ask goes at once; nothing is sent in the person's place
-  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? '' })
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done' && /^ask-/.test(b.key ?? ''))?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Done"') && line.includes('Run this to restart that chat yourself.')))).toBeDefined()
   expect(submitted.some(line => line.includes('Run this to restart'))).toBe(false)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })) ? undefined : true))).toBe(true)
@@ -752,7 +752,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   const ASK = 'Release the second round of terminal fixes?'
   const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '')
   const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label))
-  const isFinished = async () => (await labels()).some(label => /^[▸▾] Finished/.test(label)) || (await texts()).some(text => text.startsWith('Finished'))
+  const isFinished = async () => (await labels()).some(label => /^[▸▾] Done/.test(label)) || (await texts()).some(text => text.startsWith('Done'))
   // It asks, then hands in its report with the ask as its first line, as that work did at 20:27
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it'] } as never)
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Release it? (Answer: Release it.) Built, tested and checked; nothing is released.' } as never)
@@ -766,7 +766,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   expect(told).toContain('does not settle your question by itself')
   expect(told).toContain('Continue the task with this answer')
   // The card stays among the running cards, at work, its question folded to the reply in one grey line, and nothing to press or
-  // type; nothing is under Finished
+  // type; nothing is under Done
   expect((await until(async () => list.find({ type: 'Text', text: '✓ You answered “Show me images first.”' })))?.props.dimColor).toBe(true)
   expect(await list.find({ type: 'Text', text: ASK })).toBeUndefined()
   expect(await askButtons(list, 'a1')).toEqual([])
@@ -798,7 +798,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
   await $.turn.complete({ answer: 'Released as 0.2.77.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(60_000)
-  // Done, it stays among the cards, saying so, until the person dismisses it: only then is it under Finished
+  // Done, it stays among the cards, saying so, until the person dismisses it: only then is it under Done
   expect(await until(async () => list.find({ type: 'Text', text: /^◐ Delivered/ }))).toBeDefined()
   expect(await isFinished()).toBe(false)
   await pressed(list, 'dismiss-a1')
@@ -1954,7 +1954,7 @@ test('a card never goes back to an older picture once a newer one was shown, how
   expect(later).toContain('Released as 1.2.3')
   for (const where of [DOWN, TOP, DOWN]) (await viewAt(where), expect(await card()).toEqual(later))
   // The same through the rest of its life: handed in it is Delivered, Mark as done turns it green where it stands, and it then goes
-  // under Finished. Each of those is seen once, in that order, wherever the view is when the panel is asked for
+  // under Done. Each of those is seen once, in that order, wherever the view is when the panel is asked for
   await steps($, 1, 'claude-fable-5-2', 'a1')
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Released as 1.2.3.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-a1', reason: 'answer', agentId: 'a1' } as never)

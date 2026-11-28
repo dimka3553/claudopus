@@ -410,7 +410,7 @@ const workHooks = (on: On) => {
     const nextHere = async (asked: typeof e) => {
       const call = asked
       const r = await run(call)
-      // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
+      // Ended work a message starts again is at work from now: its card leaves Done while it acts on the message
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
@@ -869,7 +869,7 @@ const workHooks = (on: On) => {
     await changeTodos($, all => {
       const old = all.find(one => one.id === id)
       const was = carried ? all.find(one => one.id === carried && isInterrupted(one) && !one.closedAt) : undefined
-      // (the cut-off card goes under Finished, saying which task took it on)
+      // (the cut-off card goes under Done, saying which task took it on)
       const list = was ? all.map(one => (one.id === was.id ? { ...one, closedAt: now, carriedTo: id, ask: undefined } : one)) : all
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const made = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }

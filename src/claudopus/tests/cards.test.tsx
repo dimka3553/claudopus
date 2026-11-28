@@ -196,26 +196,26 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Config', 'About', 'All', 'Waiting for you', 'Delivered 1', 'Working', 'Finished', 'Starred', 'Fix the nose', '☆', 'Search the docs', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Config', 'About', 'All', 'Waiting for you', 'Delivered 1', 'Working', 'Done', 'Starred', 'Fix the nose', '☆', 'Search the docs', 'Mark as done'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeDefined()
   await clock.advance(1_100)
-  // After them it is still among the cards, green, its line the last written into it (its helper's), and nothing is under Finished:
+  // After them it is still among the cards, green, its line the last written into it (its helper's), and nothing is under Done:
   // only Dismiss puts it there
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.bold).toBe(true)
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /^ · I am reading/ }))?.text).toBe(' · I am reading how the other model draws outlines.')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Config', 'About', 'All', 'Waiting for you', 'Delivered 1', 'Working', 'Finished', 'Starred', 'Fix the nose', '☆', '1 helper ended', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Config', 'About', 'All', 'Waiting for you', 'Delivered 1', 'Working', 'Done', 'Starred', 'Fix the nose', '☆', '1 helper ended', 'Mark as done'])
   // Starred first: its star is a line in the memory folder every account on this Mac shares
   await pressed(pane, 'star-a1')
   expect(await until(async () => ((await keyed(pane, 'star-a1'))?.props.label === '★' ? true : undefined))).toBe(true)
   expect(JSON.parse(files.get(`${MEMORY}/starred.jsonl`)?.trim() ?? '{}')).toMatchObject({ id: 'a1', on: true, title: 'Fix the nose', state: 'Delivered' })
   await pressed(pane, 'dismiss-a1')
   await clock.advance(2_100)
-  // Dismissed, it is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
-  const buttons = (await until(async () => ((await pane.findAll({ type: 'Button' })).some(b => b.props.label === '▸ Finished 1') ? pane.findAll({ type: 'Button' }) : undefined))) ?? []
-  expect(buttons.map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Config', 'About', 'All', 'Waiting for you', 'Delivered', 'Working', 'Finished', 'Starred 1', '▸ Finished 1', 'Search'])
+  // Dismissed, it is one folded row, "Done", under the running cards; unfolded, a card as running work has, with Details and no Stop
+  const buttons = (await until(async () => ((await pane.findAll({ type: 'Button' })).some(b => b.props.label === '▸ Done 1') ? pane.findAll({ type: 'Button' }) : undefined))) ?? []
+  expect(buttons.map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Config', 'About', 'All', 'Waiting for you', 'Delivered', 'Working', 'Done', 'Starred 1', '▸ Done 1', 'Search'])
   // and under Starred it stays, marked done and dismissed, its star saying it is done; Working shows no card of it
   await pressed(pane, 'tasks-starred')
   expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Starred 1' })) ? true : undefined))).toBe(true)
@@ -580,7 +580,7 @@ test('work that ends in an error is kept as failed, saying why; a run that is ov
   const talk: unknown[] = []
   const { clock, submitted, files } = world(on, { agents, kinds, talk })
   on('classic.SubagentStop', () => ({ value: {} }) as never)
-  // Work that ended before this copy of the mod kept it, read back from Claude Code's record: under Finished, never up. Its end,
+  // Work that ended before this copy of the mod kept it, read back from Claude Code's record: under Done, never up. Its end,
   // by its record, is later than every end below
   const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
   files.set(`${folder}/agent-r1.meta.json`, JSON.stringify({ description: 'Old work', spawnDepth: 1, finished: true }))
@@ -588,8 +588,8 @@ test('work that ends in an error is kept as failed, saying why; a run that is ov
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const fold = async (of: typeof pane) => (await of.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label)))?.props.label
-  expect(await until(() => fold(pane))).toBe('▸ Finished 1')
+  const fold = async (of: typeof pane) => (await of.findAll({ type: 'Button' })).find(b => /^[▸▾] Done/.test(String(b.props.label)))?.props.label
+  expect(await until(() => fold(pane))).toBe('▸ Done 1')
   await pressed(pane, 'open-a1')
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   await clock.advance(120_000)
@@ -655,7 +655,7 @@ test('work that ends in an error is kept as failed, saying why; a run that is ov
   for (let n = 0; n < 50; n += 1) newest = await other(n)
   const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect((await again.find({ type: 'Text', text: /Fix the nose/ }))?.text).toBe('Fix the nose')
-  // Forty are kept. The work that was only under Finished went first, though its end is the newest: nothing is under Finished,
+  // Forty are kept. The work that was only under Done went first, though its end is the newest: nothing is under Done,
   // and every card left ended and was never dismissed, or is at work
   const cards = async () => (await again.findAll({ type: 'Text' })).filter(one => one.props.bold && /^(Other \d+|Fix the nose|Pressed.*|Never pressed.*)$/.test(one.text)).map(one => one.text).sort()
   const before = await cards()
@@ -664,7 +664,7 @@ test('work that ends in an error is kept as failed, saying why; a run that is ov
   // every card still up, the oldest too, is kept
   await pressed(again, `dismiss-${newest}`)
   await clock.advance(2_100)
-  expect(await until(() => fold(again))).toBe('▸ Finished 1')
+  expect(await until(() => fold(again))).toBe('▸ Done 1')
   await other(50)
   expect(await until(async () => ((await fold(again)) ? undefined : true))).toBe(true)
   expect(await cards()).toEqual([...before.filter(title => title !== 'Other 49'), 'Other 50'].sort())
@@ -1122,18 +1122,18 @@ test("a card's edge and the line it ends with say its stage: purple at work, thr
   // Ended, each stays among the cards as it ended, an hour on and after another task's end (the done one's, above): stopped and
   // failed with Start again and Dismiss and nothing else
   const offered = async (id: string) => (await pane.findAll({ type: 'Button' })).filter(b => new RegExp(`^(stop|change|again-small|dismiss)-${id}(-\\d+)?$`).test(String(b.key))).map(b => b.props.label)
-  const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label)))?.props.label
+  const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Done/.test(String(b.props.label)))?.props.label
   for (const ms of [2_100, 3_600_000]) {
     await clock.advance(ms)
     expect([ms, await card('a3'), await card('a2'), await card('a4'), await fold()]).toEqual([ms, ['#4C9AFF', '◐ Delivered', '#4C9AFF', false], [undefined, 'Stopped', undefined, false], ['error', '✕ Failed · Ended with an error', 'error', false], undefined])
     expect([ms, await offered('a2'), await offered('a4')]).toEqual([ms, ['Start again', 'Dismiss'], ['Start again', 'Dismiss']])
   }
-  // Dismissed, each is under Finished and stays there, and the one not dismissed stays up
+  // Dismissed, each is under Done and stays there, and the one not dismissed stays up
   await pressed(pane, 'dismiss-a4')
   await pressed(pane, 'dismiss-a2')
-  expect(await until(async () => ((await fold()) === '▸ Finished 2' ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await fold()) === '▸ Done 2' ? true : undefined))).toBe(true)
   await clock.advance(3_600_000)
-  expect([await fold(), (await card('a2'))[1], (await card('a4'))[1], await card('a3')]).toEqual(['▸ Finished 2', undefined, undefined, ['#4C9AFF', '◐ Delivered', '#4C9AFF', false]])
+  expect([await fold(), (await card('a2'))[1], (await card('a4'))[1], await card('a3')]).toEqual(['▸ Done 2', undefined, undefined, ['#4C9AFF', '◐ Delivered', '#4C9AFF', false]])
   await pane.unmount()
 })
 
@@ -1160,17 +1160,17 @@ test('the stop button of a to-do stops its work, and its card stays among the ca
   // It offers Start again, as the person stopped it, and Dismiss, and nothing else
   const offered = async (id: string) => (await pane.findAll({ type: 'Button' })).filter(b => new RegExp(`^(stop|change|again-small|dismiss)-${id}(-\\d+)?$`).test(String(b.key))).map(b => b.props.label)
   expect(await offered('a1')).toEqual(['Start again', 'Dismiss'])
-  // Dismissed, it is under Finished, and stays there
+  // Dismissed, it is under Done, and stays there
   await pressed(pane, 'dismiss-a1')
-  const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label)))?.props.label
-  expect(await until(fold)).toBe('▸ Finished 1')
+  const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Done/.test(String(b.props.label)))?.props.label
+  expect(await until(fold)).toBe('▸ Done 1')
   expect(await titles()).toEqual(['Check the ears'])
   await clock.advance(3_600_000)
-  expect([await fold(), await titles()]).toEqual(['▸ Finished 1', ['Check the ears']])
+  expect([await fold(), await titles()]).toEqual(['▸ Done 1', ['Check the ears']])
   await pane.unmount()
 })
 
-test("work that finishes comes to the top, outlined for two seconds, and stays there over what works, the newest first, blue and Delivered, until the person marks it done: two at once, through an hour and another task's end, one ended while the panel was closed; delivered, its only presses are at its bottom, Give feedback and Mark as done; marked done, it is green where it stood for two seconds from the first drawing that shows it, with the happy octopus and the sound, its shape and presses kept, then under Finished; a message to it makes the same card work again, and delivered again when it hands in, what its last note left open listed on it with Reply", async ($, on) => {
+test("work that finishes comes to the top, outlined for two seconds, and stays there over what works, the newest first, blue and Delivered, until the person marks it done: two at once, through an hour and another task's end, one ended while the panel was closed; delivered, its only presses are at its bottom, Give feedback and Mark as done; marked done, it is green where it stood for two seconds from the first drawing that shows it, with the happy octopus and the sound, its shape and presses kept, then under Done; a message to it makes the same card work again, and delivered again when it hands in, what its last note left open listed on it with Reply", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock, played } = world(on, { agents, kinds, art: true })
@@ -1191,7 +1191,7 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   const end = (agentId: string, turnId: string) => ((agents[agentId] = 'completed'), (kinds[agentId] = 'general-purpose'), $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId } as never))
   type Pane = Awaited<ReturnType<typeof $.ui.mount>>
   const titles = async (of: Pane) => (await of.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose|ears|eyes/.test(one.text)).map(one => one.text)
-  const fold = async (of: Pane) => (await of.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label)))?.props.label
+  const fold = async (of: Pane) => (await of.findAll({ type: 'Button' })).find(b => /^[▸▾] Done/.test(String(b.props.label)))?.props.label
   // The cards drawn done: each line's colour, and each green edge
   const dones = async (of: Pane) => [(await of.findAll({ type: 'Text', text: '◐ Delivered' })).map(one => one.props.color), (await of.findAll({ type: 'Box' })).filter(b => b.props.width === 1 && b.props.backgroundColor === '#4C9AFF').length]
   // What a card offers beside its title
@@ -1199,7 +1199,7 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   const head = async (of: Pane) => (await of.findAll({ type: 'Text' })).filter(one => /working|waiting for you|^Nothing|^Just|delivered$/.test(one.text)).map(one => one.text).join('')
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
 
-  // Two that end together both go to the top, blue, the newer first, over the one still working; neither is under Finished
+  // Two that end together both go to the top, blue, the newer first, over the one still working; neither is under Done
   await clock.advance(400)
   await end('a1', 't1')
   await clock.advance(100)
@@ -1209,7 +1209,7 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   expect(await head(pane)).toBe('1 working · 2 delivered')
   expect(await fold(pane)).toBeUndefined()
   // After their two seconds both are still on top, over what works, the newer first, and so an hour later: no time moves a
-  // card under Finished
+  // card under Done
   for (const ms of [2_100, 3_600_000]) {
     await clock.advance(ms)
     expect([ms, await titles(pane), await dones(pane), await fold(pane)]).toEqual([ms, ['Draw the eyes', 'Fix the nose', 'Check the ears'], [['#4C9AFF', '#4C9AFF'], 2], undefined])
@@ -1229,11 +1229,11 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   expect((await again.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => label === 'Message' || label === 'Dismiss')).toEqual([])
   expect(await again.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
 
-  // Dismiss puts it under Finished, and it stays there: an hour on, and as other work goes on and ends
+  // Dismiss puts it under Done, and it stays there: an hour on, and as other work goes on and ends
   // Marked done, it turns green where it stood, outlined, for two seconds, the octopus happy and the sound of work done: nothing
-  // moves and nothing is under Finished yet; then it is there. The two seconds count from the first drawing that shows it, never
+  // moves and nothing is under Done yet; then it is there. The two seconds count from the first drawing that shows it, never
   // from the press: right after an update the app drew the panel seconds after the press, the moment was over unseen, and the card
-  // went under Finished with no green, octopus or sound while the next one slid into its place, so the press seemed to do nothing
+  // went under Done with no green, octopus or sound while the next one slid into its place, so the press seemed to do nothing
   // (19 Nov, the person: "I clicked Mark as done two times, and the animation didn't play. The sound didn't play"). Here the
   // panel's drawing after the press takes 2.1 s, and the panel is drawn afresh a second after it
   const before = await titles(again)
@@ -1255,7 +1255,7 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   await clock.advance(900)
   expect([await titles(again), await greens(), await fold(again), await offered(again, 'a1'), await band.find({ type: 'Text', text: /^↳ / }), played.slice(sounds)]).toEqual([before, [['success'], 1], undefined, [], undefined, ['sounds/ready.wav']])
   await clock.advance(200)
-  expect(await until(() => fold(again))).toBe('▸ Finished 1')
+  expect(await until(() => fold(again))).toBe('▸ Done 1')
   expect(await titles(again)).toEqual(['Check the ears', 'Draw the eyes'])
   // (marked done, it is green there, with Message, and the header no longer counts it)
   expect(await head(again)).toBe('2 delivered')
@@ -1264,14 +1264,14 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   expect(await offered(again, 'a1')).toEqual(['Message'])
   await pressed(again, 'finished-fold')
   await clock.advance(3_600_000)
-  expect([await fold(again), await titles(again), await dones(again)]).toEqual(['▸ Finished 1', ['Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF'], 2]])
+  expect([await fold(again), await titles(again), await dones(again)]).toEqual(['▸ Done 1', ['Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF'], 2]])
 
   // A message to a done task makes the same card work again, purple with its Stop and Message, and no second card; started again by
   // Claude Code under its id, it is still that one card
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a3', message: 'Shade the eyes too.' } as never)
   agents.a3 = 'running'
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'Shade the eyes too.', resume: { agentId: 'a3' } } as never)
-  expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop', 'Message'], [['#4C9AFF'], 1], '1 working · 1 delivered', '▸ Finished 1'])
+  expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop', 'Message'], [['#4C9AFF'], 1], '1 working · 1 delivered', '▸ Done 1'])
   // When it hands in with its last note asking something of the person, it is not delivered: that is its question on its card, as
   // any question is, amber at the top with what waits, counted as waiting, with the buttons the task gave and Answer in words
   // (20 Nov, the person: "'Delivered' should only mean after it's already been deployed or the task has actually completed"; "The
@@ -1283,7 +1283,7 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   const ambers = async () => (await again.findAll({ type: 'Box' })).filter(b => b.props.width === 1 && b.props.backgroundColor === '#E5A50A').length
   const answers = async () => (await again.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /^(?:Release it|Don't release|Answer in words|Reply)$/.test(label))
   expect(await until(async () => ((await ambers()) ? true : undefined))).toBe(true)
-  expect([await titles(again), await dones(again), await ambers(), await head(again), await answers(), (await again.find({ type: 'Text', text: 'Release the shaded eyes?' }))?.props.color, await fold(again)]).toEqual([['Draw the eyes', 'Release the shaded eyes?', 'Check the ears'], [['#4C9AFF'], 1], 1, '1 waiting for you · 1 delivered', ['Release it', "Don't release", 'Answer in words'], '#E5A50A', '▸ Finished 1'])
+  expect([await titles(again), await dones(again), await ambers(), await head(again), await answers(), (await again.find({ type: 'Text', text: 'Release the shaded eyes?' }))?.props.color, await fold(again)]).toEqual([['Draw the eyes', 'Release the shaded eyes?', 'Check the ears'], [['#4C9AFF'], 1], 1, '1 waiting for you · 1 delivered', ['Release it', "Don't release", 'Answer in words'], '#E5A50A', '▸ Done 1'])
   // A press answers it: the task is started again with the answer, its card at work, nothing left to answer
   const release = await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it'))
   await again.press({ key: release?.key ?? '' })
@@ -1464,8 +1464,8 @@ test('work that ended before the mod kept it is read back from the chat\'s own r
   await $.session.start(start)
 
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label))))
-  expect(fold?.props.label).toBe('▸ Finished 1')
+  const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Done/.test(String(b.props.label))))
+  expect(fold?.props.label).toBe('▸ Done 1')
   await pane.press({ key: String(fold?.key) })
   expect((await pane.find({ type: 'Text', text: /The old line/ }))?.text).toBe(' · The old line')
   // (how full it is, read back too, even on a model this chat does not run on)
@@ -2291,7 +2291,7 @@ test("a moving mark keeps turning for as long as what it stands for goes on: the
   await pane.unmount()
 })
 
-test('Finished lists every task that ever finished, from every result and not only the cards kept, one page at a time with Newer and Older, and finds them by name', async ($, on) => {
+test('Done lists every task that ever finished, from every result and not only the cards kept, one page at a time with Newer and Older, and finds them by name', async ($, on) => {
   const { files } = world(on)
   for (let i = 0; i < 45; i++) {
     const r = { id: `r${i}`, title: i === 7 ? 'Fit the ears' : `Result ${i}`, subject: 'S', at: 1_600_000_000_000 + i * 60_000, chat: 'Heads', chatId: 'c', folder: '/repo', gist: '', files: [], agent: `old${i}` }
@@ -2300,9 +2300,9 @@ test('Finished lists every task that ever finished, from every result and not on
   }
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => ((await keyed(pane, 'finished-fold'))?.props.label === '▸ Finished 45' ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await keyed(pane, 'finished-fold'))?.props.label === '▸ Done 45' ? true : undefined))).toBe(true)
   await pressed(pane, 'tasks-finished')
-  expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Finished 45' })) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Done 45' })) ? true : undefined))).toBe(true)
   // the newest first, one page of 40, then Older for the next page in its place: never more than a page at once (28 Nov: each
   // Show more added 40 until the app refused the whole drawing)
   const titles = async () => (await pane.findAll({ type: 'Text' })).filter(t => t.props.bold && /^(Result \d+|Fit the ears)$/.test(t.text)).map(t => t.text)
@@ -2322,5 +2322,5 @@ test('Finished lists every task that ever finished, from every result and not on
   const box = await until(async () => (await pane.findAll({ type: 'Input' })).find(one => String(one.key).startsWith('tasks-box-')))
   await pane.input({ key: String(box?.key), text: 'EARS' })
   expect(await until(async () => ((await titles()).join() === 'Fit the ears' ? true : undefined))).toBe(true)
-  expect(await pane.find({ type: 'Text', text: 'Finished 1' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Done 1' })).toBeDefined()
 })

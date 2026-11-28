@@ -1114,7 +1114,7 @@ test("after the chat's process was replaced, as when the app quits or drops the 
   const carry = `${LEDGER}/a7.carry.md`
   expect(asked).toContain(`subagent_type "claudopus:task", the model it ran on (Opus 5.5), description "Solve the cameras", and as its prompt exactly: Carry on a task the Claude app's close cut off. Read ${carry} first`)
   for (const part of ['Solve the cameras with the new rig: all 158 frames placed.', '- [done] Place the frames', '- [doing] Write the report', 'I am writing the report.', 'Its worktree, yours now: /work/rig-cams on branch cams', `${HOME}/.claude/projects/-repo/engine-id/subagents/agent-a7.jsonl`]) expect(files.get(carry)).toContain(part)
-  // The fresh task takes its place: its to-dos and notes, and the cut-off card goes under Finished
+  // The fresh task takes its place: its to-dos and notes, and the cut-off card goes under Done
   await pane.unmount()
   const fresh = await $.agent.spawn({ ...spawn, description: 'Solve the cameras', prompt: `Carry on a task the Claude app's close cut off. Read ${carry} first.` } as never)
   expect(await until(async () => ((await lines()).cut === 1 ? true : undefined))).toBe(true)
@@ -1256,7 +1256,7 @@ test("a chat the app's rewind starts again under a new id has every card of the 
   const now = await until(async () => ((await lines()).texts.some(text => text.startsWith('⏸ Interrupted')) ? await lines() : undefined))
   expect(now?.texts).toEqual(expect.arrayContaining(['Solve the cameras', 'Check the totals', '◐ Delivered']))
   expect([now?.buttons.filter(label => label === 'Carry on').length, now?.buttons.includes('Open chat')]).toEqual([1, false])
-  // (the finished one under Finished, kept with this chat's own)
+  // (the finished one under Done, kept with this chat's own)
   await clock.advance(21_000)
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/finished/engine-id.json`) ?? '[]') as { id: string; title: string }[]).find(one => one.id === 'a3')?.title)).toBe('Draw the chart')
   expect(files.get(`${MEMORY}/words/engine-id.said.md`)).toContain('solve the cameras')
@@ -1273,7 +1273,7 @@ test("a chat the app's rewind starts again under a new id has every card of the 
   for (const part of ['Solve the cameras with the new rig: all 158 frames placed.', `${HOME}/.claude/projects/-repo/chat-old/subagents/agent-a1.jsonl`]) expect(carry).toContain(part)
 })
 
-test("a task no run is behind and Claude Code can't start again, as a rewind kept its card in the same process, ends Interrupted and says it can't be reached, never Working for good: one at work after nothing moved for 12 minutes, with Carry on; a delivered one at once when a message to it can't reach it, under Finished with its result, the message marked as not reached and given to the chat", SLOW, async ($, on) => {
+test("a task no run is behind and Claude Code can't start again, as a rewind kept its card in the same process, ends Interrupted and says it can't be reached, never Working for good: one at work after nothing moved for 12 minutes, with Carry on; a delivered one at once when a message to it can't reach it, under Done with its result, the message marked as not reached and given to the chat", SLOW, async ($, on) => {
   // (Claude Code has no loop for either and no record of them in this chat's folder)
   const { files, clock, appended } = world(on, { ended: new Set(['a1', 'a2']), unresumable: new Set(['a1', 'a2']) })
   files.set('session:id', 'chat-old')
@@ -1298,7 +1298,7 @@ test("a task no run is behind and Claude Code can't start again, as a rewind kep
     return all
   }
   expect(await until(async () => (kept('engine-id').tasks?.find(one => one.id === 'a1')?.state === 'working' ? true : undefined))).toBe(true)
-  // A message to the delivered one can't reach it: its card ends so at once, under Finished with its result, and the chat has the words
+  // A message to the delivered one can't reach it: its card ends so at once, under Done with its result, and the chat has the words
   const view = await $.ui.mount({ ...LIST, requestId: 'work-a2', surface: 'desktop' } as never)
   const box = await until(async () => (await view.findAll({ type: 'Input' } as never)).find(one => /^details-a2-reply-change-/.test(one.key ?? '')))
   await view.input({ key: box?.key ?? '', text: 'Add April too' })

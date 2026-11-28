@@ -1020,7 +1020,7 @@ test('a workflow that finishes stays where it was for its green two seconds, und
   await pane.unmount()
 })
 
-test('a workflow the chat starts is one blue card: how many agents, its rounds as squares with the step being run, the last round checked, nothing cut at any width, and Details with each round and agent chat; ended, it is under Finished', async ($, on) => {
+test('a workflow the chat starts is one blue card: how many agents, its rounds as squares with the step being run, the last round checked, nothing cut at any width, and Details with each round and agent chat; ended, it is under Done', async ($, on) => {
   const { files, tabs, clock, played, notified } = world(on, { panes: ['claudopus'], art: true })
   await $.session.start(start)
   await $.prompt.submit({ text: 'make the roman numerals right', wait: false, origin: composer })
@@ -1109,10 +1109,10 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await until(async () => tab.find({ type: 'Text', text: /^Conversation of the checker · round 1$/ }))).toBeDefined()
   await tab.unmount()
 
-  // The notice that it ended ends its card: it leaves the running cards and is under Finished
+  // The notice that it ended ends its card: it leaves the running cards and is under Done
   await $.prompt.submit({ text: '<task-notification><task-id>wt1</task-id><status>completed</status><result>passed in 2 rounds</result></task-notification>', wait: false, origin: { kind: 'task-notification' } } as never)
   expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Just finished$/ })) ? true : undefined))).toBe(true)
-  // For two seconds it stays where it was, green, with no Stop, and nothing is under Finished yet
+  // For two seconds it stays where it was, green, with no Stop, and nothing is under Done yet
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => !b.key?.startsWith('outline-') && b.props.backgroundColor === 'success').length).toBe(1)
   expect(await pane.find({ type: 'Button', key: 'flow-stop-wf_1' })).toBeUndefined()
@@ -1122,7 +1122,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // A workflow that passed makes the octopus happy for its pause too, then it rests
   const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt))
   expect(await octopus()).toBe('Claudopus, a task is done')
-  expect((await pane.findAll({ type: 'Button' })).some(b => /^[▸▾] Finished/.test(String(b.props.label)))).toBe(false)
+  expect((await pane.findAll({ type: 'Button' })).some(b => /^[▸▾] Done/.test(String(b.props.label)))).toBe(false)
   await clock.advance(2_100)
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined()
   expect(await octopus()).toBe('Claudopus')

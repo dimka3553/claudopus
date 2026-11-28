@@ -14,7 +14,7 @@ const backAsked = async ($: EngineInterface, id: string) => {
 // Refresh, above the chat beside Open and Close panel and on a tab that couldn't be shown: the panel back to how it first opens.
 // What was picked, searched, unfolded, paged or scrolled in it goes back to its start, every other tab of the mod's is closed, the
 // panel is opened again in front if it was open, and nothing held from before is given again: each drawing is made afresh, with
-// all it holds (28 Nov, the person, after many presses of Show more under Finished left the panel too big to show: "a refresh
+// all it holds (28 Nov, the person, after many presses of Show more under Done left the panel too big to show: "a refresh
 // button which restores claudopus to the og state"). The tasks, their results, the stars, what is typed and not sent, memory and
 // whether the panel is open stay as they are
 const refreshPanel = async ($: EngineInterface) => {
@@ -294,9 +294,9 @@ const panelHooks = (on: On) => {
     if (paneId === LIST) doneDrawn.push(...own.filter(one => isDoneMoment(one, at)))
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The cards kept up: every one working or waiting for the person, and every one that ended, done, stopped or failed, until the
-    // person presses Dismiss on it: nothing else moves a card under Finished, no time and no other task's end (the person,
+    // person presses Dismiss on it: nothing else moves a card under Done, no time and no other task's end (the person,
     // iterating on a result: "tasks shouldn't be dismissed on their own"). A card that ended before cards stayed up is under
-    // Finished, as it was
+    // Done, as it was
     const shownWork = own.filter(one => !isDismissed(one) || isDoneMoment(one, at)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || isDoneMoment(one, at) || runningOn(one.id).length > 0)
     // What waits on a card for the person, each a block (needs.tsx): its own question, the permissions held for its commands,
     // Claude Code's prompt for a call of its own, the password or key box of a command of its own
@@ -312,7 +312,7 @@ const panelHooks = (on: On) => {
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : windowFor(one.model ?? '', chat.window))
     // Work that finished, in its moment: for its two seconds it is at the top under all that waits on the person, outlined green;
-    // then it goes under Finished. Work stopped or stopped by an error is not: it pauses in its place, in its own look
+    // then it goes under Done. Work stopped or stopped by an error is not: it pauses in its place, in its own look
     // In the few rows above the prompt a narrow terminal gives the panel, the outline would take two of them
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     const isFinishMoment = (one: Todo) => hasResult(stage(one)) && lingers(one, at)
@@ -536,7 +536,7 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    // A card of this chat's that has ended and is not under Finished can be dismissed there; one at work has Stop, and one a
+    // A card of this chat's that has ended and is not under Done can be dismissed there; one at work has Stop, and one a
     // command waits on for the person's Allow stays
     const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && !isDismissed(one) && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
     // What a delivered task's result leaves open, as its last note listed it: numbered lines, all answered by one reply
@@ -598,7 +598,7 @@ const panelHooks = (on: On) => {
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
                   </Box>
                 ) : null}
-                {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
+                {/* Done, at the top or under Done: a press opens the box above the chat for what to change, where that bar
                     takes a box; the same task then carries on with what is typed */}
                 {canChange(one) && !looksDelivered(one) && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
@@ -628,7 +628,7 @@ const panelHooks = (on: On) => {
                     <Button key={`again-small-${one.id}-${presses}`} label="Start again" plain dimColor hover={{ scope: `again-${one.id}`, underline: true }} onPress={() => ((presses += 1), void startAgain($, one.id))} />
                   </Box>
                 ) : null}
-                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again. A
+                {/* Ended and still up here: a press puts it under Done, whatever it asks, until its task works again. A
                     delivered card has its two presses at its bottom instead, and none up here */}
                 {canDismiss(one) && stage(one) !== 'delivered' ? (
                   <Box flexShrink={0}>
@@ -692,7 +692,7 @@ const panelHooks = (on: On) => {
             {/* Delivered: what its result leaves open, numbered, with no press of their own, and at the card's bottom its only two
                 presses (19 Nov, the person: "buttons at the bottom to mark as done, provide feedback", "it makes the most sense
                 to just send one message for both the questions"). The reply is typed in the box above the chat, as every
-                message is, and puts the task back to work; Mark as done puts the card under Finished */}
+                message is, and puts the task back to work; Mark as done puts the card under Done */}
             {looksDelivered(one) ? questionLines(one, `asks-${one.id}`, lead) : null}
             {/* Marked done, its presses go at once, the choice made: an empty row of their height holds the card's shape through its
                 green moment (19 Nov, the person: "As soon as I click a button, the buttons should immediately disappear") */}
@@ -1832,7 +1832,7 @@ const panelHooks = (on: On) => {
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (isUpThere(one) || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
     const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
-    // Finished: every task that ended, its card while it is kept and else its result, a page at a time; folded at the bottom under All,
+    // Done: every task that ended, its card while it is kept and else its result, a page at a time; folded at the bottom under All,
     // open as a filter of its own. Starred: every task starred, whatever became of it since (tasks.tsx)
     const cardItem = (one: Todo): TaskItem => ({ at: one.endedAt || one.startedAt, id: one.id, title: titleOf(one), draw: () => small(one) })
     const finishedAll = () => finishedOf([...finished.map(cardItem), ...endedFlows.map(f => ({ at: f.endedAt, id: f.id, title: f.title, draw: () => flowSmall(f) }))], kept, [...own, ...elsewhere].filter(one => !finished.includes(one)).map(one => one.id))
@@ -1840,7 +1840,7 @@ const panelHooks = (on: On) => {
       const isStars = tasksView.filter === 'starred'
       if (!['all', 'finished', 'starred'].includes(tasksView.filter) || (!isStars && !all.length)) return null
       const isAll = tasksView.filter === 'all'
-      return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, most: squeeze >= 2 ? 10 : squeeze >= 1 ? 20 : undefined, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
+      return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Done', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, most: squeeze >= 2 ? 10 : squeeze >= 1 ? 20 : undefined, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
     }
     const tasksActs: TasksActs = { redraw: () => ((presses += 1), drawAgain($)), star: one => void starPress($, rowStar(one)), open: id => openReport($, id), typing: () => holdTimes($), typed: () => freeTimes($) }
     // What a card's star keeps of it
@@ -2209,7 +2209,7 @@ const panelHooks = (on: On) => {
                 return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []
               }),
             ]}
-        {/* The Finished row sits at the pane's bottom edge, under everything else */}
+        {/* The Done row sits at the pane's bottom edge, under everything else */}
         {!alone && tasksView.filter === 'all' ? <Box key="finished-gap" flexGrow={1} /> : null}
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>

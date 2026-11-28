@@ -234,7 +234,7 @@ test("a task may not stop with to-dos open, nothing of its own running and nothi
   ]))
   await $.session.start(start)
   const back = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const folded = await until(async () => (await back.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label))))
+  const folded = await until(async () => (await back.findAll({ type: 'Button' })).find(b => /^[▸▾] Done/.test(String(b.props.label))))
   expect(await back.find({ type: 'Text', text: /^Fix the two tests|^Clear task clutter/ })).toBeUndefined()
   if (folded) await back.press({ key: String(folded.key) })
   // (under the task of this test, done with its server still running)

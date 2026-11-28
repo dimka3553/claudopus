@@ -137,7 +137,7 @@ const QUESTION_CHARS = 200
 const ANSWER_CHARS = 30_000
 // While the servers panel is open it looks again this often
 const TICK = 3000
-// Work that has just ended stays in its place among the running cards this long, in its ended look, before it goes to Finished
+// Work that has just ended stays in its place among the running cards this long, in its ended look, before it goes to Done
 const LINGER = 2000
 // Work that ended while the mod was reloading, which draws nothing for many seconds, has its pause from the panel's first drawing
 // after the load instead (Infinity until then), by `<id>:<endedAt>`: a finish is never over before the panel could show it
@@ -757,7 +757,7 @@ type ButtonArgs = Parameters<Ui['Button']>[0]
 type KeptButton = { element: ReturnType<Ui['Button']>; look: string; latest: unknown; at: number }
 const keptButtons = new Map<string, KeptButton>()
 // How many times each key has been drawn so far in one drawing, by the drawing's own event: the same key drawn twice in a pane
-// (a card shown both among the asks and under Finished) is two buttons, each kept apart
+// (a card shown both among the asks and under Done) is two buttons, each kept apart
 const keptSeen = new WeakMap<object, Map<string, number>>()
 // A kept button not drawn for this long goes; drawn again later, it is a new one
 const KEPT_FOR = 10 * 60_000

@@ -229,7 +229,7 @@ const personSign = async ($: EngineInterface) => {
   // (and what the person's own presses change once their write lands: a card dismissed, a result's question answered or set aside,
   // a task their answer starts again. Without them, a drawing made between the press and its write was kept while they used the
   // panel, and the card stayed at the top with its buttons for 15 seconds after each move)
-  // (a card marked done is green in its place for its two seconds, then under Finished: both are drawn in the kept drawing too)
+  // (a card marked done is green in its place for its two seconds, then under Done: both are drawn in the kept drawing too)
   const momentAt = await $.clock.now()
   const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
   return JSON.stringify([
@@ -1233,7 +1233,7 @@ const writtenIn = ($: EngineInterface, target: string, card: string) => {
   for (const key of startedBy) if (key.startsWith(`${card}:`)) startedBy.delete(key)
 }
 // Work an answer or the person's message started again is at work from then: its card is back among the running cards, not under
-// Finished, while it acts on it
+// Done, while it acts on it
 const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
   await changeTodos($, list => list.map(card => (card.id !== target || card.status === 'working' ? card : resumed(card, now))))

@@ -39,7 +39,7 @@ test("a star is the task's newest line, whatever lines came before or were cut s
   starsTook('')
 })
 
-test('Finished lists every finished task, the newest first: its card while one is kept, else its newest result, and a result no task wrote as a row of its own', () => {
+test('Done lists every finished task, the newest first: its card while one is kept, else its newest result, and a result no task wrote as a row of its own', () => {
   const reports = [report('r1', 10, 'a1'), report('r2', 30, 'a2', 'Second round'), report('r2-old', 20, 'a2'), report('by-hand', 25), report('r-card', 40, 'k1')]
   const cards = [{ at: 35, id: 'k1', title: 'Kept card' }]
   const all = finishedOf(cards, reports)

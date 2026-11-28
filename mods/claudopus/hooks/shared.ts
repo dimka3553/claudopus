@@ -26,7 +26,7 @@ const HELPER_ITEMS = 12
 // Text cut short says so
 const upTo = (text: string, most: number) => (text.length > most ? `${text.slice(0, most - 1).trimEnd()}…` : text)
 
-// Work that ended is shown in other chats' panels too, where it turns happy and folds into Finished as in its own: the newest few
+// Work that ended is shown in other chats' panels too, where it turns happy and folds into Done as in its own: the newest few
 // that ended in the last hours, while its chat is open
 export const ENDED_SHARED = 10
 export const ENDED_FOR = 12 * 3_600_000

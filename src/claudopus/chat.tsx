@@ -412,7 +412,7 @@ const chatHooks = (on: On) => {
       if (!isBehind() && (await ownCards($)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // and Claude's commands take their turn on the processor, so the person keeps cores of their own (pace.tsx)
       void paceWork($).catch(err => log($, `commands not paced: ${String(err)}`))
-      // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
+      // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Done
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await ownCards($))].filter(card => isLingering(card, now))) {
         const key = `${one.id}:${one.endedAt}`

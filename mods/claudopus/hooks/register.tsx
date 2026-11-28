@@ -16007,7 +16007,7 @@ return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined,
 <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
 </Box>
 ) : null}
-{/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
+{/* Done, at the top or under Done: a press opens the box above the chat for what to change, where that bar
                     takes a box; the same task then carries on with what is typed */}
 {canChange(one) && !looksDelivered(one) && 'Input' in table && repliesInBar(e.surface) ? (
 <Box flexShrink={0}>
@@ -16034,7 +16034,7 @@ return there && pressOf(there) ? (
 <Button key={`again-small-${one.id}-${presses}`} label="Start again" plain dimColor hover={{ scope: `again-${one.id}`, underline: true }} onPress={() => ((presses += 1), void startAgain($, one.id))} />
 </Box>
 ) : null}
-{/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again. A
+{/* Ended and still up here: a press puts it under Done, whatever it asks, until its task works again. A
                     delivered card has its two presses at its bottom instead, and none up here */}
 {canDismiss(one) && stage(one) !== 'delivered' ? (
 <Box flexShrink={0}>
@@ -16092,7 +16092,7 @@ return there && pressOf(there) ? (
 {/* Delivered: what its result leaves open, numbered, with no press of their own, and at the card's bottom its only two
                 presses (19 Nov, the person: "buttons at the bottom to mark as done, provide feedback", "it makes the most sense
                 to just send one message for both the questions"). The reply is typed in the box above the chat, as every
-                message is, and puts the task back to work; Mark as done puts the card under Finished */}
+                message is, and puts the task back to work; Mark as done puts the card under Done */}
 {looksDelivered(one) ? questionLines(one, `asks-${one.id}`, lead) : null}
 {/* Marked done, its presses go at once, the choice made: an empty row of their height holds the card's shape through its
                 green moment (19 Nov, the person: "As soon as I click a button, the buttons should immediately disappear") */}
@@ -17044,7 +17044,7 @@ const finishedPart = (isOpen: boolean, all = finishedAll()) => {
 const isStars = tasksView.filter === 'starred'
 if (!['all', 'finished', 'starred'].includes(tasksView.filter) || (!isStars && !all.length)) return null
 const isAll = tasksView.filter === 'all'
-return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, most: squeeze >= 2 ? 10 : squeeze >= 1 ? 20 : undefined, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
+return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Done', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, most: squeeze >= 2 ? 10 : squeeze >= 1 ? 20 : undefined, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
 }
 const tasksActs: TasksActs = { redraw: () => ((presses += 1), drawAgain($)), star: one => void starPress($, rowStar(one)), open: id => openReport($, id), typing: () => holdTimes($), typed: () => freeTimes($) }
 const starSeen = (one: Todo): StarSeen => ({ id: one.id, title: titleOf(one), state: STAGE_WORD[stage(one)], report: left(one)?.id, chat: one.chat?.title || chat.title, ended: one.endedAt || undefined })

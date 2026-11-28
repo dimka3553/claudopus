@@ -138,7 +138,7 @@ const isInterrupted = (one: Pick<Todo, 'status' | 'why'>) => one.status === 'fai
 // record is in the chat a rewind came from (27 Nov: a card brought over by a rewind, written to on its card, sat at Working for
 // hours while every message to it stayed "Not read yet", and the chat said each answer "could not reach that task"). Its card ends
 // Interrupted and says it can't be reached, with Carry on and its last result kept; one that had already handed in its result goes
-// under Finished, as it had ended before. What the person wrote to it that it never read is marked so, and goes to the chat
+// under Done, as it had ended before. What the person wrote to it that it never read is marked so, and goes to the chat
 const lostEntry = (entry: Entry): Entry => {
   const { isUnread: _, ...rest } = entry
   return { ...rest, isLost: true }
@@ -364,7 +364,7 @@ const carryText = async ($: EngineInterface, one: Todo, answer: string) => {
     .join('\n')
 }
 // The person's press on Carry on, or their answer to what a cut-off task asked: the chat starts a fresh task told everything the
-// ledger holds of it. Its card goes under Finished once the fresh task starts, which takes its place, its to-dos and its notes
+// ledger holds of it. Its card goes under Done once the fresh task starts, which takes its place, its to-dos and its notes
 const carryOn = async ($: EngineInterface, id: string, answer = '') => {
   const list = await read($, todos)
   const one = list.find(card => card.id === topOf(list, id))
