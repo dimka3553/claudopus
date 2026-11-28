@@ -270,7 +270,8 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
 // way, none put to the person). A command so blocked is asked on its task's card as any permission is: Allow runs that very
 // command once, as the person's own (runit.tsx), and Don't allow leaves it. Claudopus never lets the refused call itself through.
 // A blocked call that is no command the person could run leaves nothing to decide, so nothing waits for them: the task was told
-// by Claude Code and carries on without it
+// by Claude Code and carries on without it. Only a file change in a folder outside the chat's asks, as a line typed in the chat
+// lets it through (refusedOutside)
 const BLOCKED_ASK = 'Claude Code blocked this command. Run it anyway?'
 // A release Claude Code blocked comes after the person's press that allowed it (the go-ahead's Release it, or the release's own
 // permission): Claude Code decides each command after that, and lets one it blocked run only on a press on that very command, so
@@ -313,10 +314,14 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   if (!top || top.chat) return
   // Only a command, short enough to read, shown whole: what the person's press would run (runit.tsx)
   const runnable = runnableOf(tool, call)
+  // Aimed at a folder outside the chat's: that is why it was blocked, and the card says so
+  const outside = await outsideFolder($, tool, call)
+  if (outside) await log($, `refusal of ${tool} for ${agent} in ${outside}, outside the chat's folders (${cwd})`)
   if (!runnable && connectorRuleOf(tool)) return void (await refusedConnector($, agent, top.id, own, tool, call, refusal.reason))
+  if (!runnable && outside && CHANGE_TOOLS.includes(tool)) return void (await refusedOutside($, agent, top.id, own, String(call.file_path ?? call.notebook_path ?? ''), outside))
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
   const isRelease = releaseCalls(runnable.command, pluginRoot($), runnable.cwd).length > 0
-  const details = [runDetails(runnable, refusal.reason), isRelease ? RELEASE_SECOND_PRESS : '', own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
+  const details = [runDetails(runnable, refusal.reason), isRelease ? RELEASE_SECOND_PRESS : '', own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', outside ? OUTSIDE_COMMAND(shortPath(cwd, 80), shortPath(outside, 80), outside) : '', PRESS_ONLY].filter(Boolean).join('\n\n')
   const asked = isRelease ? BLOCKED_RELEASE_ASK : BLOCKED_ASK
   const at = await $.clock.now()
   // Beside any question waiting on the person, which it never replaces; only the same command already waiting for its Allow is not
@@ -366,9 +371,44 @@ const refusedConnector = async ($: EngineInterface, agent: string, top: string, 
   if (card) await askAloud($, card, CONNECTOR_ASK).catch(err => log($, `ask not told: ${String(err)}`))
   if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
+// ---- A call Claude Code blocked in a folder outside the chat's (hooks/outside.ts) ----
+// The folder it was aimed at, where that is outside the chat's: the repo that holds it, found a few folders up, else its own
+// (a file's, for a file); '' for none
+const outsideFolder = async ($: EngineInterface, tool: string, call: Record<string, unknown>) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const aim = refusedAim(tool, call, cwd, home)
+  if (!aim) return ''
+  const settings = [`${claudeDir || `${home}/.claude`}/settings.json`, `${cwd}/.claude/settings.json`, `${cwd}/.claude/settings.local.json`]
+  const added = await Promise.all(settings.map(path => $.fs.read(path).then(text => addedFolders(text, cwd, home), () => [])))
+  if (!isOutsideAll(aim, [cwd, ...added.flat(), dir], isWindows)) return ''
+  const own = tool === 'Bash' ? aim : aim.replace(/\/[^/]*$/, '') || '/'
+  for (let at = own, up = 0; up < 6 && at.split('/').filter(Boolean).length > 1 && at !== home; up++, at = at.replace(/\/[^/]*$/, ''))
+    if (await $.fs.exists(`${at}/.git`).catch(() => false)) return isInFolder(cwd, at, isWindows) ? own : at
+  return own
+}
+// A file change there has no command to run: the card asks once per task and folder whether the chat may work there, with the
+// line to type in the chat
+const refusedOutside = async ($: EngineInterface, agent: string, top: string, own: Todo | undefined, path: string, folder: string) => {
+  const rule = `${FOLDER_RULE}${folder}`
+  const text = FOLDER_ASK(shortPath(folder, 80))
+  const details = [...FOLDER_DETAILS(shortPath(cwd, 80), shortPath(folder, 80), path.split('/').pop() ?? '', TRY_AGAIN), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : ''].filter(Boolean).join('\n\n')
+  const at = await $.clock.now()
+  const list = await read($, todos)
+  const isAsked = (one: Todo) => asksOf(one).some(ask => ask.rule === rule)
+  let isPut = !list.some(one => (one.id === top || topOf(list, one.id) === top) && isAsked(one))
+  if (isPut) await change($, agent, one => ((isPut = !isAsked(one)), isPut ? withAsks(one, [...asksOf(one), { text, details, copy: `/add-dir ${folder}`, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
+  if (!isPut) return void (await log($, `refusal of a change in ${folder} for ${agent} not put on its card: the same folder waits on it already`))
+  await log($, `refusal of a change in ${folder} for ${agent} put to the person on its card, with the line that adds the folder to the chat`)
+  const card = (await read($, todos)).find(one => one.id === top)
+  if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+}
+
 // What the task is told of the person's answer to it
 const CONNECTOR_ANSWERED = (rule: string, said: string, isReply: boolean) =>
-  isReply
+  rule.startsWith(FOLDER_RULE)
+    ? FOLDER_ANSWERED(rule.slice(FOLDER_RULE.length), said, isReply, who(true), TRY_AGAIN, DONT_ALLOW)
+    : isReply
     ? `${who(true)} replied, in their own words, when asked to let your tasks use ${rule}, which Claude Code refused you: ${said}\nTheir words do not let it through: only the rule in their own Claude Code settings does, which the command on your card adds. If they say they have added it, call it once more exactly as before; otherwise answer them with the \`ask\` tool, or carry on without it.`
     : said === TRY_AGAIN
       ? `${who(true)} pressed "${TRY_AGAIN}" after being shown the command that adds ${rule} to their Claude Code settings. Call it once more now, exactly as before. If Claude Code refuses it again, the rule is not in yet and your card asks again: do not ask in words, and do not reach its result another way.`

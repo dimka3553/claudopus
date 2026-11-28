@@ -251,8 +251,6 @@ const deliverRun = async ($: EngineInterface, cardId: string, target: string, ru
   if (isWorking) void wakeForRun($, run, target)
   return 'waits'
 }
-// What a task that ended its step is told with the end of the command it waited on, so it carries on and hands in its result
-const RUN_RESUMED = 'You had ended your step while it ran: this message starts you again. Carry on from where you were with what it printed, then end with your report as before.'
 // The runs whose end is on its way to their task, so one end is sent once, and those whose message is going out now, which the
 // step it starts does not read a second time (marked in memory: the drawing it goes from may write nothing)
 const runWaking = new Set<string>()

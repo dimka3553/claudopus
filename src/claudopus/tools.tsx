@@ -283,13 +283,18 @@ const toolHooks = (on: On) => {
   // message the task sends it (PART_TAKEN), or with any message or notice that comes first. Claudopus submits nothing for it, as
   // Claude Code draws a plugin's message as the person's own (21 Nov: "This still gets sent as me"). Nothing on the card ends
   on('tool.call', { tool: 'mcp__claudopus__report' }, async ($, e) => {
-    const text = String((e as unknown as { message?: unknown }).message ?? '').trim()
+    const text = withShortRule(String((e as unknown as { message?: unknown }).message ?? '').trim())
     if (e.agentId === undefined) return { result: `Only a background task hands in a part of its result; the chat tells ${who()} in its reply.` }
     if (!text) return { result: 'A report needs its text, in `message`.' }
     const card = (await read($, todos)).find(one => one.id === e.agentId)
     if (!card || card.chat || isOff || !dir) return { result: `Not handed in: Claudopus does not follow this task. Put it in your last report instead.` }
     if (card.parentId) return { result: named(PART_FROM_HELPER) }
     if (card.status !== 'working') return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' }
+    // A long part begins with its short result, as a report does: asked for again once
+    if (!shortOf(text) && !longAsked.has(`${card.id}:part`)) {
+      longAsked.add(`${card.id}:part`)
+      return { result: named(NOT_HANDED_LONG(wordCountOf(text), true)) }
+    }
     await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, partsForChat: [...(one.partsForChat ?? []), text].slice(-PARTS_KEPT) } : one)))
     await saveReport($, card, text, true).catch(err => log($, `part of ${card.id}'s result not kept: ${String(err)}`))
     await log($, `part of ${card.id}'s result taken, for the chat to give now`)

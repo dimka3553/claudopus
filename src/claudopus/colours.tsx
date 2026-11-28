@@ -16,6 +16,8 @@ let colourTimer: Timer | undefined
 let colourWritten = ''
 
 const colourHex = (slot: number) => PALETTE[slot % PALETTE.length] ?? PALETTE[0]
+// The edge of a reply's box that passes on no result: grey, on a light and a dark chat alike
+const QUIET_EDGE = '#80808070'
 // Each card's colour, kept on the card (Todo.colour): the chat's own cards are given one as they are made, in the same change of
 // the list (changeTodos), the one least used by the tasks started just before, so tasks seen together never share one (27 Nov: two
 // working cards were both red). Cards made before this came in get theirs at the next change. The list as last given, by id
@@ -45,22 +47,46 @@ const taskLinks = ($: EngineInterface, id: string) => {
 const isColourRead = () => isColoured || isLinked
 
 // The results this chat was given to pass on, the newest last: a reply that passes one on, as it came, is about its task
-const givenResults: { id: string; text: string }[] = []
-const resultGiven = (id: string, text: string) => {
-  givenResults.push({ id, text: text.slice(0, 20_000) })
+// (`isPart`: a part of its result, handed in by a task still at work)
+const givenResults: { id: string; text: string; isPart?: boolean }[] = []
+const resultGiven = (id: string, text: string, isPart = false) => {
+  givenResults.push({ id, text: text.slice(0, 20_000), isPart })
   givenResults.splice(0, Math.max(0, givenResults.length - 30))
 }
+// One stretch of a reply: the whole of it, or what stands between two lines of dashes; the task whose result it passes on, if any
+type ReplyBit = { text: string; id?: string; isPart: boolean }
+const BIT_RULE = /^[ \t]*-{3,}[ \t]*$/m
 // The tasks a drawn reply is about: the one whose result it passes on (given this load, or the end report a card keeps), else by
-// its row id, else by its words (the desktop app names a reply by its message's id)
+// its row id, else by its words (the desktop app names a reply by its message's id). `bits`: a reply that passes on several results
+// at once, a line of dashes between them, as each stretch of it (28 Nov, the person, of two tasks' results in one box under the
+// first one's name: "it's confusing because now it's one message in two bits")
 const replyTasks = async ($: EngineInterface, requestId: string, text: string) => {
   const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
-  const passed = passedOn(text, [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults])
-  if (passed && cards.some(one => one.id === passed)) {
-    colourBuilder ??= new ColourBuilder()
-    colourBuilder.pick(passed)
-    return { ids: [passed], cards }
+  const finals = [...cards.filter(one => one.answer).map(one => ({ id: one.id, text: one.answer ?? '' })), ...givenResults.filter(one => !one.isPart)]
+  const parts = [...cards.flatMap(one => (one.partsGiven ?? []).map(part => ({ id: one.id, text: part }))), ...givenResults.filter(one => one.isPart)]
+  const bitOf = (bit: string): ReplyBit => {
+    const [last, part] = [passedOn(bit, finals), passedOn(bit, parts)]
+    const id = [last, part].find(one => one && cards.some(card => card.id === one))
+    return { text: bit, ...(id ? { id } : {}), isPart: Boolean(id) && id !== last }
   }
-  return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards }
+  const split = text.split(BIT_RULE).map(bit => bit.trim()).filter(Boolean).map(bitOf)
+  const found = split.filter(bit => bit.id)
+  const bits = found.length > 1 ? split : []
+  // (a reply is known by its first words, which run on into the next result where it passes on several: then by its first stretch)
+  const whole = [bitOf(text), ...found].find(bit => bit.id)
+  if (whole?.id) {
+    colourBuilder ??= new ColourBuilder()
+    colourBuilder.pick(whole.id)
+    return { ids: [whole.id], cards, isResult: true, isPart: whole.isPart, bits }
+  }
+  return { ids: (colourIndex.replies[requestId] ?? colourIndex.texts[colourTextHash(text)] ?? []).filter(id => colourIndex.tasks[id]), cards, isResult: false, isPart: false, bits }
+}
+// Result on a reply that passes on a task's result: the whole of it, of which the chat shows only the short result, in a tab of the
+// panel (results-tab.tsx); its Details where none is kept yet
+const openResultOf = async ($: EngineInterface, id: string) => {
+  const kept = (await ownReports($).catch(() => [] as Report[])).find(r => r.agent === id)
+  if (kept) openReport($, kept.id)
+  else openWork($, id)
 }
 
 // The person's messages in the chat, the newest last, those sent while the chat was at work among them: the transcript keeps no row
@@ -223,7 +249,7 @@ const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.k
 const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {
   if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
   const given = isLinked ? replyLinksIn(e.props.text) : []
-  const { ids, cards } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[] }
+  const { ids, cards, isResult, isPart, bits } = isColoured ? await replyTasks($, e.requestId, e.props.text) : { ids: [] as string[], cards: [] as Todo[], isResult: false, isPart: false, bits: [] as ReplyBit[] }
   // A reply the last pass did not read: the rows since are read, and it is drawn again in its box, quoting the message it answers.
   // A reply found by the result it passes on too, as the person's newest message to its task may have come since that pass (27 Nov:
   // a result quoted the message before the one it answered). Once for each text: a reply about no task asks no pass again
@@ -251,31 +277,62 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
         {links}
       </Box>
     )
-  return (
-    <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={colourOfTask(first)} paddingX={1} gap={1}>
-      <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {ids.map(id => {
-          return (
-            <Box key={`task-${id}`} flexDirection="row" columnGap={2}>
-              {/* The dot outside the button, as the app draws a button's words in its own colour */}
-              <Box key={`task-name-${id}`} flexDirection="row">
-                <Text color={colourOfTask(id)}>● </Text>
-                <Button key={`task-open-${id}-${presses}`} plain hover={{ scope: `task-open-${id}`, underline: true }} onPress={() => openWork($, id)}>
-                  <Text bold>{cut(titleOfTask(id), 60)}</Text>
-                </Button>
-              </Box>
-              <Button key={`task-reply-${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
-            </Box>
-          )
-        })}
+  // Colour marks only what matters, and is a card's own: a reply that passes on a task's result has the edge of a delivered card,
+  // blue; a part handed in by a task still at work has a working card's, purple, and says so; any other reply about a task has a
+  // quiet grey one. Its task's colour is only the dot before its name, as on its card (28 Nov, the person: "colors kinda make it
+  // confusing maybe only for important bits of text?"; twelve colours of box told nothing of what a reply was)
+  type Kind = 'result' | 'part' | 'other'
+  const edgeOf = (kind: Kind) => (kind === 'result' ? DELIVERED : kind === 'part' ? LIVE : QUIET_EDGE)
+  // A box's head: its task's dot and name, which opens its Details; on a result, Result, which opens the whole of it; Reply
+  // (`tag`: which stretch of the reply it heads, where it has several)
+  const headOf = (id: string, kind: Kind, tag = '') => (
+    <Box key={`task-${tag}${id}`} flexDirection="row" columnGap={2}>
+      {/* The dot outside the button, as the app draws a button's words in its own colour */}
+      <Box key={`task-name-${id}`} flexDirection="row">
+        <Text color={colourOfTask(id)}>● </Text>
+        <Button key={`task-open-${tag}${id}-${presses}`} plain hover={{ scope: `task-open-${tag}${id}`, underline: true }} onPress={() => openWork($, id)}>
+          <Text bold>{cut(titleOfTask(id), 60)}</Text>
+        </Button>
       </Box>
-      {(() => {
-        // The person's message this reply answers: the newest they sent its task before it, in the chat or on its card, else the
-        // one that started it. A reply not read yet, as it comes, is the newest of all
-        const row = colourIndex.rows[e.requestId] ?? colourIndex.rows[hash]
-        const words = (quoteFor(colourIndex, first, row) ?? cards.find(one => one.id === first)?.words ?? '').trim()
-        return words ? quoteOf($, ui, `${mark(e.requestId)}-${first}`, words) : null
-      })()}
+      {kind === 'part' ? <Text key={`task-part-${id}`} color={LIVE}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
+      {kind === 'other' ? null : <Button key={`task-result-${tag}${id}-${presses}`} label="Result" plain hover={{ scope: `task-result-${tag}${id}`, underline: true }} onPress={() => void openResultOf($, id).catch(err => log($, `result not opened: ${String(err)}`))} />}
+      <Button key={`task-reply-${tag}${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${tag}${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
+    </Box>
+  )
+  // The person's message a reply about a task answers: the newest they sent that task before it, in the chat or on its card, else
+  // the one that started it. A reply not read yet, as it comes, is the newest of all
+  const quoteOn = (id: string, tag = '') => {
+    const row = colourIndex.rows[e.requestId] ?? colourIndex.rows[hash]
+    const words = (quoteFor(colourIndex, id, row) ?? cards.find(one => one.id === id)?.words ?? '').trim()
+    return words ? quoteOf($, ui, `${mark(e.requestId)}-${tag}${id}`, words) : null
+  }
+  // Several results in one reply: each in a box of its own, under its own task's name, with what the chat said around them plain
+  if (bits.length)
+    return (
+      <Box key={`task-boxes-${mark(e.requestId)}`} flexDirection="column" gap={1}>
+        {bits.map((bit, n) =>
+          bit.id ? (
+            <Box key={`task-box-${mark(e.requestId)}-${n}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(bit.isPart ? 'part' : 'result')} paddingX={1} gap={1}>
+              <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
+                {headOf(bit.id, bit.isPart ? 'part' : 'result', `${n}-`)}
+              </Box>
+              {quoteOn(bit.id, `${n}-`)}
+              <Markdown key={`task-bit-${n}`} text={bit.text} />
+            </Box>
+          ) : (
+            <Markdown key={`task-bit-${n}`} text={bit.text} />
+          ),
+        )}
+        {links}
+      </Box>
+    )
+  const kind: Kind = isResult ? (isPart ? 'part' : 'result') : 'other'
+  return (
+    <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind)} paddingX={1} gap={1}>
+      <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
+        {ids.map(id => headOf(id, kind))}
+      </Box>
+      {quoteOn(first)}
       {reply}
       {links}
     </Box>

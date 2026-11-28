@@ -622,7 +622,6 @@ const takeAttached = (id: string) => {
 }
 // What Paste said, by the box's id, when the clipboard held nothing to attach; it goes with the next file attached or sent
 const attachSaid = new Map<string, string>()
-const NOTHING_TO_PASTE = "There's nothing to paste. Copy a picture or a file first, then press Paste."
 // Where pasted pictures are kept: the person's own memory folder, never the repo or a shared place
 const attachedDir = () => `${dir}/attached`
 // A file attached as a tile is drawn: by its kind, as what a task made is (files.tsx)
@@ -666,7 +665,6 @@ function run(argv) {
   if (data.isNil()) return ''
   return data.writeToFileAtomically(argv[0], true) ? argv[0] : ''
 }`
-const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
 const pastePicture = async ($: EngineInterface, id: string) => {
   if (!canAttach()) return
   await runOn($, ['mkdir', '-p', attachedDir()])
@@ -1085,9 +1083,6 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // Said in the chat only once the answer is on its way
   void askGone($, one, said)
 }
-// What a task is told with the press on its go-ahead for a release: the press allows its release run, which it does itself
-const RELEASE_PRESSED = (folder: string) =>
-  `That press is the permission for the release: your runs of the release runner for ${folder} go through with nothing more asked, within the hour, until one has gone out: a run again after it stopped (exit 2 or 3) needs no second press. Run it now as your rules say, in your background, say on your card what you are releasing, and hand in your result once it has finished.`
 // A button's answer can be taken back while the card says it (heldAnswer, ANSWER_SHOWN), unless the work has asked again since: a press
 // meant for something else lands on an answer (16 Nov: "Not now" pressed while reaching for the picture above it, as the panel
 // jumped). The ask is put back on the card with its buttons, to be answered again, and the work is told not to act on the answer:

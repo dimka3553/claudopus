@@ -2,6 +2,15 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.321 · 28 November 2026
+- A task's result reaches the chat as a few short lines: what changed, whether it is live, and what you have to do. The rest stays in the saved result, which Result on the reply opens.
+- The chat says nothing of a task's progress, never says back what you asked, and never says something is being pushed before it is.
+- A plain "yes, go", "push it" or "release it and switch now" in the chat counts as your go-ahead for the change that waits, "push all" for every one that waits, and when your words don't count the chat says so at once.
+- A go-ahead that waits for you stays in view above the chat with its button.
+- A go-ahead is named for what it does in the project (Push it, Merge it, Open the pull request), not always "release".
+- When a task works in a folder outside the one the chat was opened in and Claude Code blocks it, its card says that this is why and how to let it work there.
+- Colour marks only what matters: a reply that passes on a result has a blue edge, a part from a task still working a purple one that says so, any other reply a grey one. Two results in one reply stand in a box each.
+
 ## 0.2.320 · 28 November 2026
 - The task panel has a row of tabs under its header: All, For you (questions and results waiting on you), Working, Finished and Starred, each with how many it holds.
 - Finished lists every task that ever finished, from all your results, 40 at a time with Show 40 more, not only the last 40. Search, at the right of the Finished or Starred heading, finds tasks by name.

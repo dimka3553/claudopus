@@ -1313,7 +1313,7 @@ test("another chat's held prompt has no Allow or Don't allow here, only where to
   await list.unmount()
 })
 
-test("a call Claude Code refuses a background task with no prompt, as auto mode does, asks nothing when it is no command the person could run: nothing waits on the card and the task is told nothing more; a failing call whose output only holds those words is no refusal; a blocked command goes beside a question already on the card, never in its place, and the same command is not put up twice; Don't allow tells the task to carry on without it and never to reach it by other means, and pressed once the task has ended it does not start it again; and Claudopus never lets the call through itself", async ($, on) => {
+test("a call Claude Code refuses a background task with no prompt, as auto mode does, asks nothing when it is no command the person could run: nothing waits on the card and the task is told nothing more; a failing call whose output only holds those words is no refusal; a change inside the chat's folder asks nothing either; a blocked command goes beside a question already on the card, never in its place, and the same command is not put up twice; Don't allow tells the task to carry on without it and never to reach it by other means, and pressed once the task has ended it does not start it again; and Claudopus never lets the call through itself", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
   const ended = new Set<string>()
   const { files, clock, resumed, appended, pressRuns } = world(on, { agents, ended })
@@ -1413,7 +1413,7 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
 })
 
 // 21 Nov: Supabase's confirm_cost, refused six times after Dima's yes on the card, and the card asked nothing of it
-test("a connector's tool Claude Code refuses a task is asked on its card once, with the one command that lets it through (a rule in the person's own settings, run in their Terminal), Open in Terminal, Try again and Don't allow; Try again tells the task to call it once more, Don't allow to carry on without it; Claudopus never calls the tool, nor lets the call through itself", async ($, on) => {
+test("a connector's tool Claude Code refuses a task is asked on its card once, with the one command that lets it through (a rule in the person's own settings, run in their Terminal), Open in Terminal, Try again and Don't allow; Try again tells the task to call it once more, Don't allow to carry on without it; a file change blocked in a folder outside the chat's is asked so too, once per folder, with the line that adds it to the chat; Claudopus never calls the tool, nor lets the call through itself", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
   const { files, clock, appended, pressRuns } = world(on, { agents })
   await $.session.start(start)
@@ -1450,12 +1450,40 @@ test("a connector's tool Claude Code refuses a task is asked on its card once, w
   expect(await until(async () => list.find({ type: 'Text', text: ASK }))).toBeDefined()
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => String(b.key ?? '').startsWith('ask-a1-choice-1-'))?.key ?? '' })
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes(`pressed "Don't allow" when asked to let your tasks use ${TOOL}`)))).toContain('Carry on without it')
+  // A file change it blocked in a folder outside the chat's is asked once for that folder, with the line that adds the folder to
+  // the chat, Try again and Don't allow, and told to the task as for a connector
+  files.set('/home/sam/work/site/.git', '')
+  const FOLDER = 'Claude Code blocked changes in ~/work/site. Let this chat work there?'
+  const change = async (id: string, tool: string, file: string) => {
+    files.set('auto-refuse', tool)
+    await $.tool.call({ tool, agentId: 'a1', tool_use_id: id, file_path: file, ...(tool === 'Edit' ? { old_string: 'a', new_string: 'b' } : { content: 'b' }) } as never)
+    files.delete('auto-refuse')
+    await clock.advance(1000)
+  }
+  const log = () => files.get(`${MEMORY}/log.md`) ?? ''
+  await change('f1', 'Edit', '/home/sam/work/site/src/app.ts')
+  expect(await until(async () => list.find({ type: 'Text', text: FOLDER }))).toBeDefined()
+  const about = (await list.findAll({ type: 'Markdown' } as never)).map(one => String(one.props.text ?? '')).join('\n')
+  expect(about).toContain("This chat was opened in /repo, and ~/work/site is outside it, so Claude Code blocks the task's changes there.\n\nIt wanted to change app.ts.\n\nType the line below in the chat to let every task of this chat work there, then press Try again.")
+  expect([...(await textsOf(list)), about].join('\n')).toContain('/add-dir /home/sam/work/site')
+  const folderLabels = (await list.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith('ask-a1')).map(b => String(b.props.label))
+  expect(folderLabels.filter(one => ['Try again', "Don't allow", 'Copy', 'Open in Terminal'].includes(one)).sort()).toEqual(['Copy', "Don't allow", 'Try again'])
+  expect(log()).toContain("refusal of Edit for a1 in /home/sam/work/site, outside the chat's folders (/repo)")
+  await change('f2', 'Write', '/home/sam/work/site/README.md')
+  expect(await until(async () => (log().includes('refusal of a change in /home/sam/work/site for a1 not put on its card: the same folder waits on it already') ? true : undefined))).toBe(true)
+  expect((await textsOf(list)).filter(one => one === FOLDER)).toHaveLength(1)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Try again')?.key ?? '' })
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('work in /home/sam/work/site. Make the same change once more now, exactly as before.')))).toContain('pressed "Try again" after being shown the line that lets this chat\'s tasks work in')
+  await change('f3', 'Edit', '/home/sam/work/site/src/app.ts')
+  expect(await until(async () => list.find({ type: 'Text', text: FOLDER }))).toBeDefined()
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => String(b.key ?? '').startsWith('ask-a1-choice-1-'))?.key ?? '' })
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('pressed "Don\'t allow" when asked to let this chat work in /home/sam/work/site')))).toContain('Do not change files there')
   // Nothing ran in the person's place
   expect(pressRuns).toEqual([])
   await list.unmount()
 })
 
-test("a command Claude Code blocked a task from running is asked on its card as a Permission block, the command whole with why and where it would run, Allow and Don't allow; nothing runs but on that Allow (not Don't allow, not a task's own question with a button of that name, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows one grey line of the press and one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed); its output is told to a task at a step; a task that ended its step while it runs stays at work, never Failed, and its end starts that task again with its output, from a hook of the mod's, never from a timer (25 Nov, the release that ran while its card said Failed); a long one is stopped at its limit, and Stop stops it", async ($, on) => {
+test("a command Claude Code blocked a task from running is asked on its card as a Permission block, the command whole with why and where it would run, Allow and Don't allow, with why where it ran in a folder outside the chat's; nothing runs but on that Allow (not Don't allow, not a task's own question with a button of that name, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows one grey line of the press and one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed); its output is told to a task at a step; a task that ended its step while it runs stays at work, never Failed, and its end starts that task again with its output, from a hook of the mod's, never from a timer (25 Nov, the release that ran while its card said Failed); a long one is stopped at its limit, and Stop stops it", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
   // (its clock moves bare, with no hook of the mod after each move: nothing here may go from a timer)
   const ended = new Set<string>()
@@ -1532,6 +1560,21 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   await pressOn('-deny-')
   expect(await until(async () => (appended.filter(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')).length === 2 ? true : undefined))).toBe(true)
   expect(pressRuns).toEqual([])
+  // Blocked in a folder outside the chat's, its block says so and how to let tasks work there; in a folder the chat's settings
+  // add, it says nothing of it
+  files.set('/home/sam/work/site/.git', '')
+  files.set('/repo/.claude/settings.local.json', JSON.stringify({ permissions: { additionalDirectories: ['~/shared'] } }))
+  const OUTSIDE = 'This chat was opened in /repo, and ~/work/site is outside it, so Claude Code blocks what the task does there, one command at a time. To let tasks work there, type /add-dir /home/sam/work/site in the chat, or open a chat in ~/work/site or in a folder that holds both.'
+  const denied = async (n: number) => until(async () => (appended.filter(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')).length === n ? true : undefined))
+  await refuse('b02', { command: 'cd ~/work/site/src && git push', description: 'Push the site' })
+  expect(await until(async () => (await details()).find(one => one.includes(OUTSIDE)))).toContain(`${OUTSIDE}\n\nOnly your press on Allow runs it.`)
+  expect(files.get(`${MEMORY}/log.md`) ?? '').toContain("refusal of Bash for a1 in /home/sam/work/site, outside the chat's folders (/repo)")
+  await pressOn('-deny-')
+  expect(await denied(3)).toBe(true)
+  await refuse('b03', { command: 'git -C ~/shared/lib status', description: 'Look at the shared code' })
+  expect(await until(async () => (await details()).find(one => one.startsWith('Runs once in ')))).not.toContain('is outside it')
+  await pressOn('-deny-')
+  expect(await denied(4)).toBe(true)
   // Nor does a task's own question with a button of that name, over the same command
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Shall I go on?', choices: ['Allow', 'Leave it'], copy: 'dig +short NS example.org' } as never)
   await pressOn('-choice-0-')

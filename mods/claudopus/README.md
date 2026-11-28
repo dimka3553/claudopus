@@ -134,7 +134,7 @@ The panel's header has these buttons (Results once there is a result):
 
 ### One release at a time
 
-Claudopus tells Claude to change a repo only in the task's own worktree and branch. A task reaches main only through one release command. The command waits its turn, numbers the version, builds, checks and pushes, and only after you press **Release it** on the task's question, or **Allow** on its card, or type either in the chat. Claudopus refuses a task's own push to main.
+Claudopus tells Claude to change a repo only in the task's own worktree and branch. A task reaches main only through one release command. The command waits its turn, numbers the version, builds, checks and pushes, and only after you press the go-ahead on the task's question (**Release it**, or what it is in your project, such as **Push it** or **Merge it**), or **Allow** on its card, or say so in the chat in plain words, such as "yes, push it". While a go-ahead waits, it stays above the chat with its button. Claudopus refuses a task's own push to main.
 
 Every detail is in the [full guide](docs/guide.md#what-you-see).
 
@@ -149,7 +149,7 @@ You set everything below in the panel's **Config** tab, except `macs`. Claudopus
 | `sound` | `true` | `false` silences the chime and the "needs you" sound |
 | `notifications` | `true` | `false` stops the notifications when a task is done, stopped or failed |
 | `askPictures` | `false` | `true` has Claudopus draw each question with buttons as one picture, open it on your screen and show it with the question |
-| `taskColours` | `true` | `false` takes away the box in a task's colour around each chat reply about it, with its name and **Reply**, and the colour dot on its card |
+| `taskColours` | `true` | `false` takes away the box around each chat reply about a task, with its name, **Result** and **Reply**, and the colour dot on its card. The box is blue where the reply passes on a result, grey otherwise |
 | `replyLinks` | `true` | `false` takes away the list of links at the end of each chat reply, and the Links part of a task's Details |
 | `admin` | `each` | When you are asked before an admin command runs: `each` time, once per task (`work`), or `never` |
 | `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most tasks, clearly stated jobs with long searching and reading, and heavy tasks |

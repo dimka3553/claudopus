@@ -4,6 +4,9 @@
 // Claudopus sends. A message that fits more than one named card, or a long one, answers nothing. A command Claude Code blocked runs
 // only on the person's own press on its card (runit.tsx): a typed answer to it answers nothing and the chat says so. Keys and
 // passwords are never typed in the chat (24 Nov, the person: "it counts if I type allow ... in any of the subagents if they are asking")
+// While a release waits, a plain go-ahead to release counts too, read more widely (typed-release.ts): 28 Nov, a release waited on
+// its card far down the panel while the person typed "push all so I can test", "release it and switch now so I can test", "OK to
+// all go push it" and "is now all pushed?"; none counted, each went on to the task, nothing was pushed and nothing said why
 
 // Longer than this, a message is more than an answer
 const TYPED_MOST = 80
@@ -55,10 +58,52 @@ const isNamed = (one: Typed, name: string[]) => {
   return Boolean(one.title) && name.every(word => title.has(word))
 }
 
+// A go-ahead to release that waits for the person on this chat's own cards or its own thread: a task's question asked with its
+// worktree (its first button, such as Release it, is the yes), or a release the admin gate holds (Allow). One Claude Code blocked is
+// listed as press-only: only the person's press on its card runs it. The band above the prompt draws the first (band.tsx)
+type ReleaseWait = { need: Need; card?: Todo; title: string; button: NeedButton; isPressOnly: boolean }
+const releasesOf = ($: EngineInterface, cards: Todo[], now: number): ReleaseWait[] => {
+  const yes = (need: Need, label: string | undefined) => need.buttons.find(b => !b.isOpener && b.label === label)
+  const onCards = cards
+    .filter(one => !one.parentId && !one.chat)
+    .flatMap(given => {
+      const one = asPressed(given)
+      const asks = asksOf(one)
+        .filter(ask => (ask.release && !ask.refused) || (ask.refused && ask.text === BLOCKED_RELEASE_ASK))
+        .flatMap(ask => {
+          const need = askNeed($, one, '', now, ask)
+          const button = need && yes(need, ask.refused ? ALLOW : ask.choices?.[0])
+          return need && button ? [{ need, card: given, title: titleOf(given), button, isPressOnly: Boolean(ask.refused) }] : []
+        })
+      const gates = (one.admins ?? [])
+        .filter(gate => gate.kind === 'release' && !gatePressed.has(gate.id))
+        .flatMap(gate => {
+          const need = gateNeed($, gate, one.id, false, '', '')
+          const button = yes(need, ALLOW)
+          return button ? [{ need, card: given, title: titleOf(given), button, isPressOnly: false }] : []
+        })
+      return [...asks, ...gates]
+    })
+  const loose = looseGates
+    .filter(gate => gate.kind === 'release' && !gatePressed.has(gate.id))
+    .flatMap(gate => {
+      const need = gateNeed($, gate, '', false, 'This chat')
+      const button = yes(need, ALLOW)
+      return button ? [{ need, title: '', button, isPressOnly: false }] : []
+    })
+  return [...onCards, ...loose].filter(one => !one.need.isActing).sort((a, b) => a.need.at - b.need.at)
+}
+
 // The person's typed message as an answer: pressed on its block, and what the chat's model is told of it; nothing when it is no answer
 const typedAnswer = async ($: EngineInterface, text: string): Promise<string | undefined> => {
   const typed = text.trim()
-  if (!typed || typed.length > TYPED_MOST || /\n/.test(typed)) return undefined
+  if (!typed) return undefined
+  const exact = typed.length > TYPED_MOST || /\n/.test(typed) ? undefined : await exactAnswer($, typed)
+  if (exact) return exact
+  return releaseAnswer($, typed)
+}
+// Today's exact reading: a yes, allow or a button's own words, then what names the task, if anything
+const exactAnswer = async ($: EngineInterface, typed: string): Promise<string | undefined> => {
   const words = plainWords(typed)
   if (!words) return undefined
   const fits = (await typedWaiting($)).flatMap(one => {
@@ -87,4 +132,38 @@ const typedAnswer = async ($: EngineInterface, text: string): Promise<string | u
   if (!one.need.id.startsWith('ask-')) pressedLine($, one.card?.id ?? '', one.button.label, '', `You typed “${cut(oneLine(typed), 40)}” in the chat`)
   await log($, `typed answer "${cut(oneLine(typed), 40)}" taken as "${one.button.label}" on ${one.card?.id ?? 'this chat'}`)
   return named(TYPED_ANSWERED(typed, one.button.label, where, cut(oneLine(one.need.text), 160)))
+}
+// The wider reading while a release waits (typed-release.ts): a plain go-ahead presses it; a message about releasing that gave
+// none is told as that
+const releaseAnswer = async ($: EngineInterface, typed: string): Promise<string | undefined> => {
+  if (typed.length > TYPED_TALK) return undefined
+  const waits = releasesOf($, await read($, todos), await $.clock.now())
+  if (!waits.length) return undefined
+  const reading = releaseReading(typed)
+  const said = cut(oneLine(typed), TYPED_WIDEST)
+  const short = cut(oneLine(typed), 40)
+  const what = (one: ReleaseWait) => (one.title ? `the task "${one.title}"` : `this chat's own "${one.need.text}"`)
+  const pressable = waits.filter(one => !one.isPressOnly)
+  const blocked = waits[waits.length - 1]
+  if (reading.counts && !pressable.length && blocked) {
+    await log($, `typed answer "${short}" not taken: the release that waits is one Claude Code blocked, which only a press runs`)
+    return named(TYPED_PRESS_ONLY(said, blocked.title, cut(oneLine(blocked.need.command ?? ''), 160)))
+  }
+  const { chosen, more, unsure } = reading.counts ? chooseReleases(reading, pressable) : { chosen: [], more: [] }
+  if (unsure) {
+    await log($, `typed answer "${short}" fits more than one release, so it answered nothing`)
+    return named(TYPED_WHICH_RELEASE(said, [...new Set(unsure.map(what))]))
+  }
+  if (chosen.length) {
+    for (const one of chosen) one.button.onPress({ surface: '' })
+    await Promise.allSettled([...answersOnWay])
+    for (const one of chosen) {
+      if (!one.need.id.startsWith('ask-')) pressedLine($, one.card?.id ?? '', one.button.label, '', `You typed “${short}” in the chat`)
+      await log($, `typed answer "${short}" taken as "${one.button.label}" on ${one.card?.id ?? 'this chat'}`)
+    }
+    return named(TYPED_GO_AHEAD(said, chosen.map(one => ({ label: one.button.label, where: one.title ? `the task "${one.title}"'s` : "this chat's own", asked: cut(oneLine(one.need.text), 160) })), more.length > 0))
+  }
+  if (!reading.isTalk || !pressable.length) return undefined
+  await log($, `typed answer "${short}" is about releasing but gave no go-ahead, so the chat is told the release waits`)
+  return named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label }))))
 }

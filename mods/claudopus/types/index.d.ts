@@ -104,7 +104,7 @@ export type Todo = {
   // What waits for the person's press: an admin command, a release to main ('release'), or a change to a file of theirs ('file')
   // `isUndone`: a file of theirs a command changed, put back as it was (`isOutside`: found changed between commands, by an editor or a program left running); Allow makes the change again
   // `talk`: what the person wrote on it with Answer in words, and the task's answers, the oldest first. A release's `reason` is the task's one line for it (bin/release -m), `commits` the subjects of its branch's commits main lacks, newest first, `more` how many more there are, `files` how many files it changes
-  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string; talk?: Talk[]; reason?: string; commits?: string[]; more?: number; files?: number }[]
+  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isVersion?: boolean; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string; talk?: Talk[]; reason?: string; commits?: string[]; more?: number; files?: number }[]
   startedAt: number
   // Its place in the task colours' palette: given once, the colour least used by the tasks started just before it, so tasks seen
   // together differ
