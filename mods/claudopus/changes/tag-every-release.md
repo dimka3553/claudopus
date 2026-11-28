@@ -1,0 +1,1 @@
+- Every release now checks that its version tag is on GitHub, and stops with a clear error naming the one command that finishes it when it is not. The 61 early versions that had no tag now have one, so all 331 are counted.

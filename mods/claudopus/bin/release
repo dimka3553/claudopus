@@ -8,8 +8,8 @@
 # Exit: 0 released; 2 main and the branch changed the same lines (merge main into the branch, resolve, commit, run again);
 #       3 the build or the checks failed (fix on the branch, run again), or GitHub's checks (GITHUB_CHECKS) failed, were missing
 #       or did not end in time (it names which), or, with GITHUB_RELEASE, its notes could not be made
-#       or gh cannot make the release (not installed, not signed in, no write access to the repo: fix that, run again); 4 main was pushed but its tag or its GitHub release was
-#       not (it says the one command that finishes it); 1 anything else. Nothing is pushed to main unless it exits 0 or 4 (with
+#       or gh cannot make the release (not installed, not signed in, no write access to the repo: fix that, run again); 4 main was pushed but its version tag or its GitHub release
+#       was not (it says why, and the one command that finishes it: the tag is read back from the remote, never taken on trust); 1 anything else. Nothing is pushed to main unless it exits 0 or 4 (with
 #       GITHUB_CHECKS the release's commit goes to a refs/release-check/ ref for GitHub to check, removed again as it ends).
 # Settings, all optional, in the repo's committed `.release` (bash): MAIN (main), REMOTE (origin), NAME (put before the version
 # in the title), VERSION_FILE (a JSON file with "version": "x.y.z", or a file holding only x.y.z), DERIVED (files the build
@@ -192,6 +192,22 @@ trap 'exit 1' INT TERM HUP
 derived() { for d in $DERIVED; do [ "$1" = "$d" ] && return 0; done; return 1; }
 getv() { perl -ne 'if (/"version"\s*:\s*"(\d+\.\d+\.\d+)"/ || /^(\d+\.\d+\.\d+)\s*$/) { print $1; exit }' "$1"; }
 setv() { perl -0pi -e 's/("version"\s*:\s*")\d+\.\d+\.\d+"/${1}'"$2"'"/ or s/^\d+\.\d+\.\d+$/'"$2"'/m' "$1"; }
+# The version's tag, pushed and then read back from the remote: it is there on the release's very commit, or this says why not (a
+# tag the remote already has on another commit is never moved). A push that fails is tried again twice, a few seconds apart
+tag_on_remote() { git ls-remote "$REMOTE" "refs/tags/$1" 2>/dev/null | awk -v t="refs/tags/$1" '$2 == t "^{}" { p = $1 } $2 == t { d = $1 } END { print (p != "" ? p : d) }'; }
+push_tag() {
+  local tag=$1 want=$2 there out= try=0
+  while :; do
+    there=$(tag_on_remote "$tag")
+    [ "$there" = "$want" ] && { git tag -f "$tag" "$want" >/dev/null 2>&1; return 0; }
+    [ -n "$there" ] && { printf '%s already has %s on another commit, %.7s, and a tag is never moved' "$REMOTE" "$tag" "$there"; return 1; }
+    try=$((try + 1)); [ $try -gt 3 ] && break
+    [ $try -gt 1 ] && sleep 2
+    out=$(RELEASE_PUSH=1 git push -q "$REMOTE" "$want:refs/tags/$tag" 2>&1) && out=
+  done
+  printf 'git said: %s' "$(printf '%s' "${out:-the push went through, but $REMOTE does not show the tag}" | tail -3 | tr '\n' ' ' | cut -c1-300)"
+  return 1
+}
 gained() { [ -n "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN" 2>/dev/null)" ] || return 0; git -C "$top" log --no-merges --format='  %h %s' "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN")..$REMOTE/$MAIN" | cut -c1-150 | head -12; }
 
 # gh as installed, never one the caller's PATH puts first, with nothing of the caller's that sends it to another server, account
@@ -404,8 +420,8 @@ for try in 1 2 3 4 5; do
     if [ -n "$ver" ]; then
       kept="$common/release-notes-v$ver.md"
       retry="gh release create v$ver --repo \"${repo:-}\" --title \"${NAME:+$NAME }$ver\" --notes-file \"$kept\" --latest --verify-tag"
-      if ! { git tag -f "v$ver" "$candidate" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null; }; then
-        failed="RELEASE FAILED: $MAIN was pushed as $sha, but its tag v$ver was not. Finish it with: git push $REMOTE $sha:refs/tags/v$ver"
+      if ! tag_said=$(push_tag "v$ver" "$candidate"); then
+        failed="RELEASE FAILED: $MAIN was pushed as $sha, but its version tag v$ver is not on $REMOTE: $tag_said. Finish it with: git push $REMOTE $candidate:refs/tags/v$ver"
         [ -n "$GITHUB_RELEASE" ] && { cp "$notes" "$kept"; failed="$failed, then: $retry"; }
       elif [ -n "$GITHUB_RELEASE" ]; then
         if ! out=$(gh release create "v$ver" --repo "$repo" --title "${NAME:+$NAME }$ver" --notes-file "$notes" --latest --verify-tag 2>&1) \

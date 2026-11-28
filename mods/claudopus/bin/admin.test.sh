@@ -319,6 +319,21 @@ else
 fi
 n=$((n + 1))
 [ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
+# Each numbered release puts its version's tag on the remote, on main's very commit, read back from there; where it cannot, main is
+# out already, so it ends 4 saying why and the one command that finishes it, and a tag already there is never moved (29 Nov)
+(cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK=true\nVERSION_FILE=version\n' >.release && echo 0.1.0 >version && git add -A && git commit -q -m numbered && RELEASE_PUSH=1 git push -q origin main && for b in tagged taken refused; do git checkout -q -B "$b" main && echo "$b" >"$b.txt" && git add -A && git commit -q -m "$b" || exit 1; done) || { echo "NOT OK - the repo for version tags was not set up"; failed=1; }
+numbered() { release_grant "rel-$1" release-grant "$1"; (cd "$r/work" && git checkout -q "$1" && "$here/release"); }
+remote_tag() { git -C "$r/origin.git" rev-parse -q --verify "refs/tags/$1^{commit}"; }
+expect 'a numbered release: released' 0 'released 0.1.1: tagged' -- numbered tagged
+n=$((n + 1)); [ -n "$(remote_tag v0.1.1)" ] && [ "$(remote_tag v0.1.1)" = "$(git -C "$r/origin.git" rev-parse main)" ] && echo "ok $n - its tag is on the remote, on main" || { echo "NOT OK $n - the remote has no tag v0.1.1 on main"; failed=1; }
+taken_at=$(git -C "$r/origin.git" rev-parse main~1)
+git -C "$r/origin.git" update-ref refs/tags/v0.1.2 "$taken_at"
+expect 'a release whose tag the remote has on another commit: ended 4, saying so and how to finish' 4 "already has v0.1.2 on another commit.*Finish it with: git push origin [0-9a-f]\{40\}:refs/tags/v0.1.2" -- numbered taken
+n=$((n + 1)); [ "$(remote_tag v0.1.2)" = "$taken_at" ] && [ "$(git -C "$r/origin.git" show main:taken.txt)" = taken ] && echo "ok $n - main went out and the tag already there was not moved" || { echo "NOT OK $n - main or the tag already there is not as it should be"; failed=1; }
+printf '#!/bin/sh\nwhile read -r _ _ ref; do case $ref in refs/tags/*) echo "tags are refused here" >&2; exit 1 ;; esac; done\nexit 0\n' >"$r/origin.git/hooks/pre-receive" && chmod +x "$r/origin.git/hooks/pre-receive"
+expect "a release whose tag the remote refuses: ended 4 with git's reason and how to finish" 4 "tags are refused here.*Finish it with: git push origin [0-9a-f]\{40\}:refs/tags/v0.1.3" -- numbered refused
+rm -f "$r/origin.git/hooks/pre-receive"
+n=$((n + 1)); [ "$(git -C "$r/origin.git" show main:refused.txt)" = refused ] && [ -z "$(remote_tag v0.1.3)" ] && echo "ok $n - main went out, with no tag" || { echo "NOT OK $n - main or its tag is not as it should be"; failed=1; }
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "ok - main's own checks and GitHub's skipped: this test's stand-in for gh answers through jq, which is not installed here"
