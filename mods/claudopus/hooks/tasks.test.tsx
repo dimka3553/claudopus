@@ -49,6 +49,8 @@ test('Finished lists every finished task, the newest first: its card while one i
     ['by-hand', 'by-hand'],
     ['a1', 'r1'],
   ])
+  // (nor one of a card still up among the cards: it is not finished for the person yet)
+  expect(finishedOf(cards, reports, ['a2']).map(one => one.id)).toEqual(['k1', 'by-hand', 'a1'])
   // (two thousand results: every one listed)
   const many = Array.from({ length: 2000 }, (_, i) => report(`r${i}`, i, `t${i}`))
   expect(finishedOf([], many).length).toBe(2000)

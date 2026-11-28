@@ -82,13 +82,14 @@ export const STARS_TRIP = `sh -c 'f=$HOME/.claude/claudopus/${STARS_FILE}; mkdir
 
 // ---- The rows of a list: a card the panel draws (`draw`), or a task no card is kept for, drawn here from its result or its star ----
 export type TaskItem = { at: number; id: string; title: string; draw?: () => JSXEl | null; line?: string; report?: string }
-// The newest result of each task, a row each, but for the tasks whose cards are listed; a result no task wrote is a row of its own.
+// The newest result of each task, a row each, but for the tasks whose cards are listed and those still up among the cards (`up`); a
+// result no task wrote is a row of its own.
 // Made again only when the results or the cards listed change, never for a drawing alone; the cards, a few, are put in among them
 let made: { reports: readonly Report[]; cards: string; items: TaskItem[] } | undefined
-export const finishedOf = (cards: TaskItem[], reports: readonly Report[]) => {
-  const key = cards.map(one => one.id).join(',')
+export const finishedOf = (cards: TaskItem[], reports: readonly Report[], up: string[] = []) => {
+  const key = [...cards.map(one => one.id), '|', ...up].join(',')
   if (made?.reports !== reports || made.cards !== key) {
-    const seen = new Set(cards.map(one => one.id))
+    const seen = new Set([...cards.map(one => one.id), ...up])
     const rows: TaskItem[] = []
     for (const r of [...reports].sort((a, b) => b.at - a.at)) {
       const id = r.agent || r.id
@@ -174,7 +175,7 @@ export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, su
 
 // A list with its heading: Finished (folded at the panel's bottom under All, open as its own tab) or Starred. Its rows the newest
 // first, as many as `most`, then a row that shows more
-export type ListLook = { head: string; surface: string; isOpen: boolean; fold?: () => void; hotkey?: string; now: number; fill: string; lead: number | string; empty: string }
+export type ListLook = { head: string; side?: string; surface: string; isOpen: boolean; fold?: () => void; hotkey?: string; now: number; fill: string; lead: number | string; empty: string }
 export const tasksList = (ui: Ui, items: TaskItem[], look: ListLook, acts: TasksActs) => {
   const { Box, Button, Input, Text } = ui as unknown as Parts
   // Search, at the heading's right, opens a box under it for a name, which every list and card then answers (on the desktop: a
@@ -209,6 +210,7 @@ export const tasksList = (ui: Ui, items: TaskItem[], look: ListLook, acts: Tasks
         <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
           {look.fold ? <Button key={`finished-fold-${tasksView.n}`} label={`${look.isOpen ? '▾' : '▸'} ${head}`} plain hotkey={look.hotkey} onPress={pressed(acts, look.fold)} /> : <Text bold>{head}</Text>}
         </Box>
+        {look.side ? <Text dimColor>{look.side}</Text> : null}
         {canFind ? <Button key={`tasks-find-${tasksView.n}`} label={isFinding ? 'Close' : 'Search'} plain dimColor hover={{ scope: 'tasks-find', underline: true }} onPress={pressed(acts, () => ((tasksView.isFinding = !isFinding), (tasksView.find = ''), (tasksView.most = TASKS_PAGE)))} /> : null}
       </Box>
       {canFind && isFinding && Input ? (

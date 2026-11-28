@@ -133,8 +133,6 @@ const syncResults = async ($: EngineInterface) => {
       const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`
       try {
         await syncWith($, mac, was, now, staging)
-        // (and the stars, the same on both: panel.tsx)
-        await syncStars($, mac).catch(err => log($, `stars not made the same with ${mac}: ${String(err)}`))
       } finally {
         await runOn($, ['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
       }
@@ -158,6 +156,8 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
     if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`)
     return
   }
+  // The stars too, on a trip that reached it (panel.tsx)
+  await syncStars($, mac).catch(err => log($, `stars not made the same with ${mac}: ${String(err)}`))
   // This Mac's results as they stand: each folder with its meta.json, by name
   const mine = new Map<string, string>()
   for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {

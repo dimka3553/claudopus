@@ -1815,12 +1815,12 @@ const panelHooks = (on: On) => {
     // Finished: every task that ended, its card while it is kept and else its result, a page at a time; folded at the bottom under All,
     // open as a filter of its own. Starred: every task starred, whatever became of it since (tasks.tsx)
     const cardItem = (one: Todo): TaskItem => ({ at: one.endedAt || one.startedAt, id: one.id, title: titleOf(one), draw: () => small(one) })
-    const finishedAll = () => finishedOf([...finished.map(cardItem), ...endedFlows.map(f => ({ at: f.endedAt, id: f.id, title: f.title, draw: () => flowSmall(f) }))], kept)
+    const finishedAll = () => finishedOf([...finished.map(cardItem), ...endedFlows.map(f => ({ at: f.endedAt, id: f.id, title: f.title, draw: () => flowSmall(f) }))], kept, [...own, ...elsewhere].filter(one => !finished.includes(one)).map(one => one.id))
     const finishedPart = (isOpen: boolean, all = finishedAll()) => {
       const isStars = tasksView.filter === 'starred'
       if (!['all', 'finished', 'starred'].includes(tasksView.filter) || (!isStars && !all.length)) return null
       const isAll = tasksView.filter === 'all'
-      return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', surface: e.surface, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
+      return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
     }
     const tasksActs: TasksActs = { redraw: () => ((presses += 1), drawAgain($)), star: one => void starPress($, rowStar(one)), open: id => openReport($, id), typing: () => holdTimes($), typed: () => freeTimes($) }
     // What a card's star keeps of it

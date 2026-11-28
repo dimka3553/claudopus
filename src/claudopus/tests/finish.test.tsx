@@ -623,8 +623,8 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
     expect(await until(async () => ((await onCard(id)).some(one => one[0] === presses[1][0]) ? true : undefined))).toBe(true)
     expect(await list.find({ type: 'Text', text: said })).toBeDefined()
     // (a failed card also has its Start again)
-    expect([id, (await onCard(id)).filter(one => one[0] !== 'Start again')]).toEqual([id, [[`Piece ${id.slice(1)}`, true, undefined], ...presses]])
-    if (reason === 'answer') expect((await onCard(id)).length).toBe(3)
+    expect([id, (await onCard(id)).filter(one => one[0] !== 'Start again')]).toEqual([id, [[`Piece ${id.slice(1)}`, true, undefined], ['☆', true, true], ...presses]])
+    if (reason === 'answer') expect((await onCard(id)).length).toBe(4)
     const told = [appended.length, resumed.length, sent.length, submitted.length]
     const folded = Number(/\d+/.exec(String(await fold()))?.[0])
     await pressed(list, `dismiss-${id}`)

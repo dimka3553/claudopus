@@ -9277,7 +9277,6 @@ await $.fs.write(resultsPath(mac), JSON.stringify({ ...was, triedAt: now }))
 const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`
 try {
 await syncWith($, mac, was, now, staging)
-await syncStars($, mac).catch(err => log($, `stars not made the same with ${mac}: ${String(err)}`))
 } finally {
 await runOn($, ['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
 }
@@ -9297,6 +9296,7 @@ if (!theirs) {
 if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`)
 return
 }
+await syncStars($, mac).catch(err => log($, `stars not made the same with ${mac}: ${String(err)}`))
 const mine = new Map<string, string>()
 for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
 if (entry.kind !== 'dir' || !isResultId(entry.name)) continue
@@ -17368,12 +17368,12 @@ const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat &
 const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
 const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
 const cardItem = (one: Todo): TaskItem => ({ at: one.endedAt || one.startedAt, id: one.id, title: titleOf(one), draw: () => small(one) })
-const finishedAll = () => finishedOf([...finished.map(cardItem), ...endedFlows.map(f => ({ at: f.endedAt, id: f.id, title: f.title, draw: () => flowSmall(f) }))], kept)
+const finishedAll = () => finishedOf([...finished.map(cardItem), ...endedFlows.map(f => ({ at: f.endedAt, id: f.id, title: f.title, draw: () => flowSmall(f) }))], kept, [...own, ...elsewhere].filter(one => !finished.includes(one)).map(one => one.id))
 const finishedPart = (isOpen: boolean, all = finishedAll()) => {
 const isStars = tasksView.filter === 'starred'
 if (!['all', 'finished', 'starred'].includes(tasksView.filter) || (!isStars && !all.length)) return null
 const isAll = tasksView.filter === 'all'
-return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', surface: e.surface, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
+return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
 }
 const tasksActs: TasksActs = { redraw: () => ((presses += 1), drawAgain($)), star: one => void starPress($, rowStar(one)), open: id => openReport($, id), typing: () => holdTimes($), typed: () => freeTimes($) }
 const starSeen = (one: Todo): StarSeen => ({ id: one.id, title: titleOf(one), state: STAGE_WORD[stage(one)], report: left(one)?.id, chat: one.chat?.title || chat.title, ended: one.endedAt || undefined })
