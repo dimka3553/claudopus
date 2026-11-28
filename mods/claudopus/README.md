@@ -149,7 +149,7 @@ You set everything below in the panel's **Config** tab, except `macs`. Claudopus
 | `sound` | `true` | `false` silences the chime and the "needs you" sound |
 | `notifications` | `true` | `false` stops the notifications when a task is done, stopped or failed |
 | `askPictures` | `false` | `true` has Claudopus draw each question with buttons as one picture, open it on your screen and show it with the question |
-| `taskColours` | `true` | `false` takes away the box around each chat reply about a task, with its name, **Result** and **Reply**, and the colour dot on its card. The box is blue where the reply passes on a result, grey otherwise |
+| `taskColours` | `true` | `false` takes away the box around each chat reply about a task, with its name, **Result** and **Reply**, and the colour dot on its card. The box is blue where the reply passes on a result, green once you mark that task done, grey otherwise |
 | `replyLinks` | `true` | `false` takes away the list of links at the end of each chat reply, and the Links part of a task's Details |
 | `admin` | `each` | When you are asked before an admin command runs: `each` time, once per task (`work`), or `never` |
 | `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most tasks, clearly stated jobs with long searching and reading, and heavy tasks |

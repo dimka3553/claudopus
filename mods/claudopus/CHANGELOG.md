@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.327 · 28 November 2026
+- A result in the chat turns green once you mark its task as done, as its card does in the panel. Before, it stayed blue.
+
 ## 0.2.326 · 28 November 2026
 - When a connector such as Higgsfield is missing or needs signing in, the chat now shows the app's own Connect button for you to press, whether you ask it to connect one or a task needs one. Before, the chat was not allowed to show it, and tasks gave you steps through Settings instead.
 
