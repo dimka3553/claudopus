@@ -471,23 +471,23 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
             const [y = 0, m = 1] = one.month.split('-').map(Number)
             const by = (new Date(look.now).getFullYear() - y) * 12 + new Date(look.now).getMonth() + 1 - m
             const isShown = by === back
-            const line = (
-              <Box flexDirection="row" gap={1.5} alignItems="flex-start" paddingX={isWide ? 1.5 : 1}>
+            const label = isWide ? `${MONTHS_FULL[m - 1] ?? ''} ${y}` : `${MONTHS[m - 1] ?? ''} ${y}`
+            return (
+              <Box key={`progress-star-row-${one.month}`} flexDirection="row" gap={1.5} alignItems="flex-start" paddingX={isWide ? 1.5 : 1} flexShrink={0}>
                 <Box width={isWide ? 16 : 10} flexShrink={0}>
-                  <Text bold={isShown} dimColor={!isShown}>{isWide ? `${MONTHS_FULL[m - 1] ?? ''} ${y}` : `${MONTHS[m - 1] ?? ''} ${y}`}</Text>
+                  {by >= 0 && by < months && !isShown ? (
+                    <Button key={`progress-star-${one.month}-${look.gen}`} plain hover={{ underline: true }} onPress={() => look.acts.month(by - back)}>
+                      <Text dimColor>{label}</Text>
+                    </Button>
+                  ) : (
+                    <Text bold={isShown} dimColor={!isShown}>{label}</Text>
+                  )}
                 </Box>
                 <Box flexShrink={1} minWidth={0} flexGrow={1}>
                   <Text bold={isShown} wrap="wrap">{one.text}</Text>
                 </Box>
                 {one.own ? <Box flexShrink={0}><Text dimColor>your words</Text></Box> : null}
               </Box>
-            )
-            return by >= 0 && by < months ? (
-              <Button key={`progress-star-${one.month}-${look.gen}`} plain onPress={() => look.acts.month(by - back)}>
-                {line}
-              </Button>
-            ) : (
-              <Box key={`progress-star-${one.month}`}>{line}</Box>
             )
           })}
         </Box>
