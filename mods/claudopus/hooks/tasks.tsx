@@ -11,18 +11,24 @@ type JSXEl = ReturnType<Ui['Box']>
 type Part = (props: Record<string, unknown>) => JSXEl
 type Parts = { Box: Part; Text: Part; Button: Part; Input?: Part }
 
-export type TaskFilter = 'all' | 'you' | 'working' | 'finished' | 'starred'
-// The tabs in the order they stand, each with its word: For you is what waits on the person, a question or a result to look at
+export type TaskFilter = 'all' | 'waiting' | 'delivered' | 'working' | 'finished' | 'starred'
+// The tabs in the order they stand, which is the order the cards stand in, each with its word: between All and Starred they are
+// the states a card says and a reply's box in the chat is coloured by, in the same words (28 Nov, the person: "have the same
+// statuses at the top"; For you held what waits and what was delivered as one)
 const TABS: [TaskFilter, string][] = [
   ['all', 'All'],
-  ['you', 'For you'],
+  ['waiting', 'Waiting for you'],
+  ['delivered', 'Delivered'],
   ['working', 'Working'],
   ['finished', 'Finished'],
   ['starred', 'Starred'],
 ]
 // What a card is, for the tabs that pick among the cards up: 1 working, 2 waiting for the person, 3 delivered, 0 the rest (stopped,
 // failed, interrupted), which only All shows
-const KINDS: Partial<Record<TaskFilter, number[]>> = { working: [1], you: [2, 3] }
+const KINDS: Partial<Record<TaskFilter, number[]>> = { working: [1], waiting: [2], delivered: [3] }
+// The state each of those tabs holds, whose colour its bar has while it is picked: Finished the green of Done
+type TabState = 'working' | 'waiting' | 'delivered' | 'done'
+const STATES: Partial<Record<TaskFilter, TabState>> = { working: 'working', waiting: 'waiting', delivered: 'delivered', finished: 'done' }
 // A long list shows one page of this many rows at a time, with Newer and Older under it: the panel never holds more than a page,
 // as each press of the old Show more added 40 rows until the app refused the whole drawing (28 Nov)
 export const TASKS_PAGE = 40
@@ -154,7 +160,7 @@ export const starButton = (ui: Ui, id: string, onPress: () => void) => {
 // The tabs under the header, one row on the panel's ground with a hairline under it (two in a narrow pane), the one picked bright
 // with a bar under its word; how many each holds beside it once there are any, but Finished, whose list says it
 const LINE = 0.1
-export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, surface: string, acts: TasksActs) => {
+export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, surface: string, acts: TasksActs, colourOf?: (state: TabState) => string | undefined) => {
   const { Box, Button } = ui as unknown as Parts
   const isDesk = surface !== 'terminal'
   return (
@@ -166,7 +172,7 @@ export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, su
           return (
             <Box key={`tab-${filter}`} flexDirection="column" flexShrink={0}>
               <Button key={`tasks-${filter}-${tasksView.n}`} label={`${word}${n ? ` ${n.toLocaleString('en-US')}` : ''}`} plain {...(isOn ? {} : { dimColor: true, hover: { scope: `tasks-${filter}`, underline: true } })} onPress={pressed(acts, () => ((tasksView.filter = filter), (tasksView.from = 0)))} />
-              {isDesk ? <Box height={LINE * 2} backgroundColor={isOn ? '#e8e6dc' : undefined} /> : null}
+              {isDesk ? <Box key={`tab-bar-${filter}`} height={LINE * 2} backgroundColor={isOn ? ((STATES[filter] && colourOf?.(STATES[filter])) ?? '#e8e6dc') : undefined} /> : null}
             </Box>
           )
         })}

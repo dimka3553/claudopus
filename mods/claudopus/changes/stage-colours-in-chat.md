@@ -1,0 +1,2 @@
+- Every reply about a task in the chat has the colour of that task's card as it stands now: purple while it works, amber while it waits for you, blue once delivered, green once you mark it done. Before, only results were coloured.
+- The panel's tabs name the same states: For you is now Waiting for you and Delivered, each with its count, and the tab picked has its state's colour under it.

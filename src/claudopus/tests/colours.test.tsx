@@ -1,6 +1,6 @@
 // Task colours and links at the end of chat replies, each a switch in Config
 
-test("with Task colours on, as it comes, a reply about a task sits in a box with its colour's dot, its name, Reply and its links, blue with Result where it passes on a result and grey otherwise, its card gets the same dot and its Details its links; off, only the links stay, and Links at the end off takes them away", async ($, on) => {
+test("with Task colours on, as it comes, a reply about a task sits in a box with its colour's dot, its name, Reply and its links, its edge the colour of its card as it stands now, with Result where it passes on a result, its card gets the same dot and its Details its links; off, only the links stay, and Links at the end off takes them away", async ($, on) => {
   const PR = 'https://github.com/acme/heads/pull/7'
   const said = `The nose is fixed and merged: ${PR}`
   // The chat's transcript as the app keeps it: the task is the chat's first, a1
@@ -63,10 +63,10 @@ test("with Task colours on, as it comes, a reply about a task sits in a box with
   const result = await $.ui.mount({ ...MSG, requestId: 'msg_r6', props: { text: RESULT, isFirstOfReply: true }, surface: 'desktop' } as never)
   await clock.advance(1000)
   expect(await until(async () => result.find({ type: 'Text', text: '“Make the bridge narrower too”' }))).toBeDefined()
-  // Colour marks only what matters: the reply that passes on a task's result has a delivered card's blue edge and Result, which
-  // opens the whole of it; any other reply about a task has a grey edge and no Result, its task's colour only in its dot
+  // A reply about a task has its card's colour as it stands now, here delivered and blue, whether or not it passes on the result;
+  // the one that does has Result, which opens the whole of it, and any other has none. The task's own colour is only in its dot
   const edgeOf = async (drawn: typeof result) => (await drawn.findAll({ type: 'Box' })).find(one => /^task-box-/.test(one.key ?? ''))?.props.borderColor
-  expect([await edgeOf(result), await edgeOf(reply)]).toEqual(['#4C9AFF', '#80808070'])
+  expect([await edgeOf(result), await edgeOf(reply)]).toEqual(['#4C9AFF', '#4C9AFF'])
   expect([await keyed(reply, `task-result-${r.agentId}`), await keyed(result, `task-result-${r.agentId}`)].map(Boolean)).toEqual([false, true])
   // What you write to it on its card, here in the box Reply on a reply about it opens, is what the next reply about it quotes
   const box = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
@@ -126,7 +126,10 @@ test("with Task colours on, as it comes, a reply about a task sits in a box with
   const two = await $.ui.mount({ ...MSG, requestId: 'msg_two', props: { text: `${RESULT}\n\n---\n\n${PRICE}`, isFirstOfReply: true }, surface: 'desktop' } as never)
   const boxes = async () => (await two.findAll({ type: 'Box' })).filter(one => /^task-box-.*-\d$/.test(one.key ?? ''))
   expect(await until(async () => ((await boxes()).length === 2 ? true : undefined))).toBe(true)
-  expect((await boxes()).map(one => one.props.borderColor)).toEqual(['#4C9AFF', '#4C9AFF'])
+  // each with its card's colour as it stands now: the first task's amber, as it waits for the person with its question, the second's
+  // blue, delivered (28 Nov, the person: "Purple if it's in progress, Blue if it's delivered, Yellow if it needs you, Green if it's
+  // completed ... just make it consistent")
+  expect((await boxes()).map(one => one.props.borderColor)).toEqual(['#E5A50A', '#4C9AFF'])
   expect((await two.findAll({ type: 'Markdown' })).map(one => one.props.text)).toEqual(expect.arrayContaining([RESULT, PRICE]))
   expect(await two.find({ type: 'Text', text: 'Make the price page' })).toBeDefined()
   expect(await two.find({ type: 'Text', text: 'Fix the nose' })).toBeDefined()
@@ -135,12 +138,12 @@ test("with Task colours on, as it comes, a reply about a task sits in a box with
   expect(await until(async () => tabs.find(tab => tab.startsWith('report-')))).toBeDefined()
   await two.unmount()
   // Once the person marks a task done, its result is green in the chat as its card is in the panel, and the other task's stays
-  // blue (28 Nov, the person: "I've marked one of them as done, and it's still blue in the chat, so it's kind of confusing")
+  // as it was (28 Nov, the person: "I've marked one of them as done, and it's still blue in the chat, so it's kind of confusing")
   await list.redraw()
   await pressed(list, 'dismiss-a2')
   const marked = await $.ui.mount({ ...MSG, requestId: 'msg_two', props: { text: `${RESULT}\n\n---\n\n${PRICE}`, isFirstOfReply: true }, surface: 'desktop' } as never)
   const edges = async () => (await marked.findAll({ type: 'Box' })).filter(one => /^task-box-.*-\d$/.test(one.key ?? '')).map(one => one.props.borderColor)
-  expect(await until(async () => ((await edges()).includes('success') ? edges() : undefined))).toEqual(['#4C9AFF', 'success'])
+  expect(await until(async () => ((await edges()).includes('success') ? edges() : undefined))).toEqual(['#E5A50A', 'success'])
   await marked.unmount()
   // Task colours off in Config: the box and the dot go, the links stay
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)

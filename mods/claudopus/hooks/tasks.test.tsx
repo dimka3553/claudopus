@@ -61,7 +61,7 @@ test('each tab shows only its cards, and the search only the names it finds, in 
   const kinds = [1, 2, 3, 0]
   const shown = () => kinds.map(kind => taskShows(kind, 'Fit the Heads'))
   expect(shown()).toEqual([true, true, true, true])
-  for (const [filter, want] of [['working', [true, false, false, false]], ['you', [false, true, true, false]], ['finished', [false, false, false, false]], ['starred', [false, false, false, false]]] as const) {
+  for (const [filter, want] of [['working', [true, false, false, false]], ['waiting', [false, true, false, false]], ['delivered', [false, false, true, false]], ['finished', [false, false, false, false]], ['starred', [false, false, false, false]]] as const) {
     tasksView.filter = filter
     expect(shown()).toEqual(want)
   }
