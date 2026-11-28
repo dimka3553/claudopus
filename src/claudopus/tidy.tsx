@@ -143,7 +143,6 @@ const diskNeeds = ($: EngineInterface): Need[] => {
 // Whether a task's command may run: refused at once with why, else '' (the disk running out, or Chrome copied for nothing)
 const CHROME_APP = /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome(?![\w ]*(?:Helper|for Testing))/
 const CHROME_IN_SCRIPT = /executablePath\s*[:=]\s*[^\n]*\/Google Chrome\.app\b|\bchannel\s*[:=]\s*['"]chrome(?:-beta|-dev|-canary)?['"]/
-const CHROME_COPIED = `Not run: this starts your own Google Chrome app without a window. Each start makes a copy of the whole app on the disk, and a start that is stopped leaves it there. Use Playwright's own Chromium instead (chromium.launch() with no channel or executablePath, after npx playwright install chromium), start it once for every page the script needs, and close it in a finally block.`
 const DISK_FULL = (what: string, d: DiskKept) =>
   named(`Not run: the ${machineWord()} has ${gbText(d.free)} GB of disk space left, and "${what}" can fill it. Remove what you made that is no longer needed (your scratch folder, temporary files), run heavy work in the cloud, and send the same command again once more than ${gbText(DISK_STOP)} GB is free.${isWindows ? '' : ' {Name} can free up space from the Claudopus panel.'}`)
 const turnLeftovers = async ($: EngineInterface, e: ToolCallInput) => {

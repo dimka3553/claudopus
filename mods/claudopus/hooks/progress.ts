@@ -122,24 +122,10 @@ export const progressThumb = (reportsDir: string, path: string) => {
   return id && file.length ? `${reportsDir}/${id}/thumbs/${file.join('/').replaceAll('/', '--')}.jpg` : ''
 }
 
-// ---- Set aside: the button every question of a task has beside its own, the person's own choice to drop it and keep it as a
-// data point. Nothing else ever sets work aside: a task that waits on nothing is never taken for set aside ----
+// ---- Set aside: the person's own choice to drop a task and keep it as a data point, which questions offered as a button until 28 Nov
+// (the star keeps a task now); what was set aside then stays. Nothing else ever sets work aside ----
 
-// It sets the whole task aside, so it says so (27 Nov: pressed to skip one question of many, it ended the task); Skip this one,
-// beside it, answers only the question it is on, and the task goes on with the rest
-export const SET_ASIDE = 'Set aside task'
-export const SKIP_ONE = 'Skip this one'
 export const PICK_UP_AGAIN = 'Pick up again'
-const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-// A question's buttons: the task's own, then Skip this one and Set aside task, each unless the task gave it (or the old Set aside)
-export const withSetAside = (choices: string[]) => {
-  const has = (...words: string[]) => choices.some(choice => words.some(one => plainWords(choice) === plainWords(one)))
-  return [...choices, ...(has(SKIP_ONE) ? [] : [SKIP_ONE]), ...(has(SET_ASIDE, 'Set aside') ? [] : [SET_ASIDE])]
-}
-// What the task hears of a press on Skip this one, after the press itself
-export const SKIP_TOLD = 'That press skips only this question: leave what it was about as it is, change nothing for it, and go on with the rest of your work without asking it again.'
-// What the task hears of the press
-export const setAsideTold = (Name: string) => `Set aside: ${Name} set this aside, to keep as a data point. Do not continue it or ask about it again; record it as set aside.`
 // What the chat is sent for Pick up again on a set-aside entry, as the person's own message naming its result
 export const pickUpText = (entry: ProgressEntry, reportsDir: string) => `${PICK_UP_AGAIN}: ${entry.title}${entry.report ? ` (${reportsDir}/${entry.report}/report.md)` : ''}`
 // What the chat is told of progress/ with its role, so a question of how some work stands is answered from it

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { answerJson, applyProgress, areasFrom, asideLines, chatEventOf, entriesFrom, pictureFrom, pictureOf, progressPrompt, progressThumb, starOf, starPrompt, starsDue, withSetAside, withStar, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, asideLines, chatEventOf, entriesFrom, pictureFrom, pictureOf, progressPrompt, progressThumb, starOf, starPrompt, starsDue, withStar, wordsIn } from './progress'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
 
 const REPORTS = '/home/sam/.claude/claudopus/reports'
@@ -88,9 +88,6 @@ test('the files read back whole whatever was written, the model is shown each ar
   expect(prompt).not.toMatch(/next step/i)
   expect(prompt).toContain('This task is already in: nose')
   expect(prompt).toContain('Answer: Yes')
-  expect(withSetAside(['Release it'])).toEqual(['Release it', 'Skip this one', 'Set aside task'])
-  expect(withSetAside(['set aside'])).toEqual(['set aside', 'Skip this one'])
-  expect(withSetAside(['Skip this one', 'Set aside task'])).toEqual(['Skip this one', 'Set aside task'])
 })
 
 test('the goals are made only from the person\'s own messages, each month\'s north star from all that month\'s work, and a task is told only what was set aside in the area its words share', async () => {

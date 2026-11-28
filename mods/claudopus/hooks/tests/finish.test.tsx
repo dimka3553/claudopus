@@ -1211,7 +1211,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a4')).toBe(false)
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await stoppedCards()).toBe(3)
-  expect((await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))).toBeUndefined()
+  expect((await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label)))).toBeUndefined()
   // A turn of words alone after it leaves it as it ended: not announced again, its report kept once
   const otto = () => [...files.keys()].filter(key => /\/reports\/[^/]+-name-the-octopus\/report\.md$/.test(key))
   const reportsBefore = otto().length
@@ -1368,7 +1368,7 @@ test('work that hands in its result with everything it set out to do done, leavi
   // (a row's name is a button where a press opens its output)
   const rows = async () => [...(await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')), ...(await pane.findAll({ type: 'Button' })).map(b => String(b.props.label ?? ''))]
   const rowStop = async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop' && String(b.key ?? '').startsWith('stop-list-job-'))
-  const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
+  const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label)))?.props.label
   await $.prompt.submit({ text: 'run the site for me', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Run the site', prompt: 'run it' } as never)
   kinds.a1 = 'general-purpose'
@@ -1546,7 +1546,7 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
   await w.clock.advance(5000)
   const order = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => /^Piece \d+$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
   const green = async () => (await list.findAll({ type: 'Box' })).filter(b => b.key === 'outline-top' && b.props.backgroundColor === '#4C9AFF').length
-  const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
+  const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /^[▸▾] Finished/.test(String(b.props.label)))?.props.label
   // Its run over, as Claude Code lists it: with its last words taken as its result it is done, and ended by an error it failed
   const end = (agentId: string, reason = 'answer') => ((agents[agentId] = reason === 'answer' ? 'completed' : 'failed'), (kinds[agentId] = 'general-purpose'), $.turn.complete({ answer: reason === 'answer' ? 'Done.' : '', durationMs: 1, isAborted: false, turnId: `t-${agentId}`, reason, agentId } as never))
   return { ...w, list, order, green, fold, end }

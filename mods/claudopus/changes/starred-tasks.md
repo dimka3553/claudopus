@@ -1,0 +1,4 @@
+- The task panel has a row of tabs under its header: All, For you (questions and results waiting on you), Working, Finished and Starred, each with how many it holds.
+- Finished lists every task that ever finished, from all your results, 40 at a time with Show 40 more, not only the last 40. Search, at the right of the Finished or Starred heading, finds tasks by name.
+- A star at each task's top right keeps it under Starred, with its name, state and result, even once it is finished, dismissed or its chat is gone. Stars are kept in the memory folder every Claude account on this Mac shares, and go to your other Mac with the results.
+- A task's question now shows only its own answers and Answer in words: Skip this one and Set aside task are gone. Star a task to keep it, and Dismiss or Mark as done to let it go.

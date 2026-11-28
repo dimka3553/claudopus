@@ -133,6 +133,8 @@ const syncResults = async ($: EngineInterface) => {
       const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`
       try {
         await syncWith($, mac, was, now, staging)
+        // (and the stars, the same on both: panel.tsx)
+        await syncStars($, mac).catch(err => log($, `stars not made the same with ${mac}: ${String(err)}`))
       } finally {
         await runOn($, ['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
       }
