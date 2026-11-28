@@ -52,8 +52,8 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect((await stats.find({ type: 'Text', text: /^This chat$/ }))?.props.bold).toBe(true)
   expect((await stats.find({ type: 'Text', text: 'Today' }))?.props.bold).toBe(true)
   expect((await keyed(stats, 'scope-All chats'))?.props.label).toBe('All chats')
-  // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 35 minutes of work (the first with
-  // its helper) in 25
+  // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 40 minutes of work (the tasks' 30
+  // and the helper's 10 beside them) in 25
   expect(await until(async () => stats.find({ type: 'Text', text: 'Saved by running at once' }))).toBeDefined()
   expect(await stats.find({ type: 'Text', text: 'Opus 5.5' })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: '1.5M' })).toBeDefined()
@@ -63,17 +63,19 @@ test('Stats opens in front from its button beside Results, and adds up this chat
     return rows[rows.indexOf(name) + 1]
   }
   // The headline: time saved, cost, work done
-  expect(await value('10m')).toBe('time saved')
+  expect(await value('15m')).toBe('time saved')
   expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
-  expect(await value('Time of work')).toBe('35m')
+  expect(await value('Time of work')).toBe('40m')
   expect(await value('Time on the clock')).toBe('25m')
-  expect(await value('Saved by running at once')).toBe('10m')
-  // 35 minutes of work in 25 of real time: 1.4 hours of work for each hour, and the tokens by kind, each a share of all
-  expect(await value('Efficiency')).toBe('1.40×')
-  // The tasks and the helper each counted as itself: three at work at once, 30 minutes of the tasks' own and 10 of the helper's
-  const helpers = ['Helpers that worked', 'Tasks and helpers at work at once, at most', 'Time of tasks, on their own', 'Time of helpers', 'Tasks and helpers, added up']
-  expect(await Promise.all(helpers.map(value))).toEqual(['1', '3', '30m', '10m', '40m'])
+  expect(await value('Saved by running at once')).toBe('15m')
+  // 40 minutes of work in 25 of real time: 1.6 hours of work for each hour, and the tokens by kind, each a share of all
+  expect(await value('Efficiency')).toBe('1.60×')
+  // The tasks and the helper each counted as itself: three at work at once, on one timeline with no strip under it
+  expect(await stats.find({ type: 'Text', text: 'Up to 3 at work at once' })).toBeDefined()
+  expect((await stats.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => /timeline|at once/.test(alt))).toEqual(['3 tasks and helpers on a timeline'])
+  const helpers = ['Helpers that worked', 'Time of tasks, on their own', 'Time of helpers']
+  expect(await Promise.all(helpers.map(value))).toEqual(['1', '30m', '10m'])
   // The model that used the most tokens
   expect(await value('Favourite model')).toBe('Opus 5.5')
   expect(await value('Cache reads')).toBe('0% · 0')
@@ -90,14 +92,16 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   // Months kept before they held each helper's time are made again from what is kept, once, with no transcript summed again
   const all = JSON.parse(files.get(`${MEMORY}/stats/all.json`) ?? '{}') as { mv?: number; months: Record<string, { part: Record<string, unknown> }> }
   delete all.mv
-  for (const one of Object.values(all.months)) for (const name of ['crowd', 'ownMs', 'kidMs', 'kids']) delete one.part[name]
+  // (as such a month added up: each task's time with its helpers' as one, so 35 minutes, two at once at most)
+  for (const one of Object.values(all.months)) (['ownMs', 'kidMs', 'kids'].forEach(name => delete one.part[name]), Object.assign(one.part, { added: 35 * M, most: 2 }))
   files.set(`${MEMORY}/stats/all.json`, JSON.stringify(all))
-  for (const [path, text] of [...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/months/`))) files.set(path, text.replace(/,"o":\[[\d,]*\],"h":\[[\d,[\]]*\]\]/g, '').replace(/,"h":\[[\d,[\]]*\]\]/g, ''))
+  for (const [path, text] of [...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/months/`))) files.set(path, text.replace(/,"hm":\[[^\]]*\]/g, '').replace(/,"o":\[[\d,]*\],"h":\[[\d,[\]]*\]\]/g, '').replace(/,"h":\[[\d,[\]]*\]\]/g, ''))
   expect([...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/months/`)).some(([, text]) => text.includes('"h"'))).toBe(false)
   files.set('hold:jq', '')
   await pressed(stats, 'scope-All chats')
-  expect(await until(async () => ((await value('Tasks and helpers at work at once, at most')) === '3' ? true : undefined))).toBe(true)
-  expect(JSON.parse(files.get(`${MEMORY}/stats/all.json`) ?? '{}').mv).toBe(1)
+  expect(await until(async () => ((await value('Time of work')) === '40m' ? true : undefined))).toBe(true)
+  expect(await stats.find({ type: 'Text', text: 'Up to 3 at work at once' })).toBeDefined()
+  expect(JSON.parse(files.get(`${MEMORY}/stats/all.json`) ?? '{}').mv).toBe(2)
   expect([...holding.keys()].filter(id => id.startsWith('jq:'))).toEqual([])
 })
 
@@ -471,7 +475,7 @@ test('Stats draws whatever the history: the timeline of 240 pieces of work at on
   const allTime = await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === 'All time'))
   await stats.press({ key: allTime?.key ?? '' })
   // The timeline is drawn, its bars on a coarser grid, in one drawing the app takes
-  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks on a timeline'))
+  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks and helpers on a timeline'))
   expect(String(timeline?.props.source)).toContain('#8A63F0')
   expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131_072)).toEqual([])
   // The rest of the tab is drawn as ever

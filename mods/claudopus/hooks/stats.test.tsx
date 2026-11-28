@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { boardDelta, boardFrom, boardRange, clip, colorOf, costOf, crowdOf, crowdSvg, dayCells, efficiencyOf, GAP, lengthOf, mainModel, monthFrom, monthNo, monthsKept, mostAtOnce, partOf, piecesIn, piecesKept, priceOf, RANGES, rowPiece, statsFrom, sumKept, SVG_MOST, svgFits, timelineOf, timelineSvg, timeOf, todosOf, union } from './stats'
+import { boardDelta, boardFrom, boardRange, clip, colorOf, costOf, agentsOf, dayCells, efficiencyOf, GAP, lengthOf, mainModel, monthFrom, monthNo, monthsKept, mostAtOnce, partOf, piecesIn, piecesKept, priceOf, RANGES, rowPiece, statsFrom, sumKept, SVG_MOST, svgFits, timelineOf, timelineSvg, timeOf, todosOf, union } from './stats'
 import type { BoardSent, BoardTimeline, DayRows, Kept, Loaded, Msg, Part, Piece, Range, Run, Span, Stats, TodoCall, TokenSums } from './stats'
 
 const M = 60_000
@@ -69,18 +69,20 @@ const keep = (chats: Record<string, Run[]>, first = Object.keys(chats)[0] ?? '')
 
 // The plain way, as Stats added up before anything above a transcript's sums was kept: every response of every transcript and
 // every piece of work, gone through again for each range. What is kept must come to the very same figures
-type Plain = { id: string; isFlow: boolean; isFinished: boolean; spans: Span[]; bars: { from: number; to: number; model: string }[]; calls: TodoCall[]; ended: number }
+type Plain = { id: string; isFlow: boolean; isFinished: boolean; spans: Span[]; bars: { from: number; to: number; model: string }[]; calls: TodoCall[]; ended: number; agents: { spans: Span[]; model: string }[] }
 const plainPieces = (runs: Run[]): Plain[] => {
   const kids = (id: string): Run[] => runs.filter(r => r.kind === 'helper' && r.parent === id).flatMap(r => [r, ...kids(r.id)])
   const works = runs.filter(r => r.kind === 'work').map(r => {
     const spans = union([...r.sum.s, ...kids(r.id).flatMap(k => k.sum.s)])
     const model = mainModel(r.sum.u)
-    return { id: r.id, isFlow: false, isFinished: r.isFinished, spans, bars: spans.map(([from, to]) => ({ from, to, model })), calls: r.sum.d, ended: spans.at(-1)?.[1] ?? 0 }
+    // On the timeline the task's own time and each helper's, in its own model
+    const agents = [r, ...kids(r.id)].map(one => ({ spans: union(one.sum.s), model: mainModel(one.sum.u) })).filter(one => one.spans.length)
+    return { id: r.id, isFlow: false, isFinished: r.isFinished, spans, bars: spans.map(([from, to]) => ({ from, to, model })), calls: r.sum.d, ended: spans.at(-1)?.[1] ?? 0, agents }
   })
   const flows = [...new Set(runs.filter(r => r.kind === 'flow').map(r => r.parent))].map(id => {
     const agents = runs.filter(r => r.kind === 'flow' && r.parent === id)
     const spans = union(agents.flatMap(a => a.sum.s))
-    return { id, isFlow: true, isFinished: agents.every(a => a.isFinished), spans, bars: agents.flatMap(a => union(a.sum.s).map(([from, to]) => ({ from, to, model: mainModel(a.sum.u) }))), calls: [], ended: spans.at(-1)?.[1] ?? 0 }
+    return { id, isFlow: true, isFinished: agents.every(a => a.isFinished), spans, bars: agents.flatMap(a => union(a.sum.s).map(([from, to]) => ({ from, to, model: mainModel(a.sum.u) }))), calls: [], ended: spans.at(-1)?.[1] ?? 0, agents: agents.map(a => ({ spans: union(a.sum.s), model: mainModel(a.sum.u) })).filter(one => one.spans.length) }
   })
   return [...works, ...flows].filter(p => p.spans.length)
 }
@@ -122,7 +124,7 @@ const plain = (runs: Run[], from: number, now: number) => {
   const owns = runs.filter(r => r.kind === 'work').map(r => union(r.sum.s))
   const kidsAll = [...runs.filter(r => r.kind === 'work').flatMap(r => under(r.id)), ...runs.filter(r => r.kind === 'flow')].map(r => union(r.sum.s)).filter(one => one.length)
   const cut = (list: Span[][]) => list.map(one => clip(one, from, Infinity)).filter(one => one.length)
-  const helpers = { most: mostAtOnce([...cut(owns), ...cut(kidsAll)]), own: cut(owns).reduce((n, one) => n + lengthOf(one), 0), time: cut(kidsAll).reduce((n, one) => n + lengthOf(one), 0), count: kidsAll.filter(one => (one.at(-1)?.[1] ?? 0) > from).length }
+  const helpers = { own: cut(owns).reduce((n, one) => n + lengthOf(one), 0), time: cut(kidsAll).reduce((n, one) => n + lengthOf(one), 0), count: kidsAll.filter(one => (one.at(-1)?.[1] ?? 0) > from).length }
   const lasted = plainPieces(runs).filter(p => !p.isFlow && p.isFinished && p.ended >= from).map(p => lengthOf(p.spans))
   return {
     models: [...models.entries()].sort((a, b) => b[1].total - a[1].total),
@@ -135,8 +137,9 @@ const plain = (runs: Run[], from: number, now: number) => {
     messages: turns.length,
     turn: turns.length ? turns.reduce((sum, [a, b]) => sum + (b - a), 0) / turns.length : 0,
     perPiece: lasted.length ? lasted.reduce((sum, n) => sum + n, 0) / lasted.length : 0,
-    time: timeOf(pieces.map(p => p.spans)),
-    most: mostAtOnce(pieces.map(p => p.spans)),
+    // Each task and each helper counted as itself
+    time: { ...timeOf(pieces.map(p => p.spans)), added: helpers.own + helpers.time, saved: helpers.own + helpers.time - timeOf(pieces.map(p => p.spans)).clock },
+    most: mostAtOnce([...cut(owns), ...cut(kidsAll)]),
     pieces,
     helpers,
   }
@@ -153,9 +156,12 @@ const shape = (s: Pick<Stats, 'models' | 'all' | 'by' | 'finished' | 'running' |
 })
 const named = (line: BoardTimeline) => ({ base: line.base, pieces: line.pieces.map(one => one.map(([from, minutes, model]) => [from, minutes, line.models[model]])) })
 const plainLine = (runs: Run[], most: number, since: number): BoardTimeline => {
+  // A row for each task's own time and each helper's
   const pieces = plainPieces(runs)
-    .map(p => ({ ...p, spans: clip(p.spans, since, Infinity), bars: p.bars.flatMap(b => clip([[b.from, b.to]], since, Infinity).map(([from, to]) => ({ ...b, from, to }))) }))
-    .filter(p => p.bars.length)
+    .flatMap(p => p.agents)
+    .map(one => ({ spans: clip(one.spans, since, Infinity), model: one.model }))
+    .filter(one => one.spans.length)
+    .map(one => ({ spans: one.spans, bars: one.spans.map(([from, to]) => ({ from, to, model: one.model })) }))
     .sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0))
   const base = Math.floor((pieces[0]?.spans[0]?.[0] ?? 0) / 60_000) * 60_000
   const models: string[] = []
@@ -238,34 +244,44 @@ test('stats add up tokens by model once each, work and its helpers as one piece,
   expect(s.by).toEqual({ work: 1130, helpers: 50, flows: 5, chat: 1 })
   expect([s.finished, s.flows, s.todosDone, s.messages]).toEqual([2, 1, 1, 2])
   expect(s.turn).toBe(45_000)
-  // w1 with its helper 15 minutes, w2 10, the workflow 10: 35 minutes of work in 25 on the clock
-  expect([s.time.added, s.time.clock, s.time.saved]).toEqual([35 * M, 25 * M, 10 * M])
-  // Each task and helper counted as itself: w1, its helper and w2 at work together; the tasks' own 20 minutes, and 20 of their
+  // Each task and helper counted as itself: w1 10 minutes, its helper 10 beside it, w2 10, the workflow's two agents 5 each: 40
+  // minutes of work in 25 on the clock, and w1, its helper and w2 at work together; the tasks' own 20 minutes, and 20 of their
   // helpers', the workflow's agents among them
-  expect(s.helpers).toEqual({ most: 3, own: 20 * M, time: 20 * M, count: 3 })
-  expect(crowdOf(s.pieces).map(([a, z, tasks, helpers]) => [(a - day) / M, (z - day) / M, tasks, helpers])).toEqual([[0, 5, 2, 0], [5, 10, 2, 1], [10, 15, 0, 1], [20, 30, 0, 1]])
-  expect(crowdSvg(s.pieces, 400)).toContain('Up to 3 at work at once')
+  expect([s.time.added, s.time.clock, s.time.saved, s.most]).toEqual([40 * M, 25 * M, 15 * M, 3])
+  expect(s.helpers).toEqual({ own: 20 * M, time: 20 * M, count: 3 })
+  // On the timeline every task and every helper is a row of its own, in its own model: w1's own time, its helper on Sonnet, w2,
+  // and each agent of the workflow
+  const rows = agentsOf(s.pieces)
+  expect(rows.map(p => [p.title, ((p.spans[0]?.[0] ?? 0) - day) / M, p.bars.map(b => b.model)])).toEqual([
+    ['w1', 0, ['claude-opus-5-5']],
+    ['Helper · w1', 5, ['claude-sonnet-5-5']],
+    ['w2', 0, ['claude-sonnet-5-5']],
+    ['Helper · a1', 20, ['claude-opus-5-5']],
+    ['Helper · a1', 25, ['']],
+  ])
+  expect(timelineSvg(rows, 400)).toContain('Helper · w1 · Sonnet 5.5')
   // From the twentieth minute on: only the workflow, the chat's later message, and their tokens
   const later = kept.stats(day + 20 * M)
   expect([later.finished, later.flows, later.messages, later.all.total]).toEqual([0, 1, 1, 5])
-  expect([later.time.added, later.time.saved]).toEqual([10 * M, 0])
-  expect(later.helpers).toEqual({ most: 1, own: 0, time: 10 * M, count: 2 })
+  expect([later.time.added, later.time.saved, later.most]).toEqual([10 * M, 0, 1])
+  expect(later.helpers).toEqual({ own: 0, time: 10 * M, count: 2 })
   // The leaderboard's ranges: today from midnight, the last 7 and 30 days back from now, all time; work against real time
   const board = kept.board(day + 3 * 86_400_000)
-  expect([board.all.work, board.all.clock, board.all.tasks, board.all.tokens]).toEqual([35 * M, 25 * M, 2, 1186])
-  expect([board.d7.work, board.d30.work, board.today.work]).toEqual([35 * M, 35 * M, 0])
+  expect([board.all.work, board.all.clock, board.all.tasks, board.all.tokens, board.all.most]).toEqual([40 * M, 25 * M, 2, 1186, 3])
+  expect([board.d7.work, board.d30.work, board.today.work]).toEqual([40 * M, 40 * M, 0])
   expect(board.all.models.map(([model, tokens]) => [model, tokens])).toEqual([['claude-opus-5-5', 1116], ['claude-sonnet-5-5', 70]])
-  expect(efficiencyOf(board.all.work, board.all.clock)).toBe(1.4)
+  expect(efficiencyOf(board.all.work, board.all.clock)).toBe(1.6)
   expect(kept.board(day + 10 * 86_400_000).d7.work).toBe(0)
-  // The timeline the board draws: each task's stretches in minutes with its model, never a title; the newest kept when it is too long
+  // The timeline the board draws: each task's and helper's stretches in minutes with its model, never a title; the newest kept when
+  // it is too long
   const line = kept.line()
-  expect(line.pieces).toEqual([[[0, 15, 0]], [[0, 10, 1]], [[20, 5, 0], [25, 5, 2]]])
+  expect(line.pieces).toEqual([[[0, 10, 0]], [[0, 10, 1]], [[5, 10, 1]], [[20, 5, 0]], [[25, 5, 2]]])
   expect(line.models).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', ''])
   expect(JSON.stringify(line)).not.toContain('w1')
-  expect(kept.line(30).pieces).toEqual([[[20, 5, 0], [25, 5, 2]]])
+  expect(kept.line(30).pieces).toEqual([[[20, 5, 0]], [[25, 5, 2]]])
   // Nothing from before Claudopus was installed counts on the board, in the figures or the timeline
   expect(kept.board(day + 86_400_000, day + 20 * M).all.work).toBe(10 * M)
-  expect(kept.line(40_000, day + 20 * M).pieces).toEqual([[[0, 5, 0], [5, 5, 1]]])
+  expect(kept.line(40_000, day + 20 * M).pieces).toEqual([[[0, 5, 0]], [[5, 5, 1]]])
 })
 
 test('the timeline is one drawing the app takes whatever the history: each bar its own words while they fit, then each piece, then the bars alone', async () => {
@@ -291,8 +307,6 @@ test('the timeline is one drawing the app takes whatever the history: each bar i
     const pieces = many(n, days)
     const source = timelineSvg(pieces, width)
     expect(svgFits(source)).toBe(true)
-    // and the tasks and helpers at work at once under it, on the same axis
-    expect(svgFits(crowdSvg(pieces, width))).toBe(true)
     // Each model in its colour; drawn on a grid, each cell is the model that ran most in it
     if (groups !== 0) for (const model of models) expect(source).toContain(colorOf(model))
     if (typeof groups === 'number') expect(source.split('class="b"').length - 1).toBe(groups)
@@ -409,7 +423,7 @@ test('what is kept by chat, day and month comes to the very figures of adding ev
   const all = kept.stats(0, now)
   expect([all.finished > 20, all.running, all.flows, all.todosDone > 20, all.messages, all.all.unpriced > 0, all.by.helpers > 0, all.by.flows > 0, all.time.saved > 0]).toEqual([true, 1, 4, true, 96, true, true, true, true])
   // with helpers at work beside their tasks, more at once than the tasks alone
-  expect([all.helpers.count, all.helpers.most > all.most]).toEqual([2 * (5 + 3 + 4), true])
+  expect([all.helpers.count, all.most > mostAtOnce(all.pieces.map(p => p.spans))]).toEqual([2 * (5 + 3 + 4), true])
   expect(all.all.total).toBeLessThan(everything.flatMap(r => r.sum.u).filter(m => m[1] !== '<synthetic>').reduce((sum, m) => sum + m[5] + m[6] + m[7] + m[8] + m[9], 0))
   // The leaderboard's timeline: the same tasks at the same minutes in the same models, whole and cut to its newest, with nothing
   // from before Claudopus was installed

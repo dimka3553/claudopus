@@ -1,0 +1,2 @@
+- The Stats timeline now shows every helper as a bar of its own, in its own model's colour, beside the tasks, so one chart shows every Claude at work; the strip of tasks and helpers under it is gone.
+- Time of work, time saved, efficiency and the most at work at once now count each helper's time as well as its task's, so helpers working at the same time each add theirs, on the leaderboard too.

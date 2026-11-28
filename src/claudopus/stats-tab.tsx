@@ -118,7 +118,7 @@ const headNew = (): Head => ({ folder: '', cells: {}, months: [] })
 // whole month's sums, each with when its file was last written, so a copy held in a chat is known to be old; and how the months'
 // files were made (`mv`): a keeping made before they held each helper's time has them made again from the chats' files, once
 // (nothing is summed again)
-const MONTHS_V = 1
+const MONTHS_V = 2
 type AllKept = { v: number; mv?: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
 const allNew = (now: number): AllKept => ({ v: CACHE_V, mv: MONTHS_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
 async function allRead($: EngineInterface, memory: string) {
