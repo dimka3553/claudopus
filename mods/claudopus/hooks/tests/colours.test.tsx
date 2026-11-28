@@ -1002,6 +1002,7 @@ test("with Task colours on, as it comes, a reply about a task sits in a box with
     { role: 'assistant', text: 'I cannot see the weather from here.', uuid: 'r2', toolUses: [] },
     { role: 'user', text: 'Also make the tip rounder', toolUses: [] },
     { role: 'assistant', text: 'Passing that to the nose task.', uuid: 'r3', toolUses: [{ tool_use_id: 'pass', tool: 'SendMessage', input: { to: 'a1', message: 'Also make the tip rounder' } }] },
+    { role: 'assistant', text: 'The nose task has your note about the tip.', uuid: 'r3b', toolUses: [] },
     { role: 'user', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n</task-notification>', toolUses: [] },
     { role: 'assistant', text: 'The tip of the nose is rounder now, and the bridge is as it was.', uuid: 'r4', toolUses: [] },
   ]
@@ -1039,6 +1040,16 @@ test("with Task colours on, as it comes, a reply about a task sits in a box with
   const later = await $.ui.mount({ ...MSG, requestId: 'r4', props: { text: 'The tip of the nose is rounder now, and the bridge is as it was.', isFirstOfReply: true }, surface: 'desktop' } as never)
   expect(await until(async () => later.find({ type: 'Text', text: '“Also make the tip rounder”' }))).toBeDefined()
   await later.unmount()
+  // A second reply of the same turn about the same task, as a line before the chat passed the message on and another after,
+  // carries on under the first: a box of the same edge with no name, no Reply and no quote again (28 Nov, the person: "This could
+  // be, by the way, one message"); the first keeps them
+  const more = await $.ui.mount({ ...MSG, requestId: 'r3b', props: { text: 'The nose task has your note about the tip.', isFirstOfReply: false }, surface: 'desktop' } as never)
+  const first = await $.ui.mount({ ...MSG, requestId: 'r3', props: { text: 'Passing that to the nose task.', isFirstOfReply: true }, surface: 'desktop' } as never)
+  const partsOf = async (drawn: typeof more) => [Boolean((await drawn.findAll({ type: 'Box' })).find(one => /^task-box-/.test(one.key ?? ''))), Boolean(await keyed(drawn, `task-open-${r.agentId}`)), Boolean(await keyed(drawn, `task-reply-${r.agentId}`)), Boolean(await drawn.find({ type: 'Text', text: '“Also make the tip rounder”' }))]
+  expect(await until(async () => ((await partsOf(first))[3] ? partsOf(first) : undefined))).toEqual([true, true, true, true])
+  expect(await partsOf(more)).toEqual([true, false, false, false])
+  await more.unmount()
+  await first.unmount()
   // A result handed in after the last read of the chat, found by its words, quotes the newest message passed on to its task since
   const RESULT = 'The bridge is narrower now, and the tip is as you asked it to be.'
   talk.push(

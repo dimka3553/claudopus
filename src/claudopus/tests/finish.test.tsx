@@ -887,6 +887,22 @@ test("a task's report whose notice of its end never comes goes to the chat with 
   expect(given).toContain(`Notes: /repo/notes.md, folder ${HOME}/Documents, old ${HOME}/gone.html.`)
   expect(files.get(COPY)).toBe('<h1>Inky</h1>')
   expect(files.get('/repo/.claudopus-files/.gitignore')).toBe('*\n')
+  // A result whose short part names no file, while its rest, which the chat is not shown, names one: the chat is given what the
+  // person can open of it, the copy of a file outside the chat's folder, to send the one that is the result
+  // itself (28 Nov: a short result said "the saved copy below", and the post was out of reach: "it would have made sense to
+  // attach the markdown so I can click it to see"); one whose short part names its file is given no such list
+  const POST = `${HOME}/Documents/posts/reddit.md`
+  files.set(POST, '# The post')
+  for (const [id, message, listed] of [['a3', `The post is written.\n\n---\n\n${POST}\nNotes: /repo/notes.md.`, true], ['a4', `The post is written.\n${POST}\n\n---\n\nNotes: /repo/notes.md.`, false]] as const) {
+    await $.agent.spawn({ ...spawn, description: `Write the post ${id}`, prompt: 'write it' } as never)
+    agents[id] = 'waiting'
+    kinds[id] = 'general-purpose'
+    await $.tool.call({ tool: 'SubagentHandback', tool_use_id: `hb-${id}`, agentId: id, message } as never)
+    const told = await withMessage()
+    expect([id, told.includes('The rest of it names this file, which the person can open: /repo/.claudopus-files/Documents/posts/reddit.md. If one is the result itself')]).toEqual([id, listed])
+    expect([id, told.includes('send it to the person with SendUserFile in this same turn')]).toEqual([id, listed])
+  }
+  expect(files.get('/repo/.claudopus-files/Documents/posts/reddit.md')).toBe('# The post')
   // A file sent from outside the chat's folder is copied in, and the call refused with the copy to send instead, never changed on its
   // way; the copy sent goes, made again from its file as that is now; a file inside the chat's folder goes as it is
   files.set(BOARD, '<h1>Inky, Ink</h1>')
