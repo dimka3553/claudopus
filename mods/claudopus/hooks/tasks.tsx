@@ -28,7 +28,10 @@ const KINDS: Partial<Record<TaskFilter, number[]>> = { working: [1], you: [2, 3]
 export const TASKS_PAGE = 40
 // What the person picked, kept while the mod runs: the tab, whether the search box is open and the words searched for, how many
 // rows a long list shows, and a count of presses that makes each button new after one
-export const tasksView = { filter: 'all' as TaskFilter, isFinding: false, find: '', most: TASKS_PAGE, n: 0 }
+const TASKS_START = { filter: 'all' as TaskFilter, isFinding: false, find: '', most: TASKS_PAGE }
+export const tasksView = { ...TASKS_START, n: 0 }
+// Back to how the list first shows (Refresh above the chat): All, no search, the first page, every button new
+export const tasksReset = () => void Object.assign(tasksView, TASKS_START, { n: tasksView.n + 1 })
 
 const isFound = (title: string) => !tasksView.find || title.toLowerCase().includes(tasksView.find.toLowerCase())
 // Whether a card up in the panel is drawn under the filter picked and the search

@@ -1050,7 +1050,7 @@ test('/claudopus opens the panel for every chat; closed by hand it closes in eve
   expect(again.at).toBeGreaterThan(closedAt.at)
 })
 
-test('at the right of the line above the prompt, Open panel opens the closed panel for every chat and Close panel then closes it for every chat', async ($, on) => {
+test('at the right of the line above the prompt, Open panel opens the closed panel for every chat, Refresh puts it back as it first opens and Close panel then closes it for every chat', async ($, on) => {
   const live: { id: string; isShown: boolean; isPlaced: boolean }[] = []
   const { opened, closed, files } = world(on, { live })
   // Closed by hand earlier: work that starts leaves it closed
@@ -1066,6 +1066,21 @@ test('at the right of the line above the prompt, Open panel opens the closed pan
   await bar.press({ key: open[0]?.key ?? '' })
   expect(await until(async () => (opened.length ? opened : undefined))).toEqual(['claudopus'])
   expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
+  // Refresh, before it, puts the panel back as it first opens: the tab picked in it goes back to All, every other tab of its own
+  // closes, and the panel opens again in front, still open for every chat
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await until(async () => keyed(list, 'tasks-working'))
+  await pressed(list, 'tasks-working')
+  expect(await until(async () => ((await keyed(list, 'tasks-all'))?.props.dimColor ? true : undefined))).toBe(true)
+  await pressed(list, 'open-a1')
+  expect(await until(async () => (opened.includes('work-a1') ? true : undefined))).toBe(true)
+  const [shut, again] = [closed.length, opened.length]
+  await bar.press({ key: (await bar.findAll({ type: 'Button' })).find(b => b.props.label === 'Refresh')?.key ?? '' })
+  expect(await until(async () => (closed.slice(shut).includes('work-a1') && closed.slice(shut).includes('claudopus') && opened.slice(again).includes('claudopus') ? true : undefined))).toBe(true)
+  expect(await until(async () => (!(await keyed(list, 'tasks-all'))?.props.dimColor && (await keyed(list, 'tasks-working'))?.props.dimColor ? true : undefined))).toBe(true)
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
+  expect(files.get(`${MEMORY}/log.md`) ?? '').toMatch(/panel refreshed in chat \S+: back to how it first opens, 1 other tab closed, the panel opened again/)
+  await list.unmount()
   // Open, it offers Close panel alone, which closes it as the person's own close, for every chat
   const close = await shown('Close panel')
   expect(close.map(b => b.props.label)).toEqual(['Close panel'])

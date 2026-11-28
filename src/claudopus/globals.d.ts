@@ -448,6 +448,7 @@ declare global {
   export import taskShows = M21.taskShows
   export import tasksBar = M21.tasksBar
   export import tasksList = M21.tasksList
+  export import tasksReset = M21.tasksReset
   export import tasksView = M21.tasksView
   export import StarSeen = M21.StarSeen
   export import TaskItem = M21.TaskItem

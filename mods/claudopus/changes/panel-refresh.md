@@ -1,0 +1,1 @@
+- Refresh, beside Open panel and Close panel above the chat, puts the panel back as it first opens: the All tab, no search, the first page of every list, nothing unfolded or scrolled, every other tab of Claudopus's closed, and everything drawn afresh. Your tasks, results, stars and memory stay as they are. A tab Claudopus couldn't show has Refresh too.

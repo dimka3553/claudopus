@@ -721,6 +721,8 @@ test("a Details tab too big for the app is drawn with less in it, its ended comm
   // (the log says by how much, each count beside its limit, and how wide the pane was)
   expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab work-\S+ not given: its drawing is past what the app draws \(\d+ of 1800 parts, \d+ of 230000 characters, \d+ of 30 deep, 74 columns wide\)/)?.[0])).toBeDefined()
   expect(appDraws(await tab.drawn()).isDrawn).toBe(true)
+  // (and Refresh, which puts the panel back as it first opens)
+  expect((await keyed(tab, 'too-big-refresh'))?.props.label).toBe('Refresh')
   const before = opened.length
   await pressed(tab, 'too-big-back')
   expect(await until(async () => (opened.slice(before).includes(LIST.requestId) ? true : undefined))).toBe(true)

@@ -36,7 +36,7 @@ import { readsOnly } from './reads'
 import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
 import type { CardWords, ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
-import { finishedOf, isStarred, rowStar, starButton, starLine, starMoved, starredCount, starredOf, stars, STARS_FILE, STARS_TRIP, starsTook, starsUnion, taskShows, tasksBar, tasksList, tasksView } from './tasks'
+import { finishedOf, isStarred, rowStar, starButton, starLine, starMoved, starredCount, starredOf, stars, STARS_FILE, STARS_TRIP, starsTook, starsUnion, taskShows, tasksBar, tasksList, tasksReset, tasksView } from './tasks'
 import type { StarSeen, TaskItem, TasksActs } from './tasks'
 import { addedFolders, CHANGE_TOOLS, FOLDER_ANSWERED, FOLDER_ASK, FOLDER_DETAILS, FOLDER_RULE, isInFolder, isOutsideAll, OUTSIDE_COMMAND, refusedAim } from './outside'
 import { chooseReleases, releaseReading, TYPED_GO_AHEAD, TYPED_NOT_GIVEN, TYPED_TALK, TYPED_WHICH_RELEASE, TYPED_WIDEST } from './typed-release'
@@ -15341,8 +15341,11 @@ const row = (
 {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
 {spacers}
 {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
+{/* At the very right on the desktop, Open panel while the panel is closed and Close panel while it is open, and Refresh
+              before it, which puts the panel back as it first opens (refreshPanel) */}
 {e.surface !== 'terminal' ? (
-<Box key="band-panel" flexGrow={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+<Box key="band-panel" flexGrow={1} flexShrink={0} flexDirection="row" justifyContent="flex-end" gap={1}>
+<ui.Button key="band-refresh" label="Refresh" plain dimColor onPress={() => void refreshPanel($).catch(err => log($, `panel not refreshed: ${String(err)}`))} />
 <ui.Button key={`band-panel-${isListHere ? 'close' : 'open'}`} label={isListHere ? 'Close panel' : 'Open panel'} plain dimColor onPress={() => void (isListHere ? hidePanel($) : showPanel($)).catch(err => log($, `panel not ${isListHere ? 'closed' : 'opened'}: ${String(err)}`))} />
 </Box>
 ) : null}
@@ -15494,6 +15497,20 @@ await $.ui.close({ id }).catch(() => undefined)
 await $.ui.close({ id: LIST }).catch(() => undefined)
 await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
 }
+const refreshPanel = async ($: EngineInterface) => {
+presses += 1
+tasksReset()
+;((isEarlierOpen = false), (isArchivedOpen = false), (earlierMost = RESULTS_PAGE), (archivedMost = RESULTS_PAGE))
+for (const kept of [folds, pictureIn, openPiles, diffWhole, flowPicked, paneSqueezed, lessTried, tooBigLogged, tabFails, topPlaces, listOffsets, heldDrawings, drawnPanes, shownSigns, shownAts, freshUnderWay, freshDrawn, madeAgain]) kept.clear()
+await update($, view, () => ({ openId: '' }))
+const panes = await $.ui.panes().catch(() => [])
+const others = panes.filter(pane => pane.id !== LIST)
+for (const pane of others) await $.ui.close({ id: pane.id }).catch(() => undefined)
+const isOpen = panes.some(pane => pane.id === LIST)
+await log($, `panel refreshed in chat ${(await read($, me)).id || 'unknown'}: back to how it first opens${others.length ? `, ${others.length} other ${others.length === 1 ? 'tab' : 'tabs'} closed` : ''}${isOpen ? ', the panel opened again' : ''}`)
+if (isOpen) await backToPanel($, LIST)
+drawAgain($)
+}
 let keysAsk = ''
 const listOffsets = new Map<string, number>()
 let waitsAtTop = 0
@@ -15523,12 +15540,11 @@ const { Box, Button, Text } = uiOf($, e)
 return (
 <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
 <Text bold>Claudopus couldn't show this tab</Text>
-<Text dimColor wrap="wrap">It holds more than the app can draw at once.</Text>
-{id !== LIST ? (
-<Box alignItems="flex-start">
-<Button key={`too-big-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
+<Text dimColor wrap="wrap">It holds more than the app can draw at once. Refresh puts the panel back as it first opens.</Text>
+<Box flexDirection="row" gap={2} alignItems="flex-start">
+{id !== LIST ? <Button key={`too-big-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} /> : null}
+<Button key={`too-big-refresh-${presses}`} label="Refresh" plain onPress={() => void refreshPanel($).catch(err => log($, `panel not refreshed: ${String(err)}`))} />
 </Box>
-) : null}
 </Box>
 )
 }
@@ -17443,11 +17459,10 @@ return (
 <Text bold>Claudopus couldn't show this tab</Text>
 <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
 <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
-{id !== LIST ? (
-<Box alignItems="flex-start">
-<Button key={`failed-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
+<Box flexDirection="row" gap={2} alignItems="flex-start">
+{id !== LIST ? <Button key={`failed-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} /> : null}
+<Button key={`failed-refresh-${presses}`} label="Refresh" plain onPress={() => void refreshPanel($).catch(err => log($, `panel not refreshed: ${String(err)}`))} />
 </Box>
-) : null}
 </Box>
 )
 }
