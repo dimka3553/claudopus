@@ -360,7 +360,7 @@ test("what a task made is on its card under its title, side by side, and as tile
   // it only cites is none, though its address says "releases" (27 Nov: a card showed one cited page and not the board it named)
   const board = '/Users/me/Email board/board.html'
   files.set(board, 'x')
-  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: `The report is made: ${pdf}. The fix is in /repo/src/app.ts.\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide\n\nThe board is unchanged:\n\n${board}\n\nSources:\n- [State AG: settlement with Meta](https://ag.example.gov/news/releases/settlement-meta)` } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: `The report is made: ${pdf}. The fix is in /repo/src/app.ts.\n\n---\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide\n\nThe board is unchanged:\n\n${board}\n\nSources:\n- [State AG: settlement with Meta](https://ag.example.gov/news/releases/settlement-meta)` } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' } as never)
   await until(async () => (await keyed(pane, 'made-a1-link-0-open')) || undefined)
   const madeShown = async () => (await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))
@@ -392,7 +392,7 @@ test("what a task made is on its card under its title, side by side, and as tile
   await $.tool.call({ tool: 'Artifact', tool_use_id: 'ar1', agentId: 'a1', action: 'publish', url: 'https://claude.ai/artifact/NP6UV', file_path: '/tmp/work/tracker.html' } as never)
   files.set('result:Artifact:read', JSON.stringify({ read: { url: 'https://claude.ai/artifact/SOMEONE', title: 'Their Page' } }))
   await $.tool.call({ tool: 'Artifact', tool_use_id: 'ar2', agentId: 'a1', action: 'read', url: 'https://claude.ai/artifact/SOMEONE' } as never)
-  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a1', message: 'Two upgrades are open.\n\n| App | Pull request |\n|---|---|\n| Main app | https://github.com/acme/web/pull/285 |\n| Clipify | https://github.com/acme/clipify/pull/70 |\n\nTracker page: https://claude.ai/artifact/NP6UV\nSee https://docs.example.com/guide\nTo see the flaw live today: https://shop.example.com/api/validate?redirect=/x' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a1', message: 'Two upgrades are open.\n\n---\n\n| App | Pull request |\n|---|---|\n| Main app | https://github.com/acme/web/pull/285 |\n| Clipify | https://github.com/acme/clipify/pull/70 |\n\nTracker page: https://claude.ai/artifact/NP6UV\nSee https://docs.example.com/guide\nTo see the flaw live today: https://shop.example.com/api/validate?redirect=/x' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer', agentId: 'a1' } as never)
   await until(async () => ((await madeShown()).includes('clipify #70 ↗') ? true : undefined))
   // The artifact comes first, by the title it was published under, with an icon of its own; an address to try a flaw on is no
