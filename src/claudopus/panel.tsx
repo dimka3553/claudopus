@@ -1839,7 +1839,7 @@ const panelHooks = (on: On) => {
       const isStars = tasksView.filter === 'starred'
       if (!['all', 'finished', 'starred'].includes(tasksView.filter) || (!isStars && !all.length)) return null
       const isAll = tasksView.filter === 'all'
-      return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
+      return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, most: squeeze >= 2 ? 10 : squeeze >= 1 ? 20 : undefined, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
     }
     const tasksActs: TasksActs = { redraw: () => ((presses += 1), drawAgain($)), star: one => void starPress($, rowStar(one)), open: id => openReport($, id), typing: () => holdTimes($), typed: () => freeTimes($) }
     // What a card's star keeps of it

@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.323 · 28 November 2026
+- Finished shows one page of 40 tasks at a time, with Newer and Older under it, so paging through hundreds no longer makes the panel say it holds more than the app can draw.
+
 ## 0.2.322 · 28 November 2026
 - The north star on Progress is now the bigger vision your work serves, in at most ten words, never one month's task or plan, and it's never cut off mid-sentence. Months already picked the old way are picked again.
 

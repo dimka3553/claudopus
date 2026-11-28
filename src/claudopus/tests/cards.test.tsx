@@ -2267,7 +2267,7 @@ test("a moving mark keeps turning for as long as what it stands for goes on: the
   await pane.unmount()
 })
 
-test('Finished lists every task that ever finished, from every result and not only the cards kept, a page at a time, and finds them by name', async ($, on) => {
+test('Finished lists every task that ever finished, from every result and not only the cards kept, one page at a time with Newer and Older, and finds them by name', async ($, on) => {
   const { files } = world(on)
   for (let i = 0; i < 45; i++) {
     const r = { id: `r${i}`, title: i === 7 ? 'Fit the ears' : `Result ${i}`, subject: 'S', at: 1_600_000_000_000 + i * 60_000, chat: 'Heads', chatId: 'c', folder: '/repo', gist: '', files: [], agent: `old${i}` }
@@ -2279,13 +2279,19 @@ test('Finished lists every task that ever finished, from every result and not on
   expect(await until(async () => ((await keyed(pane, 'finished-fold'))?.props.label === '▸ Finished 45' ? true : undefined))).toBe(true)
   await pressed(pane, 'tasks-finished')
   expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Finished 45' })) ? true : undefined))).toBe(true)
-  // the newest first, 40 of them, then a press for the rest
+  // the newest first, one page of 40, then Older for the next page in its place: never more than a page at once (28 Nov: each
+  // Show more added 40 until the app refused the whole drawing)
   const titles = async () => (await pane.findAll({ type: 'Text' })).filter(t => t.props.bold && /^(Result \d+|Fit the ears)$/.test(t.text)).map(t => t.text)
   expect((await titles()).length).toBe(40)
   expect((await titles())[0]).toBe('Result 44')
-  expect((await keyed(pane, 'tasks-more'))?.props.label).toBe('Show 5 more')
-  await pressed(pane, 'tasks-more')
-  expect(await until(async () => ((await titles()).length === 45 ? true : undefined))).toBe(true)
+  expect(await pane.find({ type: 'Text', text: '1–40 of 45' })).toBeDefined()
+  expect(await keyed(pane, 'tasks-newer')).toBeUndefined()
+  await pressed(pane, 'tasks-older')
+  expect(await until(async () => ((await titles()).join() === 'Result 4,Result 3,Result 2,Result 1,Result 0' ? true : undefined))).toBe(true)
+  expect(await pane.find({ type: 'Text', text: '41–45 of 45' })).toBeDefined()
+  expect(await keyed(pane, 'tasks-older')).toBeUndefined()
+  await pressed(pane, 'tasks-newer')
+  expect(await until(async () => ((await titles()).length === 40 ? true : undefined))).toBe(true)
   // A row opens its result; Search finds one by name, in any case
   expect(await keyed(pane, 'task-row-open-old7')).toBeDefined()
   await pressed(pane, 'tasks-find')
