@@ -4083,7 +4083,11 @@ return (
 </Box>
 )
 type Kind = 'result' | 'part' | 'other'
-const edgeOf = (kind: Kind) => (kind === 'result' ? DELIVERED : kind === 'part' ? LIVE : QUIET_EDGE)
+const isDoneTask = (id: string | undefined) => {
+const card = cards.find(one => one.id === id)
+return Boolean(card && stageOf(cards, card) === 'done')
+}
+const edgeOf = (kind: Kind, id?: string) => (kind === 'other' ? QUIET_EDGE : isDoneTask(id) ? DONE : kind === 'result' ? DELIVERED : LIVE)
 const headOf = (id: string, kind: Kind, tag = '') => (
 <Box key={`task-${tag}${id}`} flexDirection="row" columnGap={2}>
 <Box key={`task-name-${id}`} flexDirection="row">
@@ -4092,7 +4096,7 @@ const headOf = (id: string, kind: Kind, tag = '') => (
 <Text bold>{cut(titleOfTask(id), 60)}</Text>
 </Button>
 </Box>
-{kind === 'part' ? <Text key={`task-part-${id}`} color={LIVE}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
+{kind === 'part' ? <Text key={`task-part-${id}`} color={isDoneTask(id) ? DONE : LIVE}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
 {kind === 'other' ? null : <Button key={`task-result-${tag}${id}-${presses}`} label="Result" plain hover={{ scope: `task-result-${tag}${id}`, underline: true }} onPress={() => void openResultOf($, id).catch(err => log($, `result not opened: ${String(err)}`))} />}
 <Button key={`task-reply-${tag}${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${tag}${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
 </Box>
@@ -4107,7 +4111,7 @@ return (
 <Box key={`task-boxes-${mark(e.requestId)}`} flexDirection="column" gap={1}>
 {bits.map((bit, n) =>
 bit.id ? (
-<Box key={`task-box-${mark(e.requestId)}-${n}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(bit.isPart ? 'part' : 'result')} paddingX={1} gap={1}>
+<Box key={`task-box-${mark(e.requestId)}-${n}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(bit.isPart ? 'part' : 'result', bit.id)} paddingX={1} gap={1}>
 <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
 {headOf(bit.id, bit.isPart ? 'part' : 'result', `${n}-`)}
 </Box>
@@ -4123,7 +4127,7 @@ bit.id ? (
 )
 const kind: Kind = isResult ? (isPart ? 'part' : 'result') : 'other'
 return (
-<Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind)} paddingX={1} gap={1}>
+<Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind, first)} paddingX={1} gap={1}>
 <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
 {ids.map(id => headOf(id, kind))}
 </Box>

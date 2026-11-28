@@ -341,8 +341,14 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
   // blue; a part handed in by a task still at work has a working card's, purple, and says so; any other reply about a task has a
   // quiet grey one. Its task's colour is only the dot before its name, as on its card (28 Nov, the person: "colors kinda make it
   // confusing maybe only for important bits of text?"; twelve colours of box told nothing of what a reply was)
+  // Once the person marks that task done, its results and parts are green in the chat as its card is in the panel, at the press
+  // (28 Nov, the person: "I've marked one of them as done, and it's still blue in the chat, so it's kind of confusing")
   type Kind = 'result' | 'part' | 'other'
-  const edgeOf = (kind: Kind) => (kind === 'result' ? DELIVERED : kind === 'part' ? LIVE : QUIET_EDGE)
+  const isDoneTask = (id: string | undefined) => {
+    const card = cards.find(one => one.id === id)
+    return Boolean(card && stageOf(cards, card) === 'done')
+  }
+  const edgeOf = (kind: Kind, id?: string) => (kind === 'other' ? QUIET_EDGE : isDoneTask(id) ? DONE : kind === 'result' ? DELIVERED : LIVE)
   // A box's head: its task's dot and name, which opens its Details; on a result, Result, which opens the whole of it; Reply
   // (`tag`: which stretch of the reply it heads, where it has several)
   const headOf = (id: string, kind: Kind, tag = '') => (
@@ -354,7 +360,7 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
           <Text bold>{cut(titleOfTask(id), 60)}</Text>
         </Button>
       </Box>
-      {kind === 'part' ? <Text key={`task-part-${id}`} color={LIVE}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
+      {kind === 'part' ? <Text key={`task-part-${id}`} color={isDoneTask(id) ? DONE : LIVE}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
       {kind === 'other' ? null : <Button key={`task-result-${tag}${id}-${presses}`} label="Result" plain hover={{ scope: `task-result-${tag}${id}`, underline: true }} onPress={() => void openResultOf($, id).catch(err => log($, `result not opened: ${String(err)}`))} />}
       <Button key={`task-reply-${tag}${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${tag}${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
     </Box>
@@ -372,7 +378,7 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
       <Box key={`task-boxes-${mark(e.requestId)}`} flexDirection="column" gap={1}>
         {bits.map((bit, n) =>
           bit.id ? (
-            <Box key={`task-box-${mark(e.requestId)}-${n}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(bit.isPart ? 'part' : 'result')} paddingX={1} gap={1}>
+            <Box key={`task-box-${mark(e.requestId)}-${n}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(bit.isPart ? 'part' : 'result', bit.id)} paddingX={1} gap={1}>
               <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
                 {headOf(bit.id, bit.isPart ? 'part' : 'result', `${n}-`)}
               </Box>
@@ -388,7 +394,7 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
     )
   const kind: Kind = isResult ? (isPart ? 'part' : 'result') : 'other'
   return (
-    <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind)} paddingX={1} gap={1}>
+    <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind, first)} paddingX={1} gap={1}>
       <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
         {ids.map(id => headOf(id, kind))}
       </Box>
