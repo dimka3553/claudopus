@@ -559,6 +559,8 @@ declare global {
   export import TYPED_ANSWERED = M24.TYPED_ANSWERED
   export import TYPED_PRESS_ONLY = M24.TYPED_PRESS_ONLY
   export import TYPED_UNSURE = M24.TYPED_UNSURE
+  export import WAITS_LINE = M24.WAITS_LINE
+  export import WAITS_TITLE = M24.WAITS_TITLE
   export import drifted = M24.drifted
   export import framed = M24.framed
   export import quotedItems = M24.quotedItems

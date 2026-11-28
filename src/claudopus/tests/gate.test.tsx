@@ -1042,7 +1042,7 @@ test("a short answer the person types in the chat is their press on the newest b
   const asked = await goAhead()
   for (const typed of ['is now all pushed?', "don't push yet"]) {
     const told = await say(typed)
-    expect(told).toContain(`From Claudopus: the release of the task "Fix the hosts file" waits for Sam's go-ahead, and their message "${typed}" did not give it. If the message is about that release, begin your reply with one short line saying it is not pushed yet and waits for their yes, which they give by typing yes in the chat or pressing Release it above the chat, then answer the rest of the message; if it is about something else, say nothing of the release.`)
+    expect(told).toContain(`From Claudopus: the release of the task "Fix the hosts file" waits for Sam's go-ahead, and their message "${typed}" did not give it. If the message is about that release, begin your reply with one short line saying it is not pushed yet and waits for their yes, which they give by typing yes in the chat or pressing Release it, then a line of its own holding only \`“Fix the hosts file” is waiting for you.\`, which Claudopus draws as that card's question with its buttons, then answer the rest of the message; if it is about something else, say nothing of the release.`)
     expect(told).toContain('A message of yours to the task approves nothing.')
   }
   // A message about something else, though it holds a word such as push, presses nothing and tells the chat nothing; one the

@@ -1,3 +1,5 @@
+import { WAITS_HOW } from './texts'
+
 // A message the person types in the chat while a release waits for their go-ahead, read for what it means: whether it gives that
 // go-ahead, for which of the releases that wait, and whether it asks for more besides. A small model reads it, in any wording or
 // language, and Claudopus takes only its one line of JSON: no list of words decides (28 Nov, the person: "dont use lists of
@@ -70,9 +72,9 @@ export const TYPED_GO_AHEAD = (typed: string, pressed: { label: string; where: s
 export const TYPED_WHICH_RELEASE = (typed: string, waits: string[]) =>
   `From Claudopus: {Name}'s message "${typed}" released nothing, as more than one release waits for their go-ahead: ${waits.join(', ')}. Ask in one short line which one, by a word of its name, such as "release <name>", or "release all" for every one, and do nothing else for this message.`
 // About releasing, but no go-ahead (a question, a hold), or a message the model gave no reading of: the chat says the release waits
-export const TYPED_NOT_GIVEN = (typed: string, waits: { what: string; label: string }[]) => {
+export const TYPED_NOT_GIVEN = (typed: string, waits: { what: string; label: string; title?: string }[]) => {
   const [first] = waits
   return waits.length === 1 && first
-    ? `From Claudopus: the release of ${first.what} waits for {name}'s go-ahead, and their message "${typed}" did not give it. If the message is about that release, begin your reply with one short line saying it is not pushed yet and waits for their yes, which they give by typing yes in the chat or pressing ${first.label} above the chat, then answer the rest of the message; if it is about something else, say nothing of the release. A message of yours to the task approves nothing.`
+    ? `From Claudopus: the release of ${first.what} waits for {name}'s go-ahead, and their message "${typed}" did not give it. If the message is about that release, begin your reply with one short line saying it is not pushed yet and waits for their yes, which they give by typing yes in the chat or pressing ${first.label}${first.title ? `, then ${WAITS_HOW(first.title)}` : ' above the chat'}, then answer the rest of the message; if it is about something else, say nothing of the release. A message of yours to the task approves nothing.`
     : `From Claudopus: the releases of ${waits.map(one => one.what).join(', ')} wait for {name}'s go-ahead, and their message "${typed}" did not give it. If the message is about them, begin your reply with one short line saying none is pushed yet and each waits for their yes, which they give by typing "release all" or "release <a word of its name>" in the chat, or pressing ${first?.label ?? 'Allow'} above the chat or on its card, then answer the rest of the message; if it is about something else, say nothing of the releases. A message of yours to a task approves nothing.`
 }

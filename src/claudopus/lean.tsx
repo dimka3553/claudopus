@@ -293,12 +293,13 @@ type Quiet = { isQuiet: boolean; isRepeat: boolean }
 // What the chat is given of a result: its short result alone where it begins with one (shortOf), else the whole, for the chat to
 // tell in a few lines; each file it names given as a copy in the chat's folder, which the person's click opens (opening.tsx); and
 // the file the whole result is kept in, once it is saved
-const forChat = async ($: EngineInterface, id: string, report: string) => {
+const forChat = async ($: EngineInterface, id: string, report: string, isAsking = false) => {
   const short = shortOf(report)
   const given = short?.head ?? report
   const text = await withOpenables($, given).catch(() => given)
   const saved = (await ownReports($).catch(() => [] as Report[])).find(r => r.agent === id)
-  return { text, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '' }
+  // (a card that still asks the person something has that said under its result, drawn with its buttons: colours.tsx)
+  return { text, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '', isAsking: isAsking && Boolean((await read($, todos)).find(one => one.id === id)?.ask) }
 }
 // The reports Claudopus took at a task's hand-back that the chat has not been given, for the tasks a notice names (or all), each
 // once: marked given, so a later notice of the same end repeats nothing (quietNotices)
@@ -308,7 +309,7 @@ const reportsFor = async ($: EngineInterface, ids?: string[]) => {
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
   await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
   // (each kept, so the chat's reply that passes it on is drawn in its task's box: colours.tsx)
-  const reports = await Promise.all(given.map(one => forChat($, one.id, one.reportForChat ?? '')))
+  const reports = await Promise.all(given.map(one => forChat($, one.id, one.reportForChat ?? '', true)))
   given.forEach((one, n) => resultGiven(one.id, reports[n]?.text ?? ''))
   return given.map((one, n) => named(REPORT_FOR_CHAT(titleOf(one), one.id, reports[n]?.text ?? '', reports[n])))
 }

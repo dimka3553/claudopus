@@ -147,7 +147,7 @@ const releaseAnswer = async ($: EngineInterface, typed: string): Promise<string 
   const pressable = waits.filter(one => !one.isPressOnly)
   // (with only releases Claude Code blocked waiting, the message is still read, to say that only a press runs them)
   const listed = pressable.length ? pressable : waits
-  const notGiven = () => (pressable.length ? named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label })))) : undefined)
+  const notGiven = () => (pressable.length ? named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label, title: one.title })))) : undefined)
   const answer = await $.model.complete({ model: GO_AHEAD_MODEL, system: GO_AHEAD_SYSTEM, prompt: goAheadPrompt(typed, listed.map(one => one.title || 'a release of this chat\'s own')), maxTokens: 120, timeoutMs: GO_AHEAD_WAIT }).catch(() => undefined)
   const reading = answer?.isAnswered ? goAheadRead(answer.text, listed.length) : undefined
   if (!reading) {

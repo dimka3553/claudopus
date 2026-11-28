@@ -133,21 +133,33 @@ const memoryHooks = (on: On) => {
       return <Box key={`quiet-${mark(e.requestId)}`} />
     }
     // Every reply then goes in its task's box, with its links at its end, as the person's settings have it (colours.tsx)
-    if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return withTaskBox($, e, await next(e), uiOf($, e))
-    const { text, hrefs } = memoryLinked(e.props.text)
-    if (!hrefs.length) return withTaskBox($, e, await next(e), uiOf($, e))
-    const { Markdown } = uiOf($, e)
-    return withTaskBox($, e, (
-      <Markdown
-        key={`memory-reply-${mark(e.requestId)}`}
-        text={text}
-        pressableLinks={hrefs.slice(0, 256)}
-        onLinkPress={link => {
-          const path = memoryPressed(link.href)
-          if (path) openMemory($, path)
-        }}
-      />
-    ), uiOf($, e))
+    const drawn = async (e: Parameters<typeof next>[0]) => {
+      if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return withTaskBox($, e, await next(e), uiOf($, e))
+      const { text, hrefs } = memoryLinked(e.props.text)
+      if (!hrefs.length) return withTaskBox($, e, await next(e), uiOf($, e))
+      const { Markdown } = uiOf($, e)
+      return withTaskBox($, e, (
+        <Markdown
+          key={`memory-reply-${mark(e.requestId)}`}
+          text={text}
+          pressableLinks={hrefs.slice(0, 256)}
+          onLinkPress={link => {
+            const path = memoryPressed(link.href)
+            if (path) openMemory($, path)
+          }}
+        />
+      ), uiOf($, e))
+    }
+    // A reply that says a card waits for the person has that card's question, with its buttons, under what else it says
+    const waits = e.props.isSummary ? undefined : await waitsIn($, e, uiOf($, e)).catch(err => (void log($, `what waits not drawn in the chat: ${String(err)}`), undefined))
+    if (!waits) return drawn(e)
+    const { Box } = uiOf($, e)
+    return (
+      <Box key={`waits-${mark(e.requestId)}`} flexDirection="column" gap={1}>
+        {waits.rest ? await drawn({ ...e, props: { ...e.props, text: waits.rest } }) : null}
+        {waits.blocks}
+      </Box>
+    )
   })
 
   // A memory file opened as a tab of its own; the links in it to other memory files open there too

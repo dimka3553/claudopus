@@ -1568,7 +1568,7 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
 })
 
 test("a chat's own thread may only read, run a single command in the background, start agents and talk to them; an agent may do the work", async ($, on) => {
-  const { files, stepped, clock } = world(on)
+  const { files, stepped, clock, appended } = world(on)
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
   expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
@@ -1681,6 +1681,31 @@ test("a chat's own thread may only read, run a single command in the background,
   await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE' } as never)
   const paused = await quietly(withResult('a1', 'Agent "Fix the nose" finished', ENDED))
   expect([paused.drop, paused.isAsked, paused.said]).toEqual([undefined, false, 'No response requested.'])
+  // A task that paused on a question of its own has it said in the chat, still with no model asked: a line Claudopus draws as that
+  // card's question with its buttons, the very block its card has, under what else the reply says, and a press answers it from
+  // the chat (28 Nov: "can we have the buttons also show up in the main chat not just the panel"). It is said once, and drawn as
+  // one grey line once answered
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'kw1', agentId: 'a1', text: 'Push the nose fix?', choices: ['Push it', 'Keep it'] } as never)
+  const waits = await quietly(withResult('a1', 'Agent "Fix the nose" finished', ENDED))
+  expect([waits.drop, waits.isAsked, waits.said]).toEqual([undefined, false, '“Fix the nose” is waiting for you.'])
+  expect((await quietly(withResult('a1', 'Agent "Fix the nose" finished', ENDED))).said).toBe('No response requested.')
+  const WAITS = { plugin: 'claudopus', component: 'AssistantMessage', surface: 'desktop' } as const
+  const drawnOwn = async (view: { find: (q: never) => Promise<unknown> }) => Boolean(await view.find({ type: 'Text', text: "the engine's own" } as never))
+  const block = await $.ui.mount({ ...WAITS, requestId: 'waits-1', props: { text: `Two tasks are still building.\n\n${waits.said}`, isFirstOfReply: true } } as never)
+  expect(await block.find({ type: 'Text', text: 'Push the nose fix?' })).toBeDefined()
+  expect(await drawnOwn(block as never)).toBe(true)
+  expect((await block.findAll({ type: 'Button' })).map(b => b.props.label).filter(label => label === 'Push it' || label === 'Keep it')).toEqual(['Push it', 'Keep it'])
+  await block.press({ key: (await block.findAll({ type: 'Button' })).find(b => b.props.label === 'Push it')?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.includes('The person answered "Fix the nose" on its card: “Push it”')))).toBeDefined()
+  await block.unmount()
+  const answered = await $.ui.mount({ ...WAITS, requestId: 'waits-2', props: { text: waits.said, isFirstOfReply: true } } as never)
+  expect([Boolean(await answered.find({ type: 'Text', text: '✓ Answered' })), await drawnOwn(answered as never)]).toEqual([true, false])
+  expect((await answered.findAll({ type: 'Button' })).some(b => b.props.label === 'Push it')).toBe(false)
+  await answered.unmount()
+  // (a line that names no card of the chat's is drawn as a reply like any other)
+  const unnamed = await $.ui.mount({ ...WAITS, requestId: 'waits-3', props: { text: '“Paint the fence” is waiting for you.', isFirstOfReply: true } } as never)
+  expect([Boolean(await unnamed.find({ type: 'Text', text: '✓ Answered' })), await drawnOwn(unnamed as never)]).toEqual([false, true])
+  await unnamed.unmount()
   // (not when it brings anything more than Claude Code's own sentences)
   expect((await quietly(withResult('a1', 'Agent "Fix the nose" finished', `${ENDED}\nThe nose is fixed.`))).isAsked).toBe(true)
   // The line that ends a quiet turn is drawn as nothing, on the desktop and in the terminal: an empty box with no text; any other

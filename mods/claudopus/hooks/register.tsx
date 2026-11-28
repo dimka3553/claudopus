@@ -40,7 +40,7 @@ import { finishedOf, isStarred, rowStar, starButton, starLine, starMoved, starre
 import type { StarSeen, TaskItem, TasksActs } from './tasks'
 import { addedFolders, CHANGE_TOOLS, FOLDER_ANSWERED, FOLDER_ASK, FOLDER_DETAILS, FOLDER_RULE, isInFolder, isOutsideAll, OUTSIDE_COMMAND, refusedAim } from './outside'
 import { chosenBy, GO_AHEAD_MODEL, GO_AHEAD_SYSTEM, GO_AHEAD_WAIT, goAheadPrompt, goAheadRead, TYPED_GO_AHEAD, TYPED_NOT_GIVEN, TYPED_TALK, TYPED_WHICH_RELEASE, TYPED_WIDEST } from './typed-release'
-import { AFAR_RULE, AGAIN_BOX, AGAIN_IN, ANSWERED_IN_CHAT, ANSWER_ALREADY_SENT, ANSWER_FOR_CHAT_RELAY, ARTIFACT_ICON, ASK_KEY_FIELD, BOOK_ALONE, BRIEF, CARRY_PROMPT, CHANGE_TOLD, CHANGE_WHAT, CHAT_SEND_BACKGROUND, CHROME_COPIED, CODE_ICON, DRIVE_LINE, DRIVE_PART, DRIVE_PLAIN, DRIVE_ROOT, DRIVE_SPACED, DRIVE_TICKED, FORGET_KEPT, FROM, GATE_IN_CHAT, HELPERS_STARTED, HELPER_ALONE, HELPER_REPORT_TAKEN, HELPER_RESULT, KEEP, KEEP_AGENTS, KEEP_RULES, LINK_ICON, LOOKUP_RUN, LOOK_NOW, LOST_FOR_YOU, MAY_NOT_STOP, NOTHING_TO_PASTE, NOT_HANDED_HELPERS, NOT_HANDED_LONG, NOT_HANDED_RUNS, NOT_HANDED_TODOS, NO_BOXES, NO_DETACH, NO_FOLLOW, NO_MEMORY, NO_PERSON_WAIT, NO_PUSH, NO_READ, NO_RUNNER_MOVED, OWED, PANEL_RULE, PART_FOR_CHAT, PART_FROM_HELPER, PART_SENT, PART_TAKEN, PASTED, PASTE_LINUX, PATH_LINE, PATH_PLAIN, PATH_SPACED, PATH_TICKED, REFUSED, RELEASE_PRESSED, REPLY_HOLDS, REPORT_FOR_CHAT, REPORT_FRAMED, REPORT_IN_CHAT, REPORT_TAKEN, RESUMED_BY_ANSWER, RETRY_TEXT, RUN_RESUMED, SEND_BACKGROUND, SERIAL_RUNS, SHORT_CHARS, SHORT_LINES, SHORT_RULE, SHOWN_LONG, SHOWN_SHORT, STOPPED_BY_YOU, STOPPED_EARLIER, STOPPED_REFUSED, STUCK_ASK, TYPED_ANSWERED, TYPED_PRESS_ONLY, TYPED_UNSURE, drifted, framed, quotedItems, shortOf, withShortRule, wordCountOf } from './texts'
+import { AFAR_RULE, AGAIN_BOX, AGAIN_IN, ANSWERED_IN_CHAT, ANSWER_ALREADY_SENT, ANSWER_FOR_CHAT_RELAY, ARTIFACT_ICON, ASK_KEY_FIELD, BOOK_ALONE, BRIEF, CARRY_PROMPT, CHANGE_TOLD, CHANGE_WHAT, CHAT_SEND_BACKGROUND, CHROME_COPIED, CODE_ICON, DRIVE_LINE, DRIVE_PART, DRIVE_PLAIN, DRIVE_ROOT, DRIVE_SPACED, DRIVE_TICKED, FORGET_KEPT, FROM, GATE_IN_CHAT, HELPERS_STARTED, HELPER_ALONE, HELPER_REPORT_TAKEN, HELPER_RESULT, KEEP, KEEP_AGENTS, KEEP_RULES, LINK_ICON, LOOKUP_RUN, LOOK_NOW, LOST_FOR_YOU, MAY_NOT_STOP, NOTHING_TO_PASTE, NOT_HANDED_HELPERS, NOT_HANDED_LONG, NOT_HANDED_RUNS, NOT_HANDED_TODOS, NO_BOXES, NO_DETACH, NO_FOLLOW, NO_MEMORY, NO_PERSON_WAIT, NO_PUSH, NO_READ, NO_RUNNER_MOVED, OWED, PANEL_RULE, PART_FOR_CHAT, PART_FROM_HELPER, PART_SENT, PART_TAKEN, PASTED, PASTE_LINUX, PATH_LINE, PATH_PLAIN, PATH_SPACED, PATH_TICKED, REFUSED, RELEASE_PRESSED, REPLY_HOLDS, REPORT_FOR_CHAT, REPORT_FRAMED, REPORT_IN_CHAT, REPORT_TAKEN, RESUMED_BY_ANSWER, RETRY_TEXT, RUN_RESUMED, SEND_BACKGROUND, SERIAL_RUNS, SHORT_CHARS, SHORT_LINES, SHORT_RULE, SHOWN_LONG, SHOWN_SHORT, STOPPED_BY_YOU, STOPPED_EARLIER, STOPPED_REFUSED, STUCK_ASK, TYPED_ANSWERED, TYPED_PRESS_ONLY, TYPED_UNSURE, WAITS_LINE, WAITS_TITLE, drifted, framed, quotedItems, shortOf, withShortRule, wordCountOf } from './texts'
 const LIST = 'claudopus'
 const LIST_TITLE = 'Claudopus'
 const PANEL_ROWS = 24
@@ -3987,6 +3987,55 @@ redraw($)
 )
 }
 const linkList = (links: readonly TaskLink[]) => links.map(link => `- **${link.kind === 'This Mac' ? `T${thisMac().slice(1)}` : link.kind}** · [${link.label.replace(/[[\]]/g, '')}](${link.url})`).join('\n')
+const pressNeeds = ($: EngineInterface, card: Todo, surface: string, now: number) =>
+needsOf($, asPressed(card), surface, now).filter(need => (need.kind === 'permission' || need.kind === 'question') && !need.isActing && need.buttons.some(button => !button.isOpener))
+const waitsSaid = new Set<string>()
+const WAITS_FRESH = 15 * 60_000
+const waitsToSay = async ($: EngineInterface) => {
+const now = await $.clock.now()
+const lines: string[] = []
+for (const card of (await read($, todos)).filter(one => !one.parentId && !one.chat)) {
+const needs = pressNeeds($, card, '', now)
+if (!needs.some(need => !waitsSaid.has(`${need.id}:${need.at}`) && now - need.at < WAITS_FRESH)) continue
+for (const need of needs) waitsSaid.add(`${need.id}:${need.at}`)
+lines.push(WAITS_LINE(titleOf(card)))
+}
+if (lines.length) await log($, `said in the chat, with no model asked, what waits for ${who()}: ${lines.length === 1 ? 'one card' : `${lines.length} cards`}`)
+return [...new Set(lines)].join('\n\n')
+}
+const waitsIn = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string } }, ui: Ui) => {
+const lines = e.props.text.split('\n')
+if (!dir || isOff || !lines.some(line => WAITS_TITLE.test(line.trim()))) return undefined
+const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
+const now = await $.clock.now()
+const { Box, Button, Text } = ui
+const blocks: JSX.Element[] = []
+const held: string[] = []
+for (const line of lines) {
+const title = WAITS_TITLE.exec(line.trim())?.[1]
+const named = title === undefined ? [] : cards.filter(one => titleOf(one) === title)
+const card = named.find(one => pressNeeds($, one, e.surface, now).length) ?? named.at(-1)
+if (title === undefined || !card) {
+held.push(line)
+continue
+}
+const needs = pressNeeds($, card, e.surface, now)
+for (const need of needs) waitsSaid.add(`${need.id}:${need.at}`)
+const n = blocks.length
+blocks.push(
+<Box key={`waits-${n}`} flexDirection="column" gap={1}>
+<Box key="waits-head" flexDirection="row">
+<Text color={taskColour(card.id) ?? NEEDS}>● </Text>
+<Button key={`waits-open-${card.id}-${presses}`} plain hover={{ scope: `waits-open-${n}-${card.id}`, underline: true }} onPress={() => openWork($, card.id)}>
+<Text bold>{cut(title, 60)}</Text>
+</Button>
+</Box>
+{needs.length ? needs.map(need => needBlock($, ui, need, { surface: e.surface })) : <Text key={`waits-done-${n}`} dimColor>✓ Answered</Text>}
+</Box>,
+)
+}
+return blocks.length ? { rest: held.join('\n').trim(), blocks } : undefined
+}
 const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: string; props: { text: string; isSummary?: boolean } }, reply: JSX.Element, ui: Ui) => {
 if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
 const given = isLinked ? replyLinksIn(e.props.text) : []
@@ -4164,6 +4213,7 @@ if (!isOff && !e.props.isSummary && e.props.text.trim() === NO_ANSWER) {
 const { Box } = uiOf($, e)
 return <Box key={`quiet-${mark(e.requestId)}`} />
 }
+const drawn = async (e: Parameters<typeof next>[0]) => {
 if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return withTaskBox($, e, await next(e), uiOf($, e))
 const { text, hrefs } = memoryLinked(e.props.text)
 if (!hrefs.length) return withTaskBox($, e, await next(e), uiOf($, e))
@@ -4179,6 +4229,16 @@ if (path) openMemory($, path)
 }}
 />
 ), uiOf($, e))
+}
+const waits = e.props.isSummary ? undefined : await waitsIn($, e, uiOf($, e)).catch(err => (void log($, `what waits not drawn in the chat: ${String(err)}`), undefined))
+if (!waits) return drawn(e)
+const { Box } = uiOf($, e)
+return (
+<Box key={`waits-${mark(e.requestId)}`} flexDirection="column" gap={1}>
+{waits.rest ? await drawn({ ...e, props: { ...e.props, text: waits.rest } }) : null}
+{waits.blocks}
+</Box>
+)
 })
 on('ui.render', { component: 'Pane' }, async ($, e, next) => {
 if (!e.requestId?.startsWith(MEMORY_PANE)) return next(e)
@@ -11172,19 +11232,19 @@ return ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), left).
 }
 const NOTICE_HEADER = /\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n(?:(?:This is an automated background-task event|Do NOT interpret this|No human input has been received)[^\n]*\n?)*/
 type Quiet = { isQuiet: boolean; isRepeat: boolean }
-const forChat = async ($: EngineInterface, id: string, report: string) => {
+const forChat = async ($: EngineInterface, id: string, report: string, isAsking = false) => {
 const short = shortOf(report)
 const given = short?.head ?? report
 const text = await withOpenables($, given).catch(() => given)
 const saved = (await ownReports($).catch(() => [] as Report[])).find(r => r.agent === id)
-return { text, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '' }
+return { text, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '', isAsking: isAsking && Boolean((await read($, todos)).find(one => one.id === id)?.ask) }
 }
 const reportsFor = async ($: EngineInterface, ids?: string[]) => {
 const given = (await read($, todos)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
 if (!given.length) return []
 await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
 await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
-const reports = await Promise.all(given.map(one => forChat($, one.id, one.reportForChat ?? '')))
+const reports = await Promise.all(given.map(one => forChat($, one.id, one.reportForChat ?? '', true)))
 given.forEach((one, n) => resultGiven(one.id, reports[n]?.text ?? ''))
 return given.map((one, n) => named(REPORT_FOR_CHAT(titleOf(one), one.id, reports[n]?.text ?? '', reports[n])))
 }
@@ -11650,7 +11710,7 @@ const short = cut(oneLine(typed), 40)
 const what = (one: ReleaseWait) => (one.title ? `the task "${one.title}"` : `this chat's own "${one.need.text}"`)
 const pressable = waits.filter(one => !one.isPressOnly)
 const listed = pressable.length ? pressable : waits
-const notGiven = () => (pressable.length ? named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label })))) : undefined)
+const notGiven = () => (pressable.length ? named(TYPED_NOT_GIVEN(said, pressable.map(one => ({ what: what(one), label: one.button.label, title: one.title })))) : undefined)
 const answer = await $.model.complete({ model: GO_AHEAD_MODEL, system: GO_AHEAD_SYSTEM, prompt: goAheadPrompt(typed, listed.map(one => one.title || 'a release of this chat\'s own')), maxTokens: 120, timeoutMs: GO_AHEAD_WAIT }).catch(() => undefined)
 const reading = answer?.isAnswered ? goAheadRead(answer.text, listed.length) : undefined
 if (!reading) {
@@ -14474,9 +14534,10 @@ return next(e)
 })
 on('turn.step', async function* ($, e, next) {
 if (e.agentId === undefined && e.index === 0 && quietTurns.has(e.turnId)) {
-yield { kind: 'text', index: 0, text: NO_ANSWER }
+const text = (dir && !isOff ? await waitsToSay($).catch(() => '') : '') || NO_ANSWER
+yield { kind: 'text', index: 0, text }
 yield { kind: 'stop', stopReason: 'end_turn', usage: null }
-return { turnId: e.turnId, index: e.index, answer: NO_ANSWER, toolUses: [], stopReason: 'end_turn', usage: null }
+return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn', usage: null }
 }
 const id = e.agentId
 if (id !== undefined) replyRead($, id)

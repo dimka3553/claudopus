@@ -693,10 +693,13 @@ const workHooks = (on: On) => {
   on('turn.step', async function* ($, e, next) {
     // The chat's turn that only a notice with nothing new started ends with Claude Code's own line for a turn with nothing to say
     // (chatHooks' prompt.submit and turn.start), with no model asked
+    // Unless a task of the chat's asks the person something not yet said in the chat: then the turn says so, a line for each such
+    // card, drawn as its question with its buttons (colours.tsx, waitsToSay), still with no model asked
     if (e.agentId === undefined && e.index === 0 && quietTurns.has(e.turnId)) {
-      yield { kind: 'text', index: 0, text: NO_ANSWER }
+      const text = (dir && !isOff ? await waitsToSay($).catch(() => '') : '') || NO_ANSWER
+      yield { kind: 'text', index: 0, text }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
-      return { turnId: e.turnId, index: e.index, answer: NO_ANSWER, toolUses: [], stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn', usage: null }
     }
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
