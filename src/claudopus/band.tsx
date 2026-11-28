@@ -413,9 +413,11 @@ const bandHooks = (on: On) => {
           {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
           {spacers}
           {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
-          {/* At the very right on the desktop, Open panel while the panel is closed and Close panel while it is open */}
+          {/* At the very right on the desktop, Open panel while the panel is closed and Close panel while it is open, and Refresh
+              before it, which puts the panel back as it first opens (refreshPanel) */}
           {e.surface !== 'terminal' ? (
-            <Box key="band-panel" flexGrow={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+            <Box key="band-panel" flexGrow={1} flexShrink={0} flexDirection="row" justifyContent="flex-end" gap={1}>
+              <ui.Button key="band-refresh" label="Refresh" plain dimColor onPress={() => void refreshPanel($).catch(err => log($, `panel not refreshed: ${String(err)}`))} />
               <ui.Button key={`band-panel-${isListHere ? 'close' : 'open'}`} label={isListHere ? 'Close panel' : 'Open panel'} plain dimColor onPress={() => void (isListHere ? hidePanel($) : showPanel($)).catch(err => log($, `panel not ${isListHere ? 'closed' : 'opened'}: ${String(err)}`))} />
             </Box>
           ) : null}

@@ -229,11 +229,10 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
       <Text bold>Claudopus couldn't show this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
       <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
-      {id !== LIST ? (
-        <Box alignItems="flex-start">
-          <Button key={`failed-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
-        </Box>
-      ) : null}
+      <Box flexDirection="row" gap={2} alignItems="flex-start">
+        {id !== LIST ? <Button key={`failed-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} /> : null}
+        <Button key={`failed-refresh-${presses}`} label="Refresh" plain onPress={() => void refreshPanel($).catch(err => log($, `panel not refreshed: ${String(err)}`))} />
+      </Box>
     </Box>
   )
 }

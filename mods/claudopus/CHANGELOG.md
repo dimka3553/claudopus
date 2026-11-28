@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.324 · 28 November 2026
+- Refresh, beside Open panel and Close panel above the chat, puts the panel back as it first opens: the All tab, no search, the first page of every list, nothing unfolded or scrolled, every other tab of Claudopus's closed, and everything drawn afresh. Your tasks, results, stars and memory stay as they are. A tab Claudopus couldn't show has Refresh too.
+
 ## 0.2.323 · 28 November 2026
 - Finished shows one page of 40 tasks at a time, with Newer and Older under it, so paging through hundreds no longer makes the panel say it holds more than the app can draw.
 

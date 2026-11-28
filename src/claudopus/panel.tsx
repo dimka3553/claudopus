@@ -11,6 +11,26 @@ const backAsked = async ($: EngineInterface, id: string) => {
   await $.ui.close({ id: LIST }).catch(() => undefined)
   await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
 }
+// Refresh, above the chat beside Open and Close panel and on a tab that couldn't be shown: the panel back to how it first opens.
+// What was picked, searched, unfolded, paged or scrolled in it goes back to its start, every other tab of the mod's is closed, the
+// panel is opened again in front if it was open, and nothing held from before is given again: each drawing is made afresh, with
+// all it holds (28 Nov, the person, after many presses of Show more under Finished left the panel too big to show: "a refresh
+// button which restores claudopus to the og state"). The tasks, their results, the stars, what is typed and not sent, memory and
+// whether the panel is open stay as they are
+const refreshPanel = async ($: EngineInterface) => {
+  presses += 1
+  tasksReset()
+  ;((isEarlierOpen = false), (isArchivedOpen = false), (earlierMost = RESULTS_PAGE), (archivedMost = RESULTS_PAGE))
+  for (const kept of [folds, pictureIn, openPiles, diffWhole, flowPicked, paneSqueezed, lessTried, tooBigLogged, tabFails, topPlaces, listOffsets, heldDrawings, drawnPanes, shownSigns, shownAts, freshUnderWay, freshDrawn, madeAgain]) kept.clear()
+  await update($, view, () => ({ openId: '' }))
+  const panes = await $.ui.panes().catch(() => [])
+  const others = panes.filter(pane => pane.id !== LIST)
+  for (const pane of others) await $.ui.close({ id: pane.id }).catch(() => undefined)
+  const isOpen = panes.some(pane => pane.id === LIST)
+  await log($, `panel refreshed in chat ${(await read($, me)).id || 'unknown'}: back to how it first opens${others.length ? `, ${others.length} other ${others.length === 1 ? 'tab' : 'tabs'} closed` : ''}${isOpen ? ', the panel opened again' : ''}`)
+  if (isOpen) await backToPanel($, LIST)
+  drawAgain($)
+}
 // The ask whose reply box holds the terminal's keys in the list: kept on it while it waits, so an ask that comes in above it never
 // takes the keys from what the person is typing
 let keysAsk = ''
@@ -74,12 +94,11 @@ const givenIfDrawn = async ($: EngineInterface, e: Parameters<EngineInterface['u
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
       <Text bold>Claudopus couldn't show this tab</Text>
-      <Text dimColor wrap="wrap">It holds more than the app can draw at once.</Text>
-      {id !== LIST ? (
-        <Box alignItems="flex-start">
-          <Button key={`too-big-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
-        </Box>
-      ) : null}
+      <Text dimColor wrap="wrap">It holds more than the app can draw at once. Refresh puts the panel back as it first opens.</Text>
+      <Box flexDirection="row" gap={2} alignItems="flex-start">
+        {id !== LIST ? <Button key={`too-big-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} /> : null}
+        <Button key={`too-big-refresh-${presses}`} label="Refresh" plain onPress={() => void refreshPanel($).catch(err => log($, `panel not refreshed: ${String(err)}`))} />
+      </Box>
     </Box>
   )
 }
