@@ -185,10 +185,10 @@ test("with work only in another chat the header and octopus are at work, amber w
   const said = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(said.filter(text => /Not done|Trainer left running|nohup|left running|Waiting for its command/.test(text))).toEqual([])
   expect(said).toEqual(expect.arrayContaining(['Train the splats', 'Send the invoices', 'Check the totals', 'Solve the cameras', 'Draw the chart']))
-  // After their pause the three are under Finished, and the header and octopus say only what waits and works
+  // After their pause the three are under Done, and the header and octopus say only what waits and works
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
-  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 2/.test(String(b.props.label)))).toBe(true)
+  expect((await list.findAll({ type: 'Button' })).some(b => /Done 2/.test(String(b.props.label)))).toBe(true)
   expect(await list.find({ type: 'Text', text: '1 waiting for you · 1 working' })).toBeDefined()
   expect(await drawn(list)).toEqual(['wave'])
   await list.unmount()
@@ -223,7 +223,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
   await list.unmount()
 })
 
-test("work that ends in another chat turns happy in this panel for its pause, then folds into Finished, which then holds every chat's", async ($, on) => {
+test("work that ends in another chat turns happy in this panel for its pause, then folds into Done, which then holds every chat's", async ($, on) => {
   const { files, clock } = world(on)
   await $.session.start(start)
   files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
@@ -237,11 +237,11 @@ test("work that ends in another chat turns happy in this panel for its pause, th
   await clock.advance(5000)
   expect(await until(async () => list.find({ type: 'Text', text: '✓ Done' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Claudopus' })).toBeDefined()
-  // After its pause it is in the Finished row, named as every chat's, and no longer under its chat
+  // After its pause it is in the Done row, named as every chat's, and no longer under its chat
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
   expect(await list.find({ type: 'Text', text: 'all chats' })).toBeDefined()
-  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 2/.test(String(b.props.label)))).toBe(true)
+  expect((await list.findAll({ type: 'Button' })).some(b => /Done 2/.test(String(b.props.label)))).toBe(true)
   // On one Mac a chat with only ended work is not listed by name, and this chat's work gets no heading of its own for it
   expect(await list.find({ type: 'Text', text: 'Billing page' })).toBeUndefined()
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })

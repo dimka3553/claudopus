@@ -1,0 +1,1 @@
+- The Finished tab and its list are now called Done, the same word a card says, so the tabs read All, Waiting for you, Delivered, Working, Done, Starred.

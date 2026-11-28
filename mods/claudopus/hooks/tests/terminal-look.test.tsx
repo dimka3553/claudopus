@@ -1069,7 +1069,7 @@ test('in the terminal an ask is above the prompt with its answers numbered, and 
   await app.unmount()
 })
 
-test('in the terminal each card has a number that opens it, Finished has f, and every tab has Close on x', async ($, on) => {
+test('in the terminal each card has a number that opens it, Done has f, and every tab has Close on x', async ($, on) => {
   world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })

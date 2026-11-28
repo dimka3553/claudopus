@@ -230,7 +230,7 @@ const readOthers = async ($: EngineInterface) => {
     }
   }
   // Work of another chat seen ending, by its id here: it turns happy for its pause from when this panel saw it end, as another
-  // chat's file reaches here seconds later. Work that ended well before this panel saw it goes to Finished at once
+  // chat's file reaches here seconds later. Work that ended well before this panel saw it goes to Done at once
   const ids = new Set<string>()
   for (const s of found)
     for (const card of s.cards.filter(one => one.status !== 'working')) {

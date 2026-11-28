@@ -182,12 +182,12 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Just finished' })).toBeDefined()
   expect(await drawn(list)).toEqual(['happy'])
-  // After its pause it is gone, and not kept under Finished, since its chat said nothing of how it ended
+  // After its pause it is gone, and not kept under Done, since its chat said nothing of how it ended
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Check the totals' })) ? undefined : true))).toBe(true)
   expect(await list.find({ type: 'Text', text: 'Nothing waits for you' })).toBeDefined()
   expect(await drawn(list)).toEqual(['mark'])
-  expect((await list.findAll({ type: 'Button' })).some(b => /^[▸▾] Finished/.test(String(b.props.label)))).toBe(false)
+  expect((await list.findAll({ type: 'Button' })).some(b => /^[▸▾] Done/.test(String(b.props.label)))).toBe(false)
   // A chat that closes with its work running shows nothing finished: its work just leaves
   files.set('ssh:fetch', `${(NOW + 40_000) / 1000}\n---claudopus-live---\n${running(NOW + 40_000)}\n`)
   let back

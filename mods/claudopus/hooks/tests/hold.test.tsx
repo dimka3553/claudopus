@@ -1045,7 +1045,7 @@ test('a chat whose ended tasks have records of 4 MB and 170 MB loads without hol
     const held = holdMeter()
     await $.session.start(start)
     // read back whole, the newest forty of this round's: their fold opened, the newest listed
-    const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /^▸ Finished 40$/.test(String(b.props.label))))
+    const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /^▸ Done 40$/.test(String(b.props.label))))
     least = Math.min(least, held())
     if (fold) await pane.press({ key: String(fold.key) })
     expect(await until(async () => (JSON.stringify(await pane.drawn()).includes(`Old work ${round} 2`) ? 'listed' : undefined))).toBe('listed')

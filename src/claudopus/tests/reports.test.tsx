@@ -159,9 +159,9 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', command: `cat ${folder}/report.md` } as never)).deny).toContain('Start a fresh agent')
 
-  // The person dismisses a card themselves, one that ended with its question open and one just done: it goes under Finished at
+  // The person dismisses a card themselves, one that ended with its question open and one just done: it goes under Done at
   // once and stays there across a redraw and a reload of the cards (18 Nov: "Either way, I should have the ability to just close it")
-  const finishedCount = async () => Number(/Finished (\d+)/.exec(String((await keyed(cards, 'finished-fold'))?.props.label))?.[1] ?? 0)
+  const finishedCount = async () => Number(/Done (\d+)/.exec(String((await keyed(cards, 'finished-fold'))?.props.label))?.[1] ?? 0)
   await $.agent.spawn({ ...spawn, description: 'Pick an opening', prompt: 'pick an opening' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'Which opening should go out?', choices: ['A', 'B', 'C'] } as never)
   // (it hands in its result with the question still open: that, not its turn's end, ends a task)
@@ -172,7 +172,7 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   const cards = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   expect((await until(async () => (await cards.find({ type: 'Text', text: 'Which opening should go out?' })) ?? undefined))?.props.color).toBe('#E5A50A')
   expect(await cards.find({ type: 'Text', text: /^1 .*waiting for you/ })).toBeDefined()
-  // (the two that ended before it stay up, with nothing under Finished, until each is dismissed)
+  // (the two that ended before it stay up, with nothing under Done, until each is dismissed)
   expect(await finishedCount()).toBe(0)
   for (const id of ['a1', 'a3']) await pressed(cards, `dismiss-${id}`)
   await clock.advance(2_100)
@@ -193,7 +193,7 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect(await until(async () => ((await cards.find({ type: 'Text', text: '◐ Delivered' })) ? undefined : true))).toBe(true)
   expect(await until(async () => ((await finishedCount()) === before + 2 ? true : undefined))).toBe(true)
   // And while the person uses the panel scrolled down, where the drawing on screen is kept while they move: the card dismissed is
-  // under Finished in the drawing right after the press, not once they have left the panel alone (18 Nov, the person: "when I
+  // under Done in the drawing right after the press, not once they have left the panel alone (18 Nov, the person: "when I
   // click this, the message should go below the finished")
   await $.agent.spawn({ ...spawn, description: 'Save a third rule', prompt: 'save it' } as never)
   await $.turn.complete({ agentId: 'a6', answer: 'The third rule is saved.', durationMs: 1, isAborted: false, turnId: 't7', reason: 'answer' } as never)
@@ -209,19 +209,19 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect((await until(async () => (await used.find({ type: 'Text', text: '✓ Done' })) ?? undefined))?.props.color).toBe('success')
   expect(await keyed(used, 'dismiss-a6')).toBeUndefined()
   writeHeld?.()
-  // (green where it stood for its two seconds, then under Finished, in the drawing kept while they use the panel too)
+  // (green where it stood for its two seconds, then under Done, in the drawing kept while they use the panel too)
   await clock.advance(2_200)
   expect(await keyed(used, 'dismiss-a6')).toBeUndefined()
-  expect(Number(/Finished (\d+)/.exec(String((await keyed(used, 'finished-fold'))?.props.label))?.[1])).toBe(before + 3)
+  expect(Number(/Done (\d+)/.exec(String((await keyed(used, 'finished-fold'))?.props.label))?.[1])).toBe(before + 3)
   await used.unmount()
-  // A redraw later, and a reload of the cards: all still under Finished, nothing back at the top
+  // A redraw later, and a reload of the cards: all still under Done, nothing back at the top
   await clock.advance(30_000)
   await $.session.start(start)
   await clock.advance(30_000)
   const after = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await after.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
   expect(await after.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
-  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 3)
+  expect(Number(/Done (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 3)
   expect((await after.findAll({ type: 'Button' })).some(b => /^dismiss-/.test(b.key ?? ''))).toBe(false)
 })
 
@@ -563,7 +563,7 @@ test('work whose brief names one result on what it is about is a round of that w
   await $.agent.spawn({ ...spawn, description: 'Video second cut', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
   await $.agent.spawn({ ...spawn, description: 'Fix the panel', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
   await $.agent.spawn({ ...spawn, description: 'Video and logo', prompt: `Read ${MEMORY}/reports/20261111-1853-explainer-video/report.md and ${MEMORY}/reports/20261111-1700-logo/report.md` } as never)
-  for (const id of ['a1', 'a2', 'a3']) await $.turn.complete({ agentId: id, answer: `Finished ${id}.\n\n${'It is in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: `t-${id}`, reason: 'answer' })
+  for (const id of ['a1', 'a2', 'a3']) await $.turn.complete({ agentId: id, answer: `Done ${id}.\n\n${'It is in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: `t-${id}`, reason: 'answer' })
   await clock.advance(10)
   const metas = await until(async () => {
     const all = [...files.entries()].filter(([path]) => path.endsWith('/meta.json')).map(([, text]) => JSON.parse(text) as { agent: string; from?: string })

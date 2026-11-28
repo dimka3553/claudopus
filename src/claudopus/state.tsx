@@ -7,7 +7,7 @@
 // - waiting (amber): only while something of its own waits for the person: a question, a permission, a key or password box
 // - delivered (blue): only by handing in its result, with every to-do ticked or dropped and nothing of its own running; a server
 //   it left for the person keeps its row under the card. The result is the person's to look at: a reply puts it back to work
-// - done (green): only by the person's Mark as done on a delivered card, which puts it under Finished (19 Nov, the person:
+// - done (green): only by the person's Mark as done on a delivered card, which puts it under Done (19 Nov, the person:
 //   "distinguish between something that's completely done, which is something that you can mark as done as a person, and
 //   something that's in the intermediate state"). A card that finished before cards stayed up is done, as it was
 // - stopped (grey): only by the person's Stop, or the chat's on their word
@@ -25,12 +25,12 @@ const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
-// Just marked done by the person: for its two seconds the card stays where it was, green, before it goes under Finished
+// Just marked done by the person: for its two seconds the card stays where it was, green, before it goes under Done
 // (19 Nov, the person: "Done stays exactly where the delivered was when you mark it as done. It should always play the green
 // animation")
 // Its two seconds count from the first drawing of the panel made that shows it, never from the press: right after an update the
 // panel's drawings came seconds late, so a moment counted from the press was over before any drawing showed it, and the card went straight
-// under Finished with no green, no octopus and no sound while the next delivered card, alike, slid into its place: the press seemed
+// under Done with no green, no octopus and no sound while the next delivered card, alike, slid into its place: the press seemed
 // to do nothing (19 Nov, the person: "I clicked Mark as done two times, and the animation didn't play. The sound didn't play")
 // Each press of this load's, until its moment is first drawn (shownAt 0), and from when; one never drawn is over DONE_UNSEEN on
 const doneMoments = new Map<string, { pressedAt: number; shownAt: number }>()

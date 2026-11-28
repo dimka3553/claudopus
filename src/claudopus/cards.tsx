@@ -449,7 +449,7 @@ const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: n
 }
 
 // The person dismisses the card of a task that has ended, whatever it still asks (18 Nov: "Either way, I should have the ability to
-// just close it"): it goes under Finished and stays there, kept on the card so a reload keeps it too, and comes back up only when
+// just close it"): it goes under Done and stays there, kept on the card so a reload keeps it too, and comes back up only when
 // the task works again (resumed). Its result stays in Results, where its open questions are still answered
 const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.closedAt)
 // The cards pressed Dismiss on whose write has not landed: drawn dismissed from the press itself (asPressed), so a drawing the app
@@ -465,7 +465,7 @@ const dismiss = async ($: EngineInterface, id: string) => {
   dismissedNow.set(id, at)
   doneMoments.set(id, { pressedAt: at, shownAt: 0 })
   redraw($)
-  // Its moment never drawn, as in a panel closed meanwhile, it is drawn again under Finished
+  // Its moment never drawn, as in a panel closed meanwhile, it is drawn again under Done
   $.clock.after(DONE_UNSEEN + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
   // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
   await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one))).finally(() => dismissedNow.delete(id))
@@ -473,7 +473,7 @@ const dismiss = async ($: EngineInterface, id: string) => {
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
 }
 // The panel's first drawing made that shows a card marked done begins its moment: its two seconds, the happy octopus and the sound
-// start together, as the person sees it, and it is drawn again under Finished once they are over
+// start together, as the person sees it, and it is drawn again under Done once they are over
 const beginDoneMoment = ($: EngineInterface, one: Todo, at: number) => {
   const moment = doneMoments.get(one.id)
   if (!moment || moment.shownAt || !isDoneMoment(one, at)) return
@@ -623,7 +623,7 @@ const openList = async ($: EngineInterface) => {
 }
 
 // Keeps the list true while work runs: the engine's list, and the minutes
-// Work that has ended, kept on disk for good, one file per chat (finished/<chat id>.json): the Finished list survives a
+// Work that has ended, kept on disk for good, one file per chat (finished/<chat id>.json): the Done list survives a
 // reload and a restart of the app. Its chat is the engine's own record of the work, read again when it is opened
 const finishedPath = (chatId: string) => `${dir}/finished/${chatId}.json`
 let finishedSaved = ''

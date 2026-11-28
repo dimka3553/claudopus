@@ -1,4 +1,4 @@
-// The panel's task list as the person sorts it: a row of filters at its top (All, Waiting for you, Working, Delivered, Finished,
+// The panel's task list as the person sorts it: a row of filters at its top (All, Waiting for you, Delivered, Working, Done,
 // Starred) with a search by name, every finished task a page at a time, and the stars. Pure: the panel part
 // (src/claudopus/panel.tsx) hands it the cards, the results and what each press does, and reads and writes the stars' file
 // (~/.claude/claudopus/starred.jsonl, in the memory folder every Claude account on a Mac shares, and carried to the other Macs
@@ -20,13 +20,13 @@ const TABS: [TaskFilter, string][] = [
   ['waiting', 'Waiting for you'],
   ['delivered', 'Delivered'],
   ['working', 'Working'],
-  ['finished', 'Finished'],
+  ['finished', 'Done'],
   ['starred', 'Starred'],
 ]
 // What a card is, for the tabs that pick among the cards up: 1 working, 2 waiting for the person, 3 delivered, 0 the rest (stopped,
 // failed, interrupted), which only All shows
 const KINDS: Partial<Record<TaskFilter, number[]>> = { working: [1], waiting: [2], delivered: [3] }
-// The state each of those tabs holds, whose colour its bar has while it is picked: Finished the green of Done
+// The state each of those tabs holds, whose colour its bar has while it is picked
 type TabState = 'working' | 'waiting' | 'delivered' | 'done'
 const STATES: Partial<Record<TaskFilter, TabState>> = { working: 'working', waiting: 'waiting', delivered: 'delivered', finished: 'done' }
 // A long list shows one page of this many rows at a time, with Newer and Older under it: the panel never holds more than a page,
@@ -158,7 +158,7 @@ export const starButton = (ui: Ui, id: string, onPress: () => void) => {
 }
 
 // The tabs under the header, one row on the panel's ground with a hairline under it (two in a narrow pane), the one picked bright
-// with a bar under its word; how many each holds beside it once there are any, but Finished, whose list says it
+// with a bar under its word; how many each holds beside it once there are any, but Done, whose list says it
 const LINE = 0.1
 export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, surface: string, acts: TasksActs, colourOf?: (state: TabState) => string | undefined) => {
   const { Box, Button } = ui as unknown as Parts
@@ -182,7 +182,7 @@ export const tasksBar = (ui: Ui, counts: Partial<Record<TaskFilter, number>>, su
   )
 }
 
-// A list with its heading: Finished (folded at the panel's bottom under All, open as its own tab) or Starred. Its rows the newest
+// A list with its heading: Done (folded at the panel's bottom under All, open as its own tab) or Starred. Its rows the newest
 // first, a page at a time (fewer on a pane drawn with less in it, `most`), then Newer and Older with where the page stands
 export type ListLook = { head: string; side?: string; surface: string; most?: number; isOpen: boolean; fold?: () => void; hotkey?: string; now: number; fill: string; lead: number | string; empty: string }
 export const tasksList = (ui: Ui, items: TaskItem[], look: ListLook, acts: TasksActs) => {
