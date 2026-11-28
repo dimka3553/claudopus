@@ -128,6 +128,18 @@ describe('which task a reply is about', () => {
     expect(builder.index().replies.both).toEqual([PUPIL])
   })
 
+  test('a second reply of a turn about the same task carries on from the first, and one about another task or in a later turn does not', async () => {
+    const builder = new Builder()
+    builder.ingest([
+      notify(PUPIL, 'Pupil size: labelling and detection'),
+      says('first', 'The pupil labels are saved.'),
+      says('second', 'The pupil task is now checking them.'),
+      notify(GAPS, 'Analysis gaps: Notion page'),
+      says('other', 'The gaps page is written.'),
+    ])
+    expect(Object.keys(builder.index().more ?? {}).filter(key => ['first', 'second', 'other'].includes(key))).toEqual(['second'])
+  })
+
   test('rows read later carry on the turn they belong to', async () => {
     const chat = [notify(GAPS, 'Analysis gaps: Notion page'), says('r0', 'The gaps page is up.'), ...CHAT]
     const upToLaunch = chat.findIndex(row => row.uuid === 'r4') + 1

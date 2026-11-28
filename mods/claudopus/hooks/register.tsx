@@ -3335,19 +3335,23 @@ if (made.length) await log($, `copied ${made.length} sent file${made.length === 
 return made.length ? named(SENT_OPENABLE(made)) : ''
 }
 const withOpenables = async ($: EngineInterface, text: string) => {
-if (!openablesDir() || !(text.includes('/') || (isWindows && text.includes('\\')))) return text
+const copies = await openablesOf($, text)
+if (!copies.size) return text
+const quoted = [...copies.keys()].map(path => path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+return text.replace(new RegExp(`(${quoted.join('|')})(?![\\w/${isWindows ? '\\\\' : ''}-]|\\.\\w)`, 'g'), path => copies.get(path) ?? path)
+}
+const openablesOf = async ($: EngineInterface, text: string) => {
+const copies = new Map<string, string>()
+if (!openablesDir() || !(text.includes('/') || (isWindows && text.includes('\\')))) return copies
 const home = await homeOf($)
 const lines = text.split('\n').map(line => line.trim().replace(/^(?:[-*]\s+)?`?/, '').replace(/`$/, '').replace(/[.:]$/, ''))
 const named = [...new Map([...lines.filter(line => isAbsPath(line) && !line.includes('`')).map(line => ({ written: line, path: keptPath(line) })), ...pathsWritten(text)].map(one => [one.written, one.path])).entries()].filter(([, path]) => isMadeHere(path, home))
-const copies = new Map<string, string>()
 for (const [written, path] of named.sort((a, b) => b[0].length - a[0].length)) {
 if (copies.size >= OPENABLE_MOST) break
 const to = await openable($, path, home)
 if (to) copies.set(written, isWindows && written.includes('\\') ? to.replace(/\//g, '\\') : to)
 }
-if (!copies.size) return text
-const quoted = [...copies.keys()].map(path => path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-return text.replace(new RegExp(`(${quoted.join('|')})(?![\\w/${isWindows ? '\\\\' : ''}-]|\\.\\w)`, 'g'), path => copies.get(path) ?? path)
+return copies
 }
 type Welcome = { shownIn: string; isOpen: boolean }
 let isWelcomeOpen = false
@@ -4125,12 +4129,15 @@ bit.id ? (
 </Box>
 )
 const kind: Kind = isResult ? (isPart ? 'part' : 'result') : 'other'
+const isMore = kind === 'other' && Boolean(colourIndex.more?.[e.requestId] ?? colourIndex.more?.[hash])
 return (
 <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind, first)} paddingX={1} gap={1}>
+{isMore ? null : (
 <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
 {ids.map(id => headOf(id, kind))}
 </Box>
-{quoteOn(first)}
+)}
+{isMore ? null : quoteOn(first)}
 {reply}
 {links}
 </Box>
@@ -11259,7 +11266,9 @@ const short = shortOf(report)
 const given = short?.head ?? report
 const text = await withOpenables($, given).catch(() => given)
 const saved = (await ownReports($).catch(() => [] as Report[])).find(r => r.agent === id)
-return { text, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '', isAsking: isAsking && Boolean((await read($, todos)).find(one => one.id === id)?.ask) }
+const rest = short?.rest && !pathsWritten(given).length ? short.rest : ''
+const files = [...new Set([...(await openablesOf($, rest).catch(() => new Map<string, string>())).values(), ...pathsWritten(rest).map(one => one.path).filter(path => isWithin(path, cwd))])].slice(0, 5)
+return { text, files, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '', isAsking: isAsking && Boolean((await read($, todos)).find(one => one.id === id)?.ask) }
 }
 const reportsFor = async ($: EngineInterface, ids?: string[]) => {
 const given = (await read($, todos)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))

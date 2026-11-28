@@ -392,12 +392,16 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
       </Box>
     )
   const kind: Kind = isResult ? (isPart ? 'part' : 'result') : 'other'
+  // A second reply of its turn about the same task carries on under the first: its box has no name and no quote again
+  const isMore = kind === 'other' && Boolean(colourIndex.more?.[e.requestId] ?? colourIndex.more?.[hash])
   return (
     <Box key={`task-box-${mark(e.requestId)}`} flexDirection="column" borderStyle="round" borderColor={edgeOf(kind, first)} paddingX={1} gap={1}>
-      <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {ids.map(id => headOf(id, kind))}
-      </Box>
-      {quoteOn(first)}
+      {isMore ? null : (
+        <Box key="task-box-head" flexDirection="row" flexWrap="wrap" columnGap={2}>
+          {ids.map(id => headOf(id, kind))}
+        </Box>
+      )}
+      {isMore ? null : quoteOn(first)}
       {reply}
       {links}
     </Box>

@@ -298,8 +298,12 @@ const forChat = async ($: EngineInterface, id: string, report: string, isAsking 
   const given = short?.head ?? report
   const text = await withOpenables($, given).catch(() => given)
   const saved = (await ownReports($).catch(() => [] as Report[])).find(r => r.agent === id)
+  // The files the rest of it names that the person can open, where its short result names none: the chat sends the one that is
+  // the result itself (texts.ts, SHOWN_SHORT)
+  const rest = short?.rest && !pathsWritten(given).length ? short.rest : ''
+  const files = [...new Set([...(await openablesOf($, rest).catch(() => new Map<string, string>())).values(), ...pathsWritten(rest).map(one => one.path).filter(path => isWithin(path, cwd))])].slice(0, 5)
   // (a card that still asks the person something has that said under its result, drawn with its buttons: colours.tsx)
-  return { text, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '', isAsking: isAsking && Boolean((await read($, todos)).find(one => one.id === id)?.ask) }
+  return { text, files, isShort: Boolean(short), kept: saved ? `${reportPath(saved)}/report.md` : '', isAsking: isAsking && Boolean((await read($, todos)).find(one => one.id === id)?.ask) }
 }
 // The reports Claudopus took at a task's hand-back that the chat has not been given, for the tasks a notice names (or all), each
 // once: marked given, so a later notice of the same end repeats nothing (quietNotices)
