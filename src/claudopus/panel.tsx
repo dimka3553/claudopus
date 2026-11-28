@@ -2116,7 +2116,7 @@ const panelHooks = (on: On) => {
     const tasksCounts = () => {
       const up = [...askCards, ...restHere, ...listedChats.flatMap(c => shownOf(c).filter(one => !isUp(one)))]
       const n = (kind: number) => up.filter(one => kindOf(one) === kind).length
-      return { you: notices.length + n(2) + n(3), working: n(1) + restFlows.filter(f => f.status === 'working').length, starred: starredCount() }
+      return { waiting: notices.length + n(2), delivered: n(3), working: n(1) + restFlows.filter(f => f.status === 'working').length, starred: starredCount() }
     }
     // A starred task whose name, state or result moved: its star says so, for when its card is gone
     if (paneId === LIST && !alone) for (const one of [...own, ...elsewhere]) if (isStarred(one.id)) void starAdd($, starMoved(starSeen(one), at)).catch(() => undefined)
@@ -2181,7 +2181,7 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         ) : null}
-        {!alone ? tasksBar(ui, tasksCounts(), e.surface, tasksActs) : null}
+        {!alone ? tasksBar(ui, tasksCounts(), e.surface, tasksActs, stageColor) : null}
         {!alone ? drawTop() : null}
         {/* What was pressed on a block that belonged to no task, in one grey line where it was */}
         {!alone ? loosePressedShown(at).map((one, n) => (

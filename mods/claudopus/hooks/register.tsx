@@ -4083,11 +4083,10 @@ return (
 </Box>
 )
 type Kind = 'result' | 'part' | 'other'
-const isDoneTask = (id: string | undefined) => {
+const edgeOf = (kind: Kind, id?: string) => {
 const card = cards.find(one => one.id === id)
-return Boolean(card && stageOf(cards, card) === 'done')
+return (card ? stageColor(stageOf(cards, card)) : kind === 'result' ? DELIVERED : kind === 'part' ? LIVE : undefined) ?? QUIET_EDGE
 }
-const edgeOf = (kind: Kind, id?: string) => (kind === 'other' ? QUIET_EDGE : isDoneTask(id) ? DONE : kind === 'result' ? DELIVERED : LIVE)
 const headOf = (id: string, kind: Kind, tag = '') => (
 <Box key={`task-${tag}${id}`} flexDirection="row" columnGap={2}>
 <Box key={`task-name-${id}`} flexDirection="row">
@@ -4096,7 +4095,7 @@ const headOf = (id: string, kind: Kind, tag = '') => (
 <Text bold>{cut(titleOfTask(id), 60)}</Text>
 </Button>
 </Box>
-{kind === 'part' ? <Text key={`task-part-${id}`} color={isDoneTask(id) ? DONE : LIVE}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
+{kind === 'part' ? <Text key={`task-part-${id}`} color={edgeOf(kind, id)}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
 {kind === 'other' ? null : <Button key={`task-result-${tag}${id}-${presses}`} label="Result" plain hover={{ scope: `task-result-${tag}${id}`, underline: true }} onPress={() => void openResultOf($, id).catch(err => log($, `result not opened: ${String(err)}`))} />}
 <Button key={`task-reply-${tag}${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${tag}${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
 </Box>
@@ -17269,7 +17268,7 @@ const updated = alone || !versions.version ? undefined : await updatedPieces($, 
 const tasksCounts = () => {
 const up = [...askCards, ...restHere, ...listedChats.flatMap(c => shownOf(c).filter(one => !isUp(one)))]
 const n = (kind: number) => up.filter(one => kindOf(one) === kind).length
-return { you: notices.length + n(2) + n(3), working: n(1) + restFlows.filter(f => f.status === 'working').length, starred: starredCount() }
+return { waiting: notices.length + n(2), delivered: n(3), working: n(1) + restFlows.filter(f => f.status === 'working').length, starred: starredCount() }
 }
 if (paneId === LIST && !alone) for (const one of [...own, ...elsewhere]) if (isStarred(one.id)) void starAdd($, starMoved(starSeen(one), at)).catch(() => undefined)
 const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
@@ -17325,7 +17324,7 @@ nameLine(ui, updated)
 ) : null}
 </Box>
 ) : null}
-{!alone ? tasksBar(ui, tasksCounts(), e.surface, tasksActs) : null}
+{!alone ? tasksBar(ui, tasksCounts(), e.surface, tasksActs, stageColor) : null}
 {!alone ? drawTop() : null}
 {!alone ? loosePressedShown(at).map((one, n) => (
 <Box key={`pressed-loose-${n}`} paddingX={2} flexShrink={0}>

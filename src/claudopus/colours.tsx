@@ -337,18 +337,17 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
         {links}
       </Box>
     )
-  // Colour marks only what matters, and is a card's own: a reply that passes on a task's result has the edge of a delivered card,
-  // blue; a part handed in by a task still at work has a working card's, purple, and says so; any other reply about a task has a
-  // quiet grey one. Its task's colour is only the dot before its name, as on its card (28 Nov, the person: "colors kinda make it
-  // confusing maybe only for important bits of text?"; twelve colours of box told nothing of what a reply was)
-  // Once the person marks that task done, its results and parts are green in the chat as its card is in the panel, at the press
-  // (28 Nov, the person: "I've marked one of them as done, and it's still blue in the chat, so it's kind of confusing")
+  // Colour is a card's own, never the task's, which is only the dot before its name, as on its card (28 Nov, the person: "colors
+  // kinda make it confusing maybe only for important bits of text?"; twelve colours of box told nothing of what a reply was)
+  // The edge is its task's card's colour, as it stands now: purple at work, amber while it waits for the person, blue delivered,
+  // green once marked done, red failed, orange interrupted, grey stopped; with no card, a result's blue, a part's purple, else grey
+  // (28 Nov, the person: "I've marked one of them as done, and it's still blue in the chat", then "Purple if it's in progress,
+  // Blue if it's delivered, Yellow if it needs you, Green if it's completed ... just make it consistent")
   type Kind = 'result' | 'part' | 'other'
-  const isDoneTask = (id: string | undefined) => {
+  const edgeOf = (kind: Kind, id?: string) => {
     const card = cards.find(one => one.id === id)
-    return Boolean(card && stageOf(cards, card) === 'done')
+    return (card ? stageColor(stageOf(cards, card)) : kind === 'result' ? DELIVERED : kind === 'part' ? LIVE : undefined) ?? QUIET_EDGE
   }
-  const edgeOf = (kind: Kind, id?: string) => (kind === 'other' ? QUIET_EDGE : isDoneTask(id) ? DONE : kind === 'result' ? DELIVERED : LIVE)
   // A box's head: its task's dot and name, which opens its Details; on a result, Result, which opens the whole of it; Reply
   // (`tag`: which stretch of the reply it heads, where it has several)
   const headOf = (id: string, kind: Kind, tag = '') => (
@@ -360,7 +359,7 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
           <Text bold>{cut(titleOfTask(id), 60)}</Text>
         </Button>
       </Box>
-      {kind === 'part' ? <Text key={`task-part-${id}`} color={isDoneTask(id) ? DONE : LIVE}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
+      {kind === 'part' ? <Text key={`task-part-${id}`} color={edgeOf(kind, id)}>{cards.find(one => one.id === id)?.status === 'working' ? 'Part · still working' : 'Part'}</Text> : null}
       {kind === 'other' ? null : <Button key={`task-result-${tag}${id}-${presses}`} label="Result" plain hover={{ scope: `task-result-${tag}${id}`, underline: true }} onPress={() => void openResultOf($, id).catch(err => log($, `result not opened: ${String(err)}`))} />}
       <Button key={`task-reply-${tag}${id}-${presses}`} label="Reply" plain dimColor hover={{ scope: `task-reply-${tag}${id}`, underline: true }} onPress={press => void replyToTask($, id, press.surface).catch(err => log($, `reply box not opened: ${String(err)}`))} />
     </Box>

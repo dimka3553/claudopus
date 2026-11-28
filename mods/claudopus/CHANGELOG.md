@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.329 · 28 November 2026
+- Every reply about a task in the chat has the colour of that task's card as it stands now: purple while it works, amber while it waits for you, blue once delivered, green once you mark it done. Before, only results were coloured.
+- The panel's tabs name the same states: For you is now Waiting for you and Delivered, each with its count, and the tab picked has its state's colour under it.
+
 ## 0.2.328 · 28 November 2026
 - Every task card now says how full its task is, on any model and whether it is at work, waiting or finished: a task on another model than the chat's used to show no share at all
 
