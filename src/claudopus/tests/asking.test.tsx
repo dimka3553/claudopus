@@ -144,7 +144,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   // Half a reply typed, then Done pressed twice: the answer goes once, the box goes with it, and the half reply is not left for
   // the next ask
   await bar.input({ key: again?.key ?? '', text: 'Not y', kind: 'change' } as never)
-  const done = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? ''
+  const done = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done' && /^ask-/.test(b.key ?? ''))?.key ?? ''
   await Promise.all([list.press({ key: done }), list.press({ key: done }).catch(() => undefined)])
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Done"')))).toContain('Submit new. Done?')
   expect(appended.filter(line => line.startsWith('a2: ') && line.includes('"Done"'))).toHaveLength(1)
@@ -600,7 +600,7 @@ test('an ask outlives the work that made it: amber after the work ends, with the
   expect(await until(async () => ((await askButtons(list, 'a1')).includes('Answer in words') ? askButtons(list, 'a1') : undefined))).toEqual(['Copy', 'Open in Terminal', 'Done', 'Answer in words'])
   expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Dismiss', 'Message', 'Not now'].includes(label))).toEqual(['Dismiss'])
   // Done starts the finished work again with the answer, and the ask goes at once; nothing is sent in the person's place
-  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? '' })
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done' && /^ask-/.test(b.key ?? ''))?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Done"') && line.includes('Run this to restart that chat yourself.')))).toBeDefined()
   expect(submitted.some(line => line.includes('Run this to restart'))).toBe(false)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })) ? undefined : true))).toBe(true)
