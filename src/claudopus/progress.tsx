@@ -23,7 +23,6 @@ const areasBeingBuilt = async ($: EngineInterface) => {
 }
 // An entry's picture's small copy, as the Results tab makes them (thumbOf draws it)
 const entryThumb = (path: string) => progressThumb(reportsDir(), path)
-const SET_ASIDE_TOLD = () => setAsideTold(who(true))
 const PROGRESS_LINE = () => progressLine(who(), dir)
 
 // ---- The queue: each hook only adds an event, at once, and never waits for the indexer ----
@@ -111,17 +110,6 @@ const readProgress = async ($: EngineInterface) => {
   const entries = new Map<string, ProgressEntry[]>()
   for (const area of areas) entries.set(area.id, await readEntries($, area.id))
   return { areas, entries }
-}
-
-// A press on Set aside: the task's entries are marked at once, before the model has sorted anything
-const markAside = async ($: EngineInterface, task: string) => {
-  const isMarked = await withProgressFiles($, async () => {
-    let found = false
-    for (const [id, list] of (await readProgress($)).entries)
-      if (list.some(e => e.task === task && e.kind !== 'aside')) (found = true), await writeEntries($, id, list.map(e => (e.task === task ? { ...e, kind: 'aside' as const, reason: e.reason || `${who(true)} set it aside` } : e)))
-    return found
-  })
-  if (isMarked) await progressMoved($)
 }
 
 // One event's answer from the model, or why there is none

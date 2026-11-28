@@ -30,15 +30,17 @@ import { USAGE_CELLS, usageDrawn, usageSpacersDrawn, usageText } from './usage-b
 import { PACE_EVERY, PACE_LOOK, PACE_SET, PACE_THREADS, paceLookOf, paceNeedsThreads, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, monthOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, PROGRESS_THUMBS_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
-import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, SKIP_ONE, SKIP_TOLD, setAsideTold, STAR_SYSTEM, starOf, starPrompt, starsDue, monthKey, withStar, topicState, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, chatEventOf, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, STAR_SYSTEM, starOf, starPrompt, starsDue, monthKey, withStar, topicState, wordsIn } from './progress'
 import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
 import { readsOnly } from './reads'
 import { Builder as ColourBuilder, linksIn as replyLinksIn, PALETTE, passedOn, personWords, quoteFor, slotsFor, textHash as colourTextHash } from './colours'
 import type { CardWords, ColourIndex, TaskLink } from './colours'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressPicture } from './progress'
+import { finishedOf, isStarred, rowStar, starButton, starLine, starMoved, starredCount, starredOf, stars, STARS_FILE, STARS_TRIP, starsTook, starsUnion, taskShows, tasksBar, tasksList, tasksView } from './tasks'
+import type { StarSeen, TaskItem, TasksActs } from './tasks'
 import { addedFolders, CHANGE_TOOLS, FOLDER_ANSWERED, FOLDER_ASK, FOLDER_DETAILS, FOLDER_RULE, isInFolder, isOutsideAll, OUTSIDE_COMMAND, refusedAim } from './outside'
-import { AFAR_RULE, AGAIN_BOX, AGAIN_IN, ANSWERED_IN_CHAT, ANSWER_ALREADY_SENT, ANSWER_FOR_CHAT_RELAY, ASK_KEY_FIELD, BOOK_ALONE, BRIEF, CARRY_PROMPT, CHANGE_TOLD, CHANGE_WHAT, CHAT_SEND_BACKGROUND, FROM, GATE_IN_CHAT, HELPERS_STARTED, HELPER_ALONE, HELPER_REPORT_TAKEN, HELPER_RESULT, KEEP, KEEP_AGENTS, KEEP_RULES, LOOKUP_RUN, LOOK_NOW, LOST_FOR_YOU, MAY_NOT_STOP, NOTHING_TO_PASTE, NOT_HANDED_HELPERS, NOT_HANDED_LONG, NOT_HANDED_RUNS, NOT_HANDED_TODOS, NO_BOXES, NO_DETACH, NO_FOLLOW, NO_MEMORY, NO_PERSON_WAIT, NO_PUSH, NO_READ, NO_RUNNER_MOVED, OWED, PANEL_RULE, PART_FOR_CHAT, PART_FROM_HELPER, PART_SENT, PART_TAKEN, PASTED, PASTE_LINUX, REFUSED, RELEASE_PRESSED, REPLY_HOLDS, REPORT_FOR_CHAT, REPORT_FRAMED, REPORT_IN_CHAT, REPORT_TAKEN, RESUMED_BY_ANSWER, RETRY_TEXT, RUN_RESUMED, SEND_BACKGROUND, SERIAL_RUNS, SHORT_CHARS, SHORT_LINES, SHORT_RULE, SHOWN_LONG, SHOWN_SHORT, STOPPED_BY_YOU, STOPPED_EARLIER, STOPPED_REFUSED, STUCK_ASK, TYPED_ANSWERED, TYPED_PRESS_ONLY, TYPED_UNSURE, drifted, framed, quotedItems, shortOf, withShortRule, wordCountOf } from './told'
 import { chooseReleases, releaseReading, TYPED_GO_AHEAD, TYPED_NOT_GIVEN, TYPED_TALK, TYPED_WHICH_RELEASE, TYPED_WIDEST } from './typed-release'
+import { AFAR_RULE, AGAIN_BOX, AGAIN_IN, ANSWERED_IN_CHAT, ANSWER_ALREADY_SENT, ANSWER_FOR_CHAT_RELAY, ARTIFACT_ICON, ASK_KEY_FIELD, BOOK_ALONE, BRIEF, CARRY_PROMPT, CHANGE_TOLD, CHANGE_WHAT, CHAT_SEND_BACKGROUND, CHROME_COPIED, CODE_ICON, DRIVE_LINE, DRIVE_PART, DRIVE_PLAIN, DRIVE_ROOT, DRIVE_SPACED, DRIVE_TICKED, FORGET_KEPT, FROM, GATE_IN_CHAT, HELPERS_STARTED, HELPER_ALONE, HELPER_REPORT_TAKEN, HELPER_RESULT, KEEP, KEEP_AGENTS, KEEP_RULES, LINK_ICON, LOOKUP_RUN, LOOK_NOW, LOST_FOR_YOU, MAY_NOT_STOP, NOTHING_TO_PASTE, NOT_HANDED_HELPERS, NOT_HANDED_LONG, NOT_HANDED_RUNS, NOT_HANDED_TODOS, NO_BOXES, NO_DETACH, NO_FOLLOW, NO_MEMORY, NO_PERSON_WAIT, NO_PUSH, NO_READ, NO_RUNNER_MOVED, OWED, PANEL_RULE, PART_FOR_CHAT, PART_FROM_HELPER, PART_SENT, PART_TAKEN, PASTED, PASTE_LINUX, PATH_LINE, PATH_PLAIN, PATH_SPACED, PATH_TICKED, REFUSED, RELEASE_PRESSED, REPLY_HOLDS, REPORT_FOR_CHAT, REPORT_FRAMED, REPORT_IN_CHAT, REPORT_TAKEN, RESUMED_BY_ANSWER, RETRY_TEXT, RUN_RESUMED, SEND_BACKGROUND, SERIAL_RUNS, SHORT_CHARS, SHORT_LINES, SHORT_RULE, SHOWN_LONG, SHOWN_SHORT, STOPPED_BY_YOU, STOPPED_EARLIER, STOPPED_REFUSED, STUCK_ASK, TYPED_ANSWERED, TYPED_PRESS_ONLY, TYPED_UNSURE, drifted, framed, quotedItems, shortOf, withShortRule, wordCountOf } from './texts'
 const LIST = 'claudopus'
 const LIST_TITLE = 'Claudopus'
 const PANEL_ROWS = 24
@@ -1588,7 +1590,6 @@ for (const area of await readAreas($)) if ((await readEntries($, area.id)).some(
 return found
 }
 const entryThumb = (path: string) => progressThumb(reportsDir(), path)
-const SET_ASIDE_TOLD = () => setAsideTold(who(true))
 const PROGRESS_LINE = () => progressLine(who(), dir)
 const queueDir = () => `${progressDir()}/queue`
 let queued = 0
@@ -1659,15 +1660,6 @@ const areas = await readAreas($)
 const entries = new Map<string, ProgressEntry[]>()
 for (const area of areas) entries.set(area.id, await readEntries($, area.id))
 return { areas, entries }
-}
-const markAside = async ($: EngineInterface, task: string) => {
-const isMarked = await withProgressFiles($, async () => {
-let found = false
-for (const [id, list] of (await readProgress($)).entries)
-if (list.some(e => e.task === task && e.kind !== 'aside')) (found = true), await writeEntries($, id, list.map(e => (e.task === task ? { ...e, kind: 'aside' as const, reason: e.reason || `${who(true)} set it aside` } : e)))
-return found
-})
-if (isMarked) await progressMoved($)
 }
 const askProgress = async ($: EngineInterface, event: ProgressEvent, picture: ProgressPicture) => {
 const { areas, entries } = await readProgress($)
@@ -3118,16 +3110,6 @@ if (isReportsLook || (await $.clock.now()) - reportsWholeAt < REPORTS_STALE) ret
 isReportsLook = true
 await loadReports($, true).finally(() => (isReportsLook = false))
 }
-const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g
-const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g
-const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g
-const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm
-const DRIVE_ROOT = String.raw`(?:[A-Za-z]:[\\/]|\/[A-Za-z]\/)`
-const DRIVE_PART = String.raw`[^\s\\/\x60'"()<>[\]{}|,;*]+`
-const DRIVE_PLAIN = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}[^\s\x60'"()<>[\]{}|,;*]+`, 'g')
-const DRIVE_SPACED = new RegExp(String.raw`(?<![\w./~:-])${DRIVE_ROOT}(?:${DRIVE_PART}(?: ${DRIVE_PART})*[\\/])+${DRIVE_PART}`, 'g')
-const DRIVE_TICKED = new RegExp(String.raw`\x60(${DRIVE_ROOT}[^\x60\n]+)\x60`, 'g')
-const DRIVE_LINE = new RegExp(String.raw`^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(${DRIVE_ROOT}[^\n\x60'"<>|*]+?)(?:\*\*)?[ \t]*$`, 'gm')
 const keptPath = (path: string) => {
 const one = slashed(path)
 return isWindows && /^\/[A-Za-z]\//.test(one) ? `${one[1]?.toUpperCase()}:${one.slice(2)}` : one
@@ -5962,10 +5944,6 @@ return faces
 const SVG_FONT = 'font-family="-apple-system,Helvetica,sans-serif"'
 const pageIcon = (badge: string, color: string) =>
 `<path d="M4.5 1.5h13l7 7v21a1 1 0 0 1-1 1h-19a1 1 0 0 1-1-1v-27a1 1 0 0 1 1-1z" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M17.5 1.5v7h7" fill="none" stroke="#9a9890" stroke-width="1.2"/>${badge ? `<rect x="1" y="15" width="${badge.length > 3 ? 22 : 19}" height="10" rx="2" fill="${color}"/><text x="${badge.length > 3 ? 12 : 10.5}" y="22.6" font-size="7" ${SVG_FONT} font-weight="700" fill="#fff" text-anchor="middle">${badge}</text>` : ''}`
-const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M11 13.5h-1.5a3.5 3.5 0 0 0 0 7H11M17 13.5h1.5a3.5 3.5 0 0 1 0 7H17M11.5 17h5" fill="none" stroke="#C9A7FF" stroke-width="1.6" stroke-linecap="round"/>'
-const ARTIFACT_ICON =
-'<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><g stroke="#D97757" stroke-width="2.2" stroke-linecap="round"><path d="M14 10.5v13M7.5 17h13M9.4 12.4l9.2 9.2M18.6 12.4l-9.2 9.2"/></g>'
-const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
 const endingOf = (path = '') => (/\.([a-z0-9]{1,4})$/i.exec(path)?.[1] ?? '').toUpperCase()
 const ENDING_COLORS: Record<string, string> = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8', ZIP: '#8A6D3B', MP3: '#C2416B', WAV: '#C2416B', M4A: '#C2416B' }
 const iconOf = (kind: MadeKind | 'code', path?: string) =>
@@ -8267,8 +8245,6 @@ replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
 const isRelease = !isReply && !ask.refused && Boolean(ask.release) && ask.choices?.[0] === said && (await allowRelease($, one.id, ask.release ?? '').catch(err => (void log($, `release not allowed by the press: ${String(err)}`), false)))
 const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
 const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
-const isOurs = (label: string) => !isReply && !ask.refused && !ask.rule && said === label && !(ask.choices ?? []).includes(label)
-const isAside = isOurs(SET_ASIDE)
 const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
 const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
 sentReplies.set(one.id, { ...sent, to: 'sending' })
@@ -8284,12 +8260,9 @@ const to = ask.refused
 ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
 : isReply
 ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
-: isAside
-? SET_ASIDE_TOLD()
-: `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isOurs(SKIP_ONE) ? `\n${SKIP_TOLD}` : ''}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
+: `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
 if (!ask.refused) {
-if (isAside) await markAside($, one.id).catch(err => log($, `task ${one.id} not marked set aside: ${String(err)}`))
-queueSoon($, { kind: isAside ? 'aside' : 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}${ask.details ? `\n${ask.details}` : ''}\nAnswer: ${said}` })
+queueSoon($, { kind: 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}${ask.details ? `\n${ask.details}` : ''}\nAnswer: ${said}` })
 }
 const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
 const told = working ? await tell($, target, to) : undefined
@@ -8518,8 +8491,7 @@ if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'wo
 const one = (await read($, todos)).find(todo => todo.id === card)
 if (sent?.to !== 'work' || !one) return
 const isHeld = asksOf(one).some(ask => ask.replied?.text === sent.text)
-const isOurs = Boolean(sent.asked && !(sent.asked.choices ?? []).includes(sent.text))
-await toEnded($, one, agentId, isOurs && sent.text === SET_ASIDE ? SET_ASIDE_TOLD() : `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isOurs && sent.text === SKIP_ONE ? `\n${SKIP_TOLD}` : ''}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
+await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
 }
 const heldAnswer = (one: Todo, now: number) => {
 const sent = one.chat ? undefined : sentReplies.get(one.id)
@@ -9029,6 +9001,7 @@ if (!theirs) {
 if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`)
 return
 }
+await syncStars($, mac).catch(err => log($, `stars not made the same with ${mac}: ${String(err)}`))
 const mine = new Map<string, string>()
 for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
 if (entry.kind !== 'dir' || !isResultId(entry.name)) continue
@@ -9728,7 +9701,6 @@ await setConfig($, dir, 'admin', mode === 'each' ? undefined : mode)
 await setConfig($, dir, 'adminSealed', mode === 'each' ? undefined : seals[kept.length])
 if (change.mode) workAllowed.clear()
 }
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else [ -x /usr/bin/cygpath ] && { p=$(/usr/bin/cygpath -F 40 2>/dev/null); HOME=$(/usr/bin/cygpath -u "${p:-${USERPROFILE:-}}" 2>/dev/null); [ -n "$HOME" ] || exit 0; }; d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
 let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
 if (isKeptForgotten || !dir) return
@@ -11309,7 +11281,7 @@ return {
 ...base,
 kind: 'question',
 buttons: [
-...(ask.rule ? (ask.choices ?? []) : withSetAside(ask.choices ?? [])).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, ...(choice === SET_ASIDE && !ask.rule ? { isPlain: true } : {}), onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
+...(ask.choices ?? []).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
 ...(inBar ? [isReplyOpen(card, ask) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
 ],
 ...(inBar
@@ -11963,6 +11935,8 @@ during('load: sync the memory')
 await sync($).catch(() => undefined)
 during('load: read the results')
 await loadReports($).catch(() => undefined)
+await loadStars($).catch(() => undefined)
+everyLoad($, FETCH_EVERY, () => loadStars($).catch(() => undefined))
 afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
 afterLoad($, PROGRESS_LOAD_AFTER, () => void drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`)))
 await readDrafts($).catch(() => undefined)
@@ -12972,7 +12946,6 @@ buttons: isFreeing || isWindows ? [] : [{ key: `disk-free-${tidyPressedAt}-${pre
 }
 const CHROME_APP = /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome(?![\w ]*(?:Helper|for Testing))/
 const CHROME_IN_SCRIPT = /executablePath\s*[:=]\s*[^\n]*\/Google Chrome\.app\b|\bchannel\s*[:=]\s*['"]chrome(?:-beta|-dev|-canary)?['"]/
-const CHROME_COPIED = `Not run: this starts your own Google Chrome app without a window. Each start makes a copy of the whole app on the disk, and a start that is stopped leaves it there. Use Playwright's own Chromium instead (chromium.launch() with no channel or executablePath, after npx playwright install chromium), start it once for every page the script needs, and close it in a finally block.`
 const DISK_FULL = (what: string, d: DiskKept) =>
 named(`Not run: the ${machineWord()} has ${gbText(d.free)} GB of disk space left, and "${what}" can fill it. Remove what you made that is no longer needed (your scratch folder, temporary files), run heavy work in the cloud, and send the same command again once more than ${gbText(DISK_STOP)} GB is free.${isWindows ? '' : ' {Name} can free up space from the Claudopus panel.'}`)
 const turnLeftovers = async ($: EngineInterface, e: ToolCallInput) => {
@@ -15298,7 +15271,7 @@ const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) =>
 const [first] = asking
 const ask = first?.ask
 if (first && ask) {
-const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 7))
+const answers = ask.refused ? [] : (ask.choices ?? []).slice(0, 9)
 const id = `${first.id}:${ask.at}`
 const picked = bandPick?.id === id ? bandPick.n : -1
 const press = (n: number, choice: string) => {
@@ -15560,6 +15533,23 @@ return (
 )
 }
 let listSurface = ''
+const starsPath = () => `${dir}/${STARS_FILE}`
+const loadStars = async ($: EngineInterface) => {
+const s = await $.fs.stat(starsPath()).catch(() => undefined)
+const seen = `${(s as { mtimeMs?: number } | undefined)?.mtimeMs ?? 0}:${s?.size ?? 0}`
+if (seen !== stars.seen && ((stars.seen = seen), starsTook(await readOr($, starsPath())))) drawAgain($)
+}
+const starAdd = async ($: EngineInterface, line: string) => void (line && (starsTook(stars.text + line), await appendTo($, starsPath(), line)))
+const starPress = async ($: EngineInterface, s: StarSeen) => {
+await starAdd($, starLine({ ...s, on: !isStarred(s.id), at: await $.clock.now() }))
+presses += 1
+drawAgain($)
+}
+const syncStars = async ($: EngineInterface, mac: string) => {
+const r = await runOn($, ssh(mac, STARS_TRIP), { stdin: stars.text, timeoutMs: 15_000 })
+const next = r.exitCode === 0 ? starsUnion(stars.text, r.stdout) : undefined
+if (next) (await $.fs.write(starsPath(), next), starsTook(next), drawAgain($))
+}
 const panelHooks = (on: On) => {
 on('ui.render', { component: 'Pane' }, async ($, e, next) => (await givenIfDrawn($, e, await (async () => {
 const id = e.requestId ?? ''
@@ -15894,6 +15884,7 @@ return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined,
 </Button>
 </Box>
 <Box flexGrow={1} />
+{starButton(table, one.id, () => void starPress($, starSeen(one)))}
 {one.status === 'working' && !one.chat ? (
 <Box flexShrink={0}>
 <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
@@ -16930,26 +16921,16 @@ const endedElsewhere = elsewhere.filter(one => !isUpThere(one) && !lingers(one, 
 const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (isUpThere(one) || lingers(one, at)))
 const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
 const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
-const finishedPart = (isOpen: boolean) =>
-finished.length || endedFlows.length ? (
-<Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
-<Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1}>
-<Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-<Button
-key={`finished-fold-${presses}`}
-label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
-plain
-hotkey={keyed ? 'f' : undefined}
-onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
-/>
-</Box>
-<Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
-</Box>
-{isOpen
-? [...finished.map(one => ({ at: one.endedAt, card: () => small(one) })), ...endedFlows.map(f => ({ at: f.endedAt, card: () => flowSmall(f) }))].sort((a, b) => b.at - a.at).map(one => one.card())
-: null}
-</Box>
-) : null
+const cardItem = (one: Todo): TaskItem => ({ at: one.endedAt || one.startedAt, id: one.id, title: titleOf(one), draw: () => small(one) })
+const finishedAll = () => finishedOf([...finished.map(cardItem), ...endedFlows.map(f => ({ at: f.endedAt, id: f.id, title: f.title, draw: () => flowSmall(f) }))], kept, [...own, ...elsewhere].filter(one => !finished.includes(one)).map(one => one.id))
+const finishedPart = (isOpen: boolean, all = finishedAll()) => {
+const isStars = tasksView.filter === 'starred'
+if (!['all', 'finished', 'starred'].includes(tasksView.filter) || (!isStars && !all.length)) return null
+const isAll = tasksView.filter === 'all'
+return tasksList(ui, isStars ? starredOf([...own, ...elsewhere].map(cardItem), kept) : all, { head: isStars ? 'Starred' : 'Finished', side: isStars ? '' : all.some(one => !own.some(c => c.id === one.id)) ? 'all chats' : 'this chat', surface: e.surface, isOpen: !isAll || isOpen || Boolean(tasksView.find), fold: isAll ? () => void update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })) : undefined, hotkey: keyed ? 'f' : undefined, now: at, fill: FILL, lead, empty: isStars ? 'Press ☆ on a task to keep it here.' : 'No task has finished yet.' }, tasksActs)
+}
+const tasksActs: TasksActs = { redraw: () => ((presses += 1), drawAgain($)), star: one => void starPress($, rowStar(one)), open: id => openReport($, id), typing: () => holdTimes($), typed: () => freeTimes($) }
+const starSeen = (one: Todo): StarSeen => ({ id: one.id, title: titleOf(one), state: STAGE_WORD[stage(one)], report: left(one)?.id, chat: one.chat?.title || chat.title, ended: one.endedAt || undefined })
 const flowBig = (f: Flow, picked: FlowAgent | undefined, lines: Line[] | undefined) => {
 const rounds = roundsOf(f)
 const current = flowStageOf(f)
@@ -17101,6 +17082,8 @@ for (const one of askCards.filter(isWaits)) if (!topPlaces.has(placeKey(one))) t
 for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) topPlaces.delete(key)
 }
 const restHere = shownWork.filter(one => !isUp(one))
+const kindOf = (one: Todo) => (isWaits(one) ? 2 : stage(one) === 'working' ? 1 : looksDelivered(one) ? 3 : 0)
+const shows = (one: Todo) => taskShows(kindOf(one), titleOf(one))
 const isHandedIn = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
 const restFlows = shownFlows
 const begun = (one: Todo) => one.begunAt ?? one.startedAt
@@ -17129,7 +17112,7 @@ cardNeeds(one).filter(need => movedPresses.get(need.id) === need.at).length,
 const drawTop = () => {
 const now = new Map<string, string>()
 let above = outCard ? 'notice' : ''
-const nodes = top.map(item => {
+const nodes = top.filter(item => (item.card ? shows(item.card) : taskShows(2, item.what))).map(item => {
 const node = item.draw()
 if (item.card && cardNeeds(item.card).length) now.set(item.card.id, `${above}|${blocksSign(item.card, true)}`)
 above += `|${item.sign()}`
@@ -17165,6 +17148,12 @@ const first = top.find(one => one.rank === 0 && one.what)?.what ?? ''
 if (count !== waitsAtTop || first !== firstAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), (firstAtTop = first), drawAgain($))
 }
 const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
+const tasksCounts = () => {
+const up = [...askCards, ...restHere, ...listedChats.flatMap(c => shownOf(c).filter(one => !isUp(one)))]
+const n = (kind: number) => up.filter(one => kindOf(one) === kind).length
+return { you: notices.length + n(2) + n(3), working: n(1) + restFlows.filter(f => f.status === 'working').length, starred: starredCount() }
+}
+if (paneId === LIST && !alone) for (const one of [...own, ...elsewhere]) if (isStarred(one.id)) void starAdd($, starMoved(starSeen(one), at)).catch(() => undefined)
 const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 return (
 <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
@@ -17218,6 +17207,7 @@ nameLine(ui, updated)
 ) : null}
 </Box>
 ) : null}
+{!alone ? tasksBar(ui, tasksCounts(), e.surface, tasksActs) : null}
 {!alone ? drawTop() : null}
 {!alone ? loosePressedShown(at).map((one, n) => (
 <Box key={`pressed-loose-${n}`} paddingX={2} flexShrink={0}>
@@ -17230,14 +17220,14 @@ nameLine(ui, updated)
 ? big(alone, talked?.lines)
 : [
 ...(listedChats.length && (restHere.length || restFlows.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-...[...restHere.map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
+...[...restHere.filter(shows).map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.filter(f => taskShows(f.status === 'working' ? 1 : 0, f.title)).map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
 ...listedChats.flatMap(c => {
 const handedIn = (one: Todo) => stageOf(shownOf(c), one) === 'delivered'
-const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => Number(handedIn(b)) - Number(handedIn(a)) || (handedIn(a) ? b.endedAt - a.endedAt : begun(a) - begun(b)))
+const cards = shownOf(c).filter(one => !isUp(one) && shows(one)).sort((a, b) => Number(handedIn(b)) - Number(handedIn(a)) || (handedIn(a) ? b.endedAt - a.endedAt : begun(a) - begun(b)))
 return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []
 }),
 ]}
-{!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
+{!alone && tasksView.filter === 'all' ? <Box key="finished-gap" flexGrow={1} /> : null}
 {!alone ? finishedPart(isFinishedOpen) : null}
 </Box>
 )

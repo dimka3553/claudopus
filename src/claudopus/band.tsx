@@ -331,7 +331,7 @@ const bandHooks = (on: On) => {
       const ask = first?.ask
       if (first && ask) {
         // The same block as on its card (needBlock), compact: its own buttons numbered, and nothing typed here
-        const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 7))
+        const answers = ask.refused ? [] : (ask.choices ?? []).slice(0, 9)
         const id = `${first.id}:${ask.at}`
         const picked = bandPick?.id === id ? bandPick.n : -1
         const press = (n: number, choice: string) => {

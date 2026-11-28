@@ -338,6 +338,9 @@ const chatHooks = (on: On) => {
     await sync($).catch(() => undefined)
     during('load: read the results')
     await loadReports($).catch(() => undefined)
+    // The stars, and again whenever another chat or another account here adds one (panel.tsx)
+    await loadStars($).catch(() => undefined)
+    everyLoad($, FETCH_EVERY, () => loadStars($).catch(() => undefined))
     // A topic page grown past what a fresh task reads whole is made short in the background, the whole of it kept in its history
     afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
     // and what waits in the queue of progress/ is indexed, the picture written when it is due, the history read in once (progress.tsx)

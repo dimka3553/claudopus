@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.320 · 28 November 2026
+- The task panel has a row of tabs under its header: All, For you (questions and results waiting on you), Working, Finished and Starred, each with how many it holds.
+- Finished lists every task that ever finished, from all your results, 40 at a time with Show 40 more, not only the last 40. Search, at the right of the Finished or Starred heading, finds tasks by name.
+- A star at each task's top right keeps it under Starred, with its name, state and result, even once it is finished, dismissed or its chat is gone. Stars are kept in the memory folder every Claude account on this Mac shares, and go to your other Mac with the results.
+- A task's question now shows only its own answers and Answer in words: Skip this one and Set aside task are gone. Star a task to keep it, and Dismiss or Mark as done to let it go.
+
 ## 0.2.319 · 28 November 2026
 - The north star on top of Progress is picked each month from all you did that month: your messages in every chat, what each area's tasks came to, your results and their topics. It is never empty: this month's is picked as soon as there is none, and once more from the whole month after it ends.
 - Under the areas, North stars lists every month's, the newest first, and a press on one shows that month with its own. When you name your north star yourself in a chat, your words are that month's.

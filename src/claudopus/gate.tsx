@@ -239,9 +239,6 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
   await setConfig($, dir, 'adminSealed', mode === 'each' ? undefined : seals[kept.length])
   if (change.mode) workAllowed.clear()
 }
-// No admin password is kept: every one an earlier version kept leaves the keychain (on Linux, bin/keyring's folder) as the mod
-// loads, with the "Let macOS ask" mark kept beside the gate's key and config.json's adminPassword, which no longer choose anything
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else [ -x /usr/bin/cygpath ] && { p=$(/usr/bin/cygpath -F 40 2>/dev/null); HOME=$(/usr/bin/cygpath -u "${p:-${USERPROFILE:-}}" 2>/dev/null); [ -n "$HOME" ] || exit 0; }; d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
 let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
