@@ -1,0 +1,1 @@
+- A result in the chat turns green once you mark its task as done, as its card does in the panel. Before, it stayed blue.

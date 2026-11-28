@@ -1122,6 +1122,14 @@ test("with Task colours on, as it comes, a reply about a task sits in a box with
   await pressed(two, 'task-result-1-a2')
   expect(await until(async () => tabs.find(tab => tab.startsWith('report-')))).toBeDefined()
   await two.unmount()
+  // Once the person marks a task done, its result is green in the chat as its card is in the panel, and the other task's stays
+  // blue (28 Nov, the person: "I've marked one of them as done, and it's still blue in the chat, so it's kind of confusing")
+  await list.redraw()
+  await pressed(list, 'dismiss-a2')
+  const marked = await $.ui.mount({ ...MSG, requestId: 'msg_two', props: { text: `${RESULT}\n\n---\n\n${PRICE}`, isFirstOfReply: true }, surface: 'desktop' } as never)
+  const edges = async () => (await marked.findAll({ type: 'Box' })).filter(one => /^task-box-.*-\d$/.test(one.key ?? '')).map(one => one.props.borderColor)
+  expect(await until(async () => ((await edges()).includes('success') ? edges() : undefined))).toEqual(['#4C9AFF', 'success'])
+  await marked.unmount()
   // Task colours off in Config: the box and the dot go, the links stay
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await config.find({ type: 'Text', text: 'Task colours' })).toBeDefined()
