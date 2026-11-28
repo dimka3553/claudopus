@@ -306,10 +306,11 @@ const panelHooks = (on: On) => {
     const needsFor = (one: Todo) => needsOf($, one, e.surface, at, !keysHeldNow()).filter(need => one.chat || shownIds.has(one.id) || !/^(?:box|prompt)-/.test(need.id))
     // The cards kept among what waits at the top, as last put together
     let keptUpNow = new Set<string>()
-    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of a chat does.
-    // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
+    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of a chat does; on another model,
+    // or in another chat, it is that model's as a chat on it measured it, else this chat's (windowFor), so every card says how full
+    // it is, at work or not. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
-    const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
+    const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : windowFor(one.model ?? '', chat.window))
     // Work that finished, in its moment: for its two seconds it is at the top under all that waits on the person, outlined green;
     // then it goes under Finished. Work stopped or stopped by an error is not: it pauses in its place, in its own look
     // In the few rows above the prompt a narrow terminal gives the panel, the outline would take two of them

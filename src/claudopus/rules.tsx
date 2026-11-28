@@ -281,7 +281,7 @@ const runnerAt = (root: string, name: string) => (/\s/.test(root) ? `"${root}/bi
 // with Edit or Write, so its card shows the change and waits for their press. A command is read as the boxes' guard reads it: a
 // command that only reads counts only for what it sends into a file with >; this stops slips and common tricks, as that guard does
 const MEMORY_READERS = [...BOX_READERS, 'cat', 'jq', 'diff', 'cmp', 'shasum', 'sha256sum', 'md5', 'md5sum']
-const MEMORY_OWN = ['live', 'ledger', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
+const MEMORY_OWN = ['live', 'ledger', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads', 'windows.json']
 const MEMORY_PERSON = ['config.json', 'rules', 'roles']
 const namesMemory = (text: string, names: readonly string[]) => {
   const words = BOX_WORDS(text)

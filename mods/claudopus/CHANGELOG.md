@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.328 · 28 November 2026
+- Every task card now says how full its task is, on any model and whether it is at work, waiting or finished: a task on another model than the chat's used to show no share at all
+
 ## 0.2.327 · 28 November 2026
 - A result in the chat turns green once you mark its task as done, as its card does in the panel. Before, it stayed blue.
 
